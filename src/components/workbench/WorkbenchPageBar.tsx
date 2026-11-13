@@ -218,7 +218,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                     onDrop={(e) => handleDrop(e, id)}
                     onClick={() => onSelect(id)}
                     onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
-                    title={tabLabel(id, intelTitleOf)}
+                    data-tip={tabLabel(id, intelTitleOf)} aria-label={tabLabel(id, intelTitleOf)}
                     className={`kb-edge-tab group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
                       isActive
                         ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
@@ -230,7 +230,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                     <button
                       onClick={(e) => { e.stopPropagation(); onClose(id) }}
                       onAuxClick={(e) => e.stopPropagation()}
-                      title="关闭标签页"
+                      data-tip="关闭标签页" aria-label="关闭标签页"
                       className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
                         isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                       }`}
@@ -250,7 +250,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                 data-wb-tab="quiz"
                 data-wb-active={quizEntryActive ? '1' : '0'}
                 onClick={() => onSelect('quiz')}
-                title="错题本 / 收藏"
+                data-tip="错题本 / 收藏" aria-label="错题本 / 收藏"
                 className={`kb-edge-tab group flex shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
                   quizEntryActive
                     ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
@@ -262,7 +262,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                 <button
                   onClick={(e) => { e.stopPropagation(); onClose('quiz') }}
                   onAuxClick={(e) => e.stopPropagation()}
-                  title="关闭错题本"
+                  data-tip="关闭错题本" aria-label="关闭错题本"
                   className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
                     quizEntryActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   }`}

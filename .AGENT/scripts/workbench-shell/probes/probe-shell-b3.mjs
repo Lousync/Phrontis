@@ -249,7 +249,7 @@ async function main() {
   ok(st8c.editing && st8c.monaco && !st8c.previewH1, 'T6h ★打开即编辑态（Monaco 在场、非阅读态排版）', `monaco=${st8c.monaco} previewH1=${st8c.previewH1}`)
 
   // 互斥（本轮一并修的缺陷）：树里开过文件后 ⌂ 回总览，必须**真回总览**而不是掉进模块侧栏
-  await evalJs(`document.querySelector('button[title="返回总览"]')?.click()`)
+  await evalJs(`document.querySelector('button[data-tip="返回总览"]')?.click()`)
   await sleep(700)
   const st9 = await evalJs(JS_STATE)
   ok(!st9.treeMode && st9.bookmarks.length === 5, 'T6b 树模式返回总览')
@@ -356,13 +356,13 @@ async function main() {
   }
 
   // 收尾：回总览，避免给后续段留树模式残留
-  await evalJs(`document.querySelector('button[title="返回总览"]')?.click()`)
+  await evalJs(`document.querySelector('button[data-tip="返回总览"]')?.click()`)
   await sleep(600)
 
 
   // S13 落盘链路：单击左栏手柄收起 → flush → workbenchLayout 键落盘
   const collapseJs = `(() => {
-    const h = document.querySelector('div[role="separator"][title="拖拽调整宽度，双击复位"]')
+    const h = document.querySelector('div[role="separator"][data-tip="拖拽调整宽度，双击复位"]')
     if (!h) return 'NO_HANDLE'
     h.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, button: 0 }))
     return 'DOWN'
@@ -370,7 +370,7 @@ async function main() {
   await evalJs(collapseJs)
   await sleep(150)
   await evalJs(`(() => {
-    const h = document.querySelector('div[role="separator"][title="拖拽调整宽度，双击复位"]')
+    const h = document.querySelector('div[role="separator"][data-tip="拖拽调整宽度，双击复位"]')
     ;(h || window).dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, button: 0 }))
     return 'UP'
   })()`)
@@ -391,7 +391,7 @@ async function main() {
   try { parsed = JSON.parse(persisted ?? 'null') } catch { /* null */ }
   ok(parsed?.leftCollapsed === true, 'S13b workbenchLayout.leftCollapsed=true 落盘', persisted == null ? readErr : JSON.stringify(parsed))
   // 恢复展开
-  await evalJs(`(() => { const e=document.querySelector('div[title="拖拽或点击展开"]'); e?.click(); return !!e })()`)
+  await evalJs(`(() => { const e=document.querySelector('div[data-tip="拖拽或点击展开"]'); e?.click(); return !!e })()`)
   await sleep(700)
   const stR = await evalJs(JS_STATE)
   ok(stR.bookmarks.length === 5, 'S14 边缘条点击 → 左栏重挂恢复', `bookmarks=${stR.bookmarks.length}`)

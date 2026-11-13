@@ -165,7 +165,9 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
         <button
           onClick={doReset}
           disabled={resetKeys.length === 0}
-          title={resetKeys.length === 0
+          data-tip={resetKeys.length === 0
+            ? '本页只有安全开关（终端执行 / 模块权限 / 仓库文件权限），它们不参与复位'
+            : `把本页这 ${resetKeys.length} 项恢复为默认值（安全开关不参与）`} aria-label={resetKeys.length === 0
             ? '本页只有安全开关（终端执行 / 模块权限 / 仓库文件权限），它们不参与复位'
             : `把本页这 ${resetKeys.length} 项恢复为默认值（安全开关不参与）`}
           className={`ml-auto mb-1 px-2.5 py-1 rounded-md text-[11.5px] border transition-colors ${
@@ -483,7 +485,7 @@ function BuiltinToolsTab() {
         <SettingsGroup title="内置工具" summary={`${tools.length} 项 · 只读`}
           hint="官方提供的只读工具，不可关闭，以保证调用透明。列表只读，逐条说明见选中项下方。"
           headerRight={
-            <button onClick={() => { void refresh() }} title="刷新" aria-label="刷新内置工具"
+            <button onClick={() => { void refresh() }} data-tip="刷新" aria-label="刷新内置工具"
               className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
               <RefreshCw size={14} />
             </button>
@@ -531,7 +533,7 @@ function AuditRow({ entry }: { entry: AuditEntryInfo }) {
   let d: Record<string, unknown> = {}
   try { d = JSON.parse(entry.detail) } catch { /* ignore */ }
   return (
-    <div className="flex items-center gap-2 py-1.5 border-t border-[var(--border-color)] first:border-t-0 text-[11px]" title={entry.action}>
+    <div className="flex items-center gap-2 py-1.5 border-t border-[var(--border-color)] first:border-t-0 text-[11px]" data-tip={entry.action} aria-label={entry.action}>
       <span className={`w-2 h-2 rounded-full shrink-0 ${d.ok ? 'bg-emerald-500' : 'bg-red-500'}`} />
       <code className="text-[var(--text-secondary)] truncate">{String(d.tool ?? entry.action)}</code>
       <span className="ml-auto text-[var(--text-disabled)] tabular-nums shrink-0">
@@ -612,7 +614,7 @@ function McpServersTab({ onInvoked }: { onInvoked: () => void }) {
         hint={<>连接外部 MCP 服务器，其工具并入统一注册表；最多同时连接 {servers[0]?.maxConnections ?? 5} 个。</>}
         headerRight={
           <>
-            <button onClick={() => { void refresh() }} title="刷新" aria-label="刷新 MCP 列表"
+            <button onClick={() => { void refresh() }} data-tip="刷新" aria-label="刷新 MCP 列表"
               className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
               <RefreshCw size={14} />
             </button>
@@ -626,8 +628,8 @@ function McpServersTab({ onInvoked }: { onInvoked: () => void }) {
         <div className={CARD}>
           {servers.map(sv => (
             <div key={sv.id} className="flex items-center gap-2 py-2.5 border-t border-[var(--border-color)] first:border-t-0">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(sv.status)}`} title={sv.status} />
-              <span className="text-[13px] text-[var(--text-primary)] truncate" title={sv.endpointPreview}>{sv.name}</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass(sv.status)}`} data-tip={sv.status} aria-label={sv.status} />
+              <span className="text-[13px] text-[var(--text-primary)] truncate" data-tip={sv.endpointPreview} aria-label={sv.endpointPreview}>{sv.name}</span>
               <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-muted)]">
                 {TRANSPORT_BADGE[sv.transport]}
               </span>
@@ -653,7 +655,7 @@ function McpServersTab({ onInvoked }: { onInvoked: () => void }) {
         </div>
         {/* 连接失败要常显：它是故障诊断，不是可以藏起来的说明 */}
         {servers.filter(sv => sv.status === 'error' && sv.lastError).map(sv => (
-          <p key={sv.id} className="mt-1.5 px-1 text-[11px] leading-relaxed text-red-400" title={sv.lastError ?? ''}>
+          <p key={sv.id} className="mt-1.5 px-1 text-[11px] leading-relaxed text-red-400" data-tip={sv.lastError ?? ''} aria-label={sv.lastError ?? ''}>
             「{sv.name}」连接失败：{sv.lastError}
           </p>
         ))}
@@ -958,18 +960,18 @@ function SkillsTab() {
         hint={`声明式提示词资产，AI 助手会引用。可装 Skill 文件夹或 .zip 包，也可来自插件贡献。${SKILL_INSTALL_HINT}`}
         headerRight={
           <>
-            <button onClick={() => { void refresh() }} title="刷新" aria-label="刷新 Skill 列表"
+            <button onClick={() => { void refresh() }} data-tip="刷新" aria-label="刷新 Skill 列表"
               className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
               <RefreshCw size={14} />
             </button>
             <button onClick={() => { void handlePickFolder() }} disabled={installing}
-              title="选中 Skill 自身的文件夹（内含 SKILL.md 或 skill.json）"
+              data-tip="选中 Skill 自身的文件夹（内含 SKILL.md 或 skill.json）"
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-40 transition-opacity">
               {installing ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />}
               选择文件夹安装
             </button>
             <button onClick={() => { void handlePickFile() }} disabled={installing}
-              title="安装已经打包好的 .zip Skill 包"
+              data-tip="安装已经打包好的 .zip Skill 包"
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
               <Upload size={13} /> .zip 包
             </button>

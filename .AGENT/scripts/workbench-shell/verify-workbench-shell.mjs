@@ -121,7 +121,7 @@ const railM = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
 const railIds = railM ? [...railM[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
 ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket,usage', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态/书市/用量', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
 ok(!/id:\s*'toolbox'/.test(railM ? railM[1] : ''), 'C1b 图标条不再含工具箱按钮（入口语义移 ToolLauncherZone）')
-ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
+ok(/data-tip="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
 
 /* C1d–C1n 图标条排序 / 右键显隐（2026-09-25 F-1 恢复）。
    成员是**固定清单**（不改成 BAR_MODULE_IDS 那 8 个），变的只是顺序与显隐来源；
@@ -217,7 +217,7 @@ ok(/maximized/.test(srcShell) && /maximized=\{zenLevel >= 2 \|\| winMax\}/.test(
 ok(/const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED\.includes\(activeTab\)/.test(srcApp)
   && /suppressSides=\{fullWindowTab\}/.test(srcApp),
   'C20 EXCLUDED 平级模块激活 = 整窗独占（suppressSides 扩展）')
-ok(/onWorkbench=/.test(srcApp) && /title="工作台"/.test(srcBar) && /onWorkbench\?\.\(\)/.test(srcBar),
+ok(/onWorkbench=/.test(srcApp) && /data-tip="工作台"/.test(srcBar) && /onWorkbench\?\.\(\)/.test(srcBar),
   'C20b 整窗模块的「回工作台」入口 = 图标条顶部工作台按钮（2026-09-17 bug 修复轮：右上角浮动钮删除，入口收敛 ActivityBar）')
 // C20c 口径更新（看板方案 §5 反馈 10，2026-09-27）：按钮不再扫描 openTabs 落「最后文档标签」
 //（旧 `?? knowledge` 兜底会落到没开页面的知识库模块，左栏被错误拉成笔记区）—— 一律回总览态（见 M7）。

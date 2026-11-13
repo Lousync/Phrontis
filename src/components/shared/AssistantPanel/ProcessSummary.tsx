@@ -47,7 +47,7 @@ export function ProcessSummary({ rows }: { rows: TraceRowView[] }) {
   return (
     <div className="kb-procsum">
       <button type="button" className="kb-procsum__head" aria-expanded={open}
-        title="展开本轮的过程与工具调用"
+        data-tip="展开本轮的过程与工具调用" aria-label="展开本轮的过程与工具调用"
         onClick={() => setOpen(v => !v)}>
         <span>{head}</span>
         <ChevronDown size={11} className={`kb-chevron ${open ? 'rotate-180' : ''}`} />

@@ -36,19 +36,19 @@ export function ZenHotZone({ zenLevel, onZenLevelChange, fileName }: Props) {
           <button
             onClick={() => onZenLevelChange(0)}
             className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            title="退出禅模式 (Esc)"
+            data-tip="退出禅模式 (Esc)" aria-label="退出禅模式 (Esc)"
           >
             <X size={12} />退出禅模式
           </button>
           <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
           {/* 窗口三键：标题栏隐藏后的最小可用窗口控制（§7-4） */}
-          <button onClick={() => window.api?.minimize()} title="最小化" className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+          <button onClick={() => window.api?.minimize()} data-tip="最小化" aria-label="最小化" className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
             <Minus size={13} />
           </button>
-          <button onClick={() => window.api?.maximize()} title={isMaximized ? '还原' : '最大化'} className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+          <button onClick={() => window.api?.maximize()} data-tip={isMaximized ? '还原' : '最大化'} aria-label={isMaximized ? '还原' : '最大化'} className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
             {isMaximized ? <Copy size={11} /> : <Square size={11} />}
           </button>
-          <button onClick={() => window.api?.close()} title="关闭" className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--danger)] hover:text-white">
+          <button onClick={() => window.api?.close()} data-tip="关闭" aria-label="关闭" className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--danger)] hover:text-white">
             <X size={13} />
           </button>
         </div>

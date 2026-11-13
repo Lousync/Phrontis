@@ -99,7 +99,7 @@ const JS_ROWS = `(() => {
     return r.width > 40 && r.height > 8
   })
   return rows.map(el => ({
-    rel: el.getAttribute('title'),
+    rel: el.getAttribute('data-tip'),
     name: (el.textContent || '').trim(),
     x: Math.round(el.getBoundingClientRect().left),
     y: Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2),
@@ -190,7 +190,7 @@ async function main() {
 
   // ---------- Q0 前置：进 AI 教学 → 左栏资源管理器树可见 ----------
   const intoAi = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('button[title]')].find(x => x.title === 'AI 教学')
+    const b = [...document.querySelectorAll('button[data-tip]')].find(x => x.title === 'AI 教学')
     if (!b) return false
     b.click()
     return true

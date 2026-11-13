@@ -130,14 +130,14 @@ export function IntelArticleView({ itemId, onBack, onClose }: Props) {
         >
           {!meta && '📰'}{meta?.label ?? item.source}
         </span>
-        <span className="min-w-0 max-w-[40%] truncate text-[12.5px] font-semibold text-[var(--text-primary)]" title={item.title}>
+        <span className="min-w-0 max-w-[40%] truncate text-[12.5px] font-semibold text-[var(--text-primary)]" data-tip={item.title} aria-label={item.title}>
           {item.title}
         </span>
         <span className="shrink-0 text-[11px] text-[var(--text-muted)]">{item.author}</span>
         <span className="flex-1" />
         <button
           onClick={() => { void toggleFav() }}
-          title={item.fav ? '取消收藏' : '收藏'}
+          data-tip={item.fav ? '取消收藏' : '收藏'} aria-label={item.fav ? '取消收藏' : '收藏'}
           className={`flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 text-[11.5px] transition-colors hover:border-[var(--accent)] ${
             item.fav ? 'text-[var(--danger)]' : 'text-[var(--text-primary)]'
           }`}
@@ -148,14 +148,14 @@ export function IntelArticleView({ itemId, onBack, onClose }: Props) {
         <button
           onClick={() => { void saveNote() }}
           disabled={savingNote || loadingArticle || !!articleError}
-          title={articleError ? '正文未提取成功，无法存为笔记（可打开原文手动整理）' : '存入 .knowbase/_draft/intel/ 草稿，编辑器打开'}
+          data-tip={articleError ? '正文未提取成功，无法存为笔记（可打开原文手动整理）' : '存入 .knowbase/_draft/intel/ 草稿，编辑器打开'} aria-label={articleError ? '正文未提取成功，无法存为笔记（可打开原文手动整理）' : '存入 .knowbase/_draft/intel/ 草稿，编辑器打开'}
           className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-2.5 text-[11.5px] text-white transition-colors hover:opacity-90 disabled:cursor-default disabled:opacity-50"
         >
           <NotebookPen size={12} />存为笔记
         </button>
         <button
           onClick={() => { void openExternal(item.url) }}
-          title="在系统浏览器打开原文"
+          data-tip="在系统浏览器打开原文" aria-label="在系统浏览器打开原文"
           className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 text-[11.5px] text-[var(--text-primary)] transition-colors hover:border-[var(--accent)]"
         >
           <ExternalLink size={12} />打开原文

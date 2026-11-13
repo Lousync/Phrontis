@@ -336,7 +336,8 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
     <div className="flex items-center gap-1 pr-0.5">
       <button onClick={() => { void update('aiAssistantPerception', !perceptionOn) }}
         aria-pressed={perceptionOn} data-wb="perceptionToggle"
-        title={perceptionOn
+        aria-label="感知模式"
+        data-tip={perceptionOn
           ? '感知模式：已开启 —— 发送前自动检索知识库，把最相关的笔记素材注入本轮上下文（纯本地检索，不消耗对话 token）'
           : '感知模式：已关闭 —— 点击开启后，发送前会自动检索知识库并注入相关笔记素材'}
         className={`flex items-center rounded-md px-1.5 py-1 transition-colors ${perceptionOn
@@ -438,7 +439,7 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
           >
           {/* 头部 */}
           <div className="h-9 shrink-0 px-2.5 flex items-center gap-1 border-b border-[var(--border-color)]">
-            <button onClick={chat.toggleDrawer} title="会话列表"
+            <button onClick={chat.toggleDrawer} data-tip="会话列表" aria-label="会话列表"
               className={`p-1.5 rounded-md transition-colors ${chat.drawerOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
               <Menu size={14} />
             </button>
@@ -450,11 +451,11 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
                 头部只留导航类控件（会话列表 / 全屏 / 收起），开关贴着它作用的输入区。 */}
             {/* N-5/N-7 拍板④（原型 A）：助手要求与术语表的常驻入口 —— 面板头部一枚常驻图标 */}
             <AssistantEntryButton activeId={chat.activeId} />
-            <button onClick={() => expandToFull()} title="全屏展开 (Ctrl+Shift+J)"
+            <button onClick={() => expandToFull()} data-tip="全屏展开 (Ctrl+Shift+J)" aria-label="全屏展开 (Ctrl+Shift+J)"
               className="ml-auto p-1.5 rounded-md text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] transition-colors">
               <Maximize2 size={14} />
             </button>
-            <button onClick={closeAll} title="收起 (Ctrl+J)"
+            <button onClick={closeAll} data-tip="收起 (Ctrl+J)" aria-label="收起 (Ctrl+J)"
               className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
               <X size={14} />
             </button>
@@ -481,7 +482,7 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
               pointerup / pointercancel 双路 + 真拖过才落盘。 */}
           <div
             className={`absolute top-0 left-[-3px] w-1.5 h-full cursor-ew-resize hover:bg-[var(--accent)]/30 ${full ? 'hidden' : ''}`}
-            title="拖拽调整宽度（拖到 320px 以内松手即关闭）"
+            data-tip="拖拽调整宽度（拖到 320px 以内松手即关闭）" aria-label="拖拽调整宽度（拖到 320px 以内松手即关闭）"
             onPointerDown={e => {
               if (e.button !== 0) return
               e.preventDefault()

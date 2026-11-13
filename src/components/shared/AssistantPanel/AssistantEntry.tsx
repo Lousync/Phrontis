@@ -43,7 +43,7 @@ export function AssistantEntryButton({ activeId }: { activeId: string | null }) 
       <button
         ref={triggerRef}
         onClick={toggle}
-        title="助手要求与术语表（.assistant/）"
+        data-tip="助手要求与术语表（.assistant/）" aria-label="助手要求与术语表（.assistant/）"
         data-wb="assistantEntryBtn"
         aria-expanded={open}
         className={`p-1.5 rounded-md transition-colors ${open
@@ -70,7 +70,7 @@ export function AssistantEntryButton({ activeId }: { activeId: string | null }) 
             </span>
           </button>
           <button onClick={() => { void openItem('session') }} disabled={!activeId} className={itemCls}
-            title={activeId ? '只对本对话生效，优先于全局要求' : '开始对话后可用'}>
+            data-tip={activeId ? '只对本对话生效，优先于全局要求' : '开始对话后可用'} aria-label={activeId ? '只对本对话生效，优先于全局要求' : '开始对话后可用'}>
             <MessagesSquare size={13} className="mt-0.5 shrink-0 text-[var(--accent)]" />
             <span className="min-w-0">
               <span className="block text-[12px] text-[var(--text-primary)]">会话要求 · 仅当前对话</span>

@@ -336,7 +336,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
             {onClearScope && (
               <button
                 onClick={onClearScope}
-                title="返回全库图谱"
+                data-tip="返回全库图谱" aria-label="返回全库图谱"
                 className="pointer-events-auto shrink-0 ml-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
               >
                 <X size={11} />
@@ -347,7 +347,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
         {centerId ? (
           <button
             onClick={() => { setCenterId(null); setSel(null) }}
-            title="返回全图"
+            data-tip="返回全图" aria-label="返回全图"
             className="pointer-events-auto flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-secondary)]/80 border border-[var(--border-color)] text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <Network size={12} />
@@ -364,7 +364,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
       <div className="absolute top-3 right-3 flex items-center gap-1.5">
         <button
           onClick={() => setShowSettings((v) => !v)}
-          title="图谱设置"
+          data-tip="图谱设置" aria-label="图谱设置"
           className={`flex items-center gap-1 px-2 py-1 rounded-md border transition-colors ${showSettings ? 'bg-[var(--bg-hover)] text-[var(--text-primary)] border-[var(--accent)]' : 'bg-[var(--bg-secondary)]/80 border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
         >
           <Settings size={14} />
@@ -372,7 +372,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
         </button>
         <button
           onClick={onExit}
-          title="退出图谱 (Esc)"
+          data-tip="退出图谱 (Esc)" aria-label="退出图谱 (Esc)"
           className="flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--bg-secondary)]/80 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
         >
           <X size={14} />
@@ -382,15 +382,15 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
 
       {/* 右下：缩放/适应 */}
       <div className="absolute bottom-3 right-3 flex items-center gap-1 select-none">
-        <button onClick={() => canvasRef.current?.zoomOut()} title="缩小"
+        <button onClick={() => canvasRef.current?.zoomOut()} data-tip="缩小" aria-label="缩小"
           className="w-7 h-7 flex items-center justify-center rounded-md bg-[var(--bg-secondary)]/80 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           <Minus size={14} />
         </button>
-        <button onClick={() => canvasRef.current?.fit()} title="适应全图"
+        <button onClick={() => canvasRef.current?.fit()} data-tip="适应全图" aria-label="适应全图"
           className="w-7 h-7 flex items-center justify-center rounded-md bg-[var(--bg-secondary)]/80 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           <Maximize2 size={13} />
         </button>
-        <button onClick={() => canvasRef.current?.zoomIn()} title="放大"
+        <button onClick={() => canvasRef.current?.zoomIn()} data-tip="放大" aria-label="放大"
           className="w-7 h-7 flex items-center justify-center rounded-md bg-[var(--bg-secondary)]/80 border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           <Plus size={14} />
         </button>
@@ -482,7 +482,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
           <div className="text-[10.5px] text-[var(--text-muted)]">
             关联 {sel.degree} 个节点
           {pageExcerpt && (
-            <div className="text-[11.5px] text-[var(--text-secondary)] leading-snug border-t border-[var(--border-color)] pt-1.5 line-clamp-3" title={pageExcerpt}>
+            <div className="text-[11.5px] text-[var(--text-secondary)] leading-snug border-t border-[var(--border-color)] pt-1.5 line-clamp-3" data-tip={pageExcerpt} aria-label={pageExcerpt}>
               {pageExcerpt}{pageExcerpt.length >= 90 ? '…' : ''}
             </div>
           )}

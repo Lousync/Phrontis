@@ -126,7 +126,7 @@ export function DirPicker({ rootId, sourceRel, onPick, onCancel }: DirPickerProp
             key={r.rel || '__root__'}
             type="button"
             data-row={i}
-            title={r.rel || '仓库根'}
+            data-tip={r.rel || '仓库根'} aria-label={r.rel || '仓库根'}
             /* 保住输入框焦点：不拦 mousedown 的话，鼠标点行会把焦点从输入框移走，
                之后 ↑↓ / Enter 就失灵了（click 仍然照常触发） */
             onMouseDown={(e) => e.preventDefault()}

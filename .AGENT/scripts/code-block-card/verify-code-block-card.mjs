@@ -181,7 +181,7 @@ ok('没有「换行开着就常显」那一档（第二轮回拍板否掉）',
 ok('纯图标：按钮内的 span 隐藏',
   has('css', '.kb-code-card__act span { display: none; }'))
 ok('纯图标下 title / aria-label 齐全（语义唯一来源）',
-  has('md', 'aria-label="复制代码"') && has('md', 'aria-label={wrap ?') && has('md', 'title="复制纯代码（不含围栏与高亮标记）"'))
+  has('md', 'aria-label="复制代码"') && has('md', 'aria-label={wrap ?') && has('md', 'data-tip="复制纯代码（不含围栏与高亮标记）"'))
 
 // ── ⑨ 优先级：卡片规则必须在基础 pre 规则之后 ─────────────────────────────────────
 const iBase = code.css.indexOf(':is(.prose-content, .kb-md-atom) pre {')

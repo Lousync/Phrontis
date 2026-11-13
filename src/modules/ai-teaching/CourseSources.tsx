@@ -205,7 +205,7 @@ export function CourseSources(props: Props) {
       <div key={src.id} className="rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5">
         <div className="flex items-center gap-1.5">
           <BookOpen size={10} className="shrink-0 text-[var(--text-muted)]" />
-          <button onClick={() => openSource(src)} disabled={!openable} title={openable ? '打开提取稿 / 原件' : '还没有可打开的提取稿'}
+          <button onClick={() => openSource(src)} disabled={!openable} data-tip={openable ? '打开提取稿 / 原件' : '还没有可打开的提取稿'} aria-label={openable ? '打开提取稿 / 原件' : '还没有可打开的提取稿'}
             className={`min-w-0 flex-1 truncate text-left text-[11px] ${openable ? 'text-[var(--text-primary)] hover:underline' : 'text-[var(--text-muted)]'}`}>
             {src.title}
           </button>
@@ -232,7 +232,7 @@ export function CourseSources(props: Props) {
             <button onClick={() => beginExtract(src)} disabled={busy} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">提取</button>
           )}
           {!opts.seg && (
-            <button onClick={() => void removeSource(src.id)} disabled={busy} title={confirmRemove === src.id ? '再点一次确认删除登记（原文件不删）' : '删除素材登记'}
+            <button onClick={() => void removeSource(src.id)} disabled={busy} data-tip={confirmRemove === src.id ? '再点一次确认删除登记（原文件不删）' : '删除素材登记'} aria-label={confirmRemove === src.id ? '再点一次确认删除登记（原文件不删）' : '删除素材登记'}
               className={`ml-auto transition-colors ${confirmRemove === src.id ? 'text-[var(--danger)]' : 'text-[var(--text-muted)] hover:text-[var(--danger)]'}`}>
               {busy ? <Loader2 size={10} className="animate-spin" /> : confirmRemove === src.id ? <span className="text-[9px]">确认删除</span> : <Trash2 size={10} />}
             </button>
@@ -261,15 +261,15 @@ export function CourseSources(props: Props) {
         <span className="text-[9.5px] text-[var(--text-muted)]">{sources.length} 条 · 未分配 {unassigned.length}</span>
         {longMatLabel && (
           <span className="kb-micro-pop shrink-0 rounded bg-[var(--accent)]/10 px-1 py-px text-[9px] text-[var(--accent)]"
-            title={`${longMat.reason}；已自动切 ${longMat.profile} 档（更大读取窗口与预算），任务费用可能较高`}>
+            data-tip={`${longMat.reason}；已自动切 ${longMat.profile} 档（更大读取窗口与预算），任务费用可能较高`} aria-label={`${longMat.reason}；已自动切 ${longMat.profile} 档（更大读取窗口与预算），任务费用可能较高`}>
             {longMatLabel}
           </span>
         )}
         <div className="flex-1" />
-        <button onClick={() => void reload()} title="刷新素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+        <button onClick={() => void reload()} data-tip="刷新素材" aria-label="刷新素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
         </button>
-        <button onClick={() => setRegOpen((v) => !v)} title="登记素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors">
+        <button onClick={() => setRegOpen((v) => !v)} data-tip="登记素材" aria-label="登记素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors">
           <Plus size={12} />
         </button>
       </div>
@@ -279,8 +279,8 @@ export function CourseSources(props: Props) {
           <div className="flex items-center gap-1">
             <input value={regPath} onChange={(e) => setRegPath(e.target.value)} placeholder="文件 / 目录 / https://…"
               className="min-w-0 flex-1 h-6 px-1.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[10.5px] outline-none" />
-            <button onClick={() => void pick(false)} title="选择文件" className="p-1 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><FilePlus2 size={11} /></button>
-            <button onClick={() => void pick(true)} title="选择目录" className="p-1 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><FolderOpen size={11} /></button>
+            <button onClick={() => void pick(false)} data-tip="选择文件" aria-label="选择文件" className="p-1 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><FilePlus2 size={11} /></button>
+            <button onClick={() => void pick(true)} data-tip="选择目录" aria-label="选择目录" className="p-1 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><FolderOpen size={11} /></button>
           </div>
           <input value={regTitle} onChange={(e) => setRegTitle(e.target.value)} placeholder="显示名（可选）"
             className="h-6 px-1.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[10.5px] outline-none" />

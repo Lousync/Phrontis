@@ -84,7 +84,8 @@ export function HelpHint({ text, icon, width = 280, label = '说明', className 
         maxWidth={width}
         role="tooltip"
         layerId={tipId}
-        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[11.5px] leading-relaxed text-[var(--text-secondary)] shadow-lg"
+        animClassName="kb-tip-anim"
+        className="kb-tip-surface leading-relaxed"
       >
         {text}
       </AnchoredLayer>

@@ -178,7 +178,7 @@ export function LanShare({ onBack }: { onBack: () => void }) {
         <button
           onClick={onBack}
           className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title="返回"
+          data-tip="返回" aria-label="返回"
         >
           <ArrowLeft size={12} />
         </button>
@@ -296,7 +296,7 @@ export function LanShare({ onBack }: { onBack: () => void }) {
                     <button
                       onClick={() => void removeOutbox(f.name)}
                       className="shrink-0 text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors"
-                      title="移出待发送"
+                      data-tip="移出待发送" aria-label="移出待发送"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -325,7 +325,7 @@ export function LanShare({ onBack }: { onBack: () => void }) {
                         onClick={() => void archive(f, 'moment')}
                         disabled={busy === f.name}
                         className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        title="归档为说说"
+                        data-tip="归档为说说" aria-label="归档为说说"
                       >
                         <MessageSquare size={13} />
                       </button>
@@ -333,7 +333,7 @@ export function LanShare({ onBack }: { onBack: () => void }) {
                         onClick={() => void archive(f, 'page')}
                         disabled={busy === f.name}
                         className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        title="归档为知识页"
+                        data-tip="归档为知识页" aria-label="归档为知识页"
                       >
                         <FileText size={13} />
                       </button>
@@ -341,7 +341,7 @@ export function LanShare({ onBack }: { onBack: () => void }) {
                         onClick={() => void archive(f, 'attachment')}
                         disabled={busy === f.name}
                         className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        title="存为附件"
+                        data-tip="存为附件" aria-label="存为附件"
                       >
                         <Paperclip size={13} />
                       </button>
@@ -349,7 +349,7 @@ export function LanShare({ onBack }: { onBack: () => void }) {
                         onClick={() => void removeInbox(f.name)}
                         disabled={busy === f.name}
                         className="flex items-center px-1.5 py-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
-                        title="移除"
+                        data-tip="移除" aria-label="移除"
                       >
                         <Trash2 size={13} />
                       </button>

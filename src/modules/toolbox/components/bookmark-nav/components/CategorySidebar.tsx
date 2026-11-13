@@ -45,7 +45,7 @@ export function CategorySidebar({ categories, bookmarks, selected, onSelect, onN
         <span className="flex-1 text-[12px] font-medium text-[var(--text-secondary)]">分类</span>
         <button onClick={onNew}
           className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-          title="新建分类">
+          data-tip="新建分类" aria-label="新建分类">
           <Plus {...SIDEBAR_HEADER_ICON} />
         </button>
       </div>
@@ -56,11 +56,11 @@ export function CategorySidebar({ categories, bookmarks, selected, onSelect, onN
         {categories.map(c => renderRow(
           c.id, c.name, c.color, countOf(c.id),
           <>
-            <button onClick={e => { e.stopPropagation(); onEdit(c) }} title="编辑分类"
+            <button onClick={e => { e.stopPropagation(); onEdit(c) }} data-tip="编辑分类" aria-label="编辑分类"
               className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)] transition-colors">
               <Pencil size={12} />
             </button>
-            <button onClick={e => { e.stopPropagation(); onDelete(c) }} title="删除分类（书签移入未分类）"
+            <button onClick={e => { e.stopPropagation(); onDelete(c) }} data-tip="删除分类（书签移入未分类）" aria-label="删除分类（书签移入未分类）"
               className="p-1 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-[var(--bg-selected)] transition-colors">
               <Trash2 size={12} />
             </button>

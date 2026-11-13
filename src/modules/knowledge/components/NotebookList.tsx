@@ -146,7 +146,7 @@ export function NotebookList({
   const pageKeep = (p: KnowledgePage) => !focusActive || p.categoryId === activePageCatId
   /** 骨架条：占位 + 悬停显原名；点击 = 退出聚焦并定位 */
   const skelRow = (key: string, name: string, depth: number, icon: React.ReactNode, onClick: () => void) => (
-    <div key={key} onClick={onClick} title={`${name}（点击退出聚焦并定位）`}
+    <div key={key} onClick={onClick} data-tip={`${name}（点击退出聚焦并定位）`} aria-label={`${name}（点击退出聚焦并定位）`}
       className="group flex items-center gap-1 py-[3px] rounded-md cursor-pointer select-none hover:bg-[var(--bg-hover)]"
       style={{ paddingLeft: `${depth * 12 + 6}px`, paddingRight: '4px' }}>
       <span className="w-[12px] shrink-0" />
@@ -532,9 +532,9 @@ export function NotebookList({
               )}
               <span className="flex-1 truncate text-[12.5px] text-[var(--text-primary)]">{cat.name}</span>
               <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-                {onSortCategory && (<><button onClick={e => { e.stopPropagation(); onSortCategory(cat.id, 'up') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="上移"><ChevronUp size={13} /></button><button onClick={e => { e.stopPropagation(); onSortCategory(cat.id, 'down') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="下移"><ChevronDown size={13} /></button></>)}
-                <button onClick={e => { e.stopPropagation(); handleStartRename(cat.id, cat.name) }} className="p-0.5 hover:text-white text-[var(--text-secondary)]" title="重命名"><Pencil size={13} /></button>
-                <button onClick={e => { e.stopPropagation(); if (skipDeleteConfirm) onDeleteNotebook(cat.id); else setDeleteTarget({ id: cat.id, name: cat.name }) }} className="p-0.5 hover:text-[var(--danger)] text-[var(--text-secondary)]" title="删除"><Trash2 size={13} /></button>
+                {onSortCategory && (<><button onClick={e => { e.stopPropagation(); onSortCategory(cat.id, 'up') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="上移" aria-label="上移"><ChevronUp size={13} /></button><button onClick={e => { e.stopPropagation(); onSortCategory(cat.id, 'down') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="下移" aria-label="下移"><ChevronDown size={13} /></button></>)}
+                <button onClick={e => { e.stopPropagation(); handleStartRename(cat.id, cat.name) }} className="p-0.5 hover:text-white text-[var(--text-secondary)]" data-tip="重命名" aria-label="重命名"><Pencil size={13} /></button>
+                <button onClick={e => { e.stopPropagation(); if (skipDeleteConfirm) onDeleteNotebook(cat.id); else setDeleteTarget({ id: cat.id, name: cat.name }) }} className="p-0.5 hover:text-[var(--danger)] text-[var(--text-secondary)]" data-tip="删除" aria-label="删除"><Trash2 size={13} /></button>
               </div>
               {deletingState(cat.id) === 'animating' && <DeleteWipe />}
             </div>
@@ -602,7 +602,7 @@ export function NotebookList({
                 ) : (
                   <span className={`flex-1 truncate text-[12.5px] ${activePageId === p.id ? 'text-[var(--text-primary)]' : ''}`}>{p.title || '无标题'}</span>
                 )}
-                {onSortPage && <div className="hidden group-hover:flex items-center gap-0.5 shrink-0"><button onClick={e => { e.stopPropagation(); onSortPage(p.id, 'up') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="上移"><ChevronUp size={11} /></button><button onClick={e => { e.stopPropagation(); onSortPage(p.id, 'down') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="下移"><ChevronDown size={11} /></button></div>}
+                {onSortPage && <div className="hidden group-hover:flex items-center gap-0.5 shrink-0"><button onClick={e => { e.stopPropagation(); onSortPage(p.id, 'up') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="上移" aria-label="上移"><ChevronUp size={11} /></button><button onClick={e => { e.stopPropagation(); onSortPage(p.id, 'down') }} className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="下移" aria-label="下移"><ChevronDown size={11} /></button></div>}
                 {(() => { const fi = getFileTypeInfo(p.fileType || ''); return <span className="hidden group-hover:inline-block shrink-0 text-[8px] px-1 rounded font-medium ml-1" style={{ backgroundColor: fi.color + '20', color: fi.color }}>{fi.badge}</span> })()}
                 {p.isStarred && <Star size={11} className="shrink-0 text-[var(--warning)]" fill="currentColor" />}
                 {deletingState(p.id) === 'animating' && <DeleteWipe />}

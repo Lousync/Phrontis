@@ -152,7 +152,7 @@ async function main() {
   ok('内容帧内程序化划选 + mouseup 派发', String(selRes).startsWith('ok:'), String(selRes))
   await sleep(500)
   const barRect = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('title') || '').startsWith('存为摘录'))
+    const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('data-tip') || '').startsWith('存为摘录'))
     if (!b) return null
     const bar = b.closest('div')
     const r = (bar ?? b).getBoundingClientRect()
@@ -162,7 +162,7 @@ async function main() {
   ok('划选浮条出现（getCFI 成功 → capture 态）', !!barRect, JSON.stringify(barRect))
   ok('浮条落在阅读器区域内（frameElement 偏移可用 = 同源）', barRect?.inHost === true, JSON.stringify(barRect))
   const clickedEx = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('title') || '').startsWith('存为摘录'))
+    const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('data-tip') || '').startsWith('存为摘录'))
     if (!b) return false
     b.click(); return true
   })()`)
@@ -210,7 +210,7 @@ async function main() {
     ok('点已有高亮 → 出回看卡（走 view.renderer.getContents 取帧内 range）', !!pop, `${String(pop)} @x=${Math.round(hx - box5.left)}px`)
     ok('★ 点高亮不翻页（热区判定先让给高亮）', (await hostPct()) === pctH0, `${pctH0}% → ${await hostPct()}%`)
     await evalJs(`(() => {
-      const b = [...document.querySelectorAll('.kb-pop button')].find((x) => (x.getAttribute('title') || '') === '关闭')
+      const b = [...document.querySelectorAll('.kb-pop button')].find((x) => (x.getAttribute('data-tip') || '') === '关闭')
       if (b) b.click(); return true
     })()`)
     await sleep(300)

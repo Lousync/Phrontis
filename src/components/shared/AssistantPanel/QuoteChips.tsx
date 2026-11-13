@@ -27,11 +27,11 @@ export function QuoteChips({ quotes, onRemove, onRemoveAll }: {
     <div className="mb-1 flex items-center gap-1.5">
       <button onClick={() => setOpen(o => !o)}
         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-        title="点击查看/管理引用片段">
+        data-tip="点击查看/管理引用片段" aria-label="点击查看/管理引用片段">
         <Quote size={10} className="text-[var(--accent)]" />
         <span>{quotes.length} 条对话引用</span>
       </button>
-      <button onClick={() => { setOpen(false); onRemoveAll() }} title="移除全部引用"
+      <button onClick={() => { setOpen(false); onRemoveAll() }} data-tip="移除全部引用" aria-label="移除全部引用"
         className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
         <X size={10} />
       </button>
@@ -41,7 +41,7 @@ export function QuoteChips({ quotes, onRemove, onRemoveAll }: {
             <div key={`${i}-${q.slice(0, 16)}`} className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)]">
               <Quote size={10} className="mt-[3px] shrink-0 text-[var(--accent)]" />
               <span className="flex-1 min-w-0 text-[11px] leading-[1.5] text-[var(--text-secondary)] line-clamp-3">【引用 {i + 1}】{q}</span>
-              <button onClick={() => onRemove(i)} title="移除此引用"
+              <button onClick={() => onRemove(i)} data-tip="移除此引用" aria-label="移除此引用"
                 className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                 <X size={10} />
               </button>

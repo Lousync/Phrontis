@@ -78,7 +78,7 @@ export function OutlineTree({ nodes, onJump, depth }: TreeProps) {
               <button onClick={() => onJump(n)}
                 className="min-w-0 flex-1 truncate py-0.5 pr-2 text-left text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                 style={{ paddingLeft: depth > 0 ? 0 : 2 }}
-                title={n.title}>
+                data-tip={n.title} aria-label={n.title}>
                 {n.title}
               </button>
             </div>

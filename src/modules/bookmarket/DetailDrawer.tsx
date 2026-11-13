@@ -45,7 +45,7 @@ export function DetailDrawer({ item, task, installed, onClose, onDownload, onRet
         <button
           type="button"
           onClick={onClose}
-          title="关闭"
+          data-tip="关闭" aria-label="关闭"
           className="ml-auto grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
           <X size={13} strokeWidth={2} />
@@ -118,7 +118,7 @@ export function DetailDrawer({ item, task, installed, onClose, onDownload, onRet
                   type="button"
                   onClick={onDownload}
                   disabled={!shown.readable}
-                  title={shown.readable ? '下载到 .books/' : '该格式书架打不开，已禁用下载'}
+                  data-tip={shown.readable ? '下载到 .books/' : '该格式书架打不开，已禁用下载'} aria-label={shown.readable ? '下载到 .books/' : '该格式书架打不开，已禁用下载'}
                   className={`h-[26px] rounded-[7px] px-3 text-[12px] transition-colors ${shown.readable
                     ? 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]'
                     : 'cursor-not-allowed border border-[var(--border-color)] text-[var(--text-disabled)]'}`}

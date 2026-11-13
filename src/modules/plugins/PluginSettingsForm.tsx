@@ -54,7 +54,7 @@ export function PluginSettingsForm({ pluginId }: { pluginId: string }) {
               <button
                 onClick={() => change(it.key, !(values[it.key] ?? it.default ?? false))}
                 className={`shrink-0 relative w-9 h-5 rounded-full transition-colors ${values[it.key] ?? it.default ?? false ? 'bg-[var(--accent)]' : 'bg-[var(--bg-tertiary)] border border-[var(--border-color)]'}`}
-                title={it.label}
+                data-tip={it.label} aria-label={it.label}
               >
                 <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${(values[it.key] ?? it.default ?? false) ? 'left-[18px]' : 'left-0.5'}`} />
               </button>

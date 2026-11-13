@@ -61,7 +61,7 @@ function fnv1a(buf) {
 
 /** 点书架卡片：**按 relPath 精确匹配**（不能用 `大样书.cbz$` 这种后缀正则 —— 它会先命中「超大样书.cbz」） */
 const clickCard = (relPath) => evalJs(`(() => {
-  const b = [...document.querySelectorAll('main button[title]')].find((x) => (x.getAttribute('title') || '') === ${JSON.stringify(relPath)})
+  const b = [...document.querySelectorAll('main button[data-tip]')].find((x) => (x.getAttribute('data-tip') || '') === ${JSON.stringify(relPath)})
   if (!b) return 'no-card'
   b.scrollIntoView({ block: 'center' })
   b.click()

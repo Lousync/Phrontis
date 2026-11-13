@@ -50,7 +50,7 @@ export function TreeNewButton({ items, onPick, title = '新建…' }: {
         ref={btnRef}
         data-wb="treeNewBtn"
         onClick={toggle}
-        title={title}
+        data-tip={title} aria-label={title}
         aria-haspopup="menu"
         aria-expanded={open}
         className={`shrink-0 rounded-md p-1 transition-colors ${

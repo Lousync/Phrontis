@@ -154,7 +154,8 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
           <button
             onClick={e => { e.stopPropagation(); void chat.removeSession(sess.id) }}
             className={`shrink-0 rounded p-0.5 ${chat.deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100'}`}
-            title={chat.deletingId === sess.id ? '再点一次确认删除' : '删除会话（右键更多操作）'}
+            data-tip={chat.deletingId === sess.id ? '再点一次确认删除' : '删除会话（右键更多操作）'}
+            aria-label={chat.deletingId === sess.id ? '再点一次确认删除' : '删除会话（右键更多操作）'}
           >
             <Trash2 size={11} />
           </button>
@@ -232,7 +233,7 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
                     key={n.id}
                     data-wb="aiOutlineNode"
                     onClick={() => jumpTo(n.id)}
-                    title="点击定位到该消息"
+                    data-tip="点击定位到该消息" aria-label="点击定位到该消息"
                     className={`flex w-full items-start gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${
                       n.role === 'user' ? '' : 'pl-5'
                     }`}

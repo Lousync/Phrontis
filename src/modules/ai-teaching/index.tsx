@@ -3,7 +3,7 @@ import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, C
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentListSideLanes, agentResume,
-  workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault,
+  workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault, workspaceOpenInSystem,
   agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachCourseGetState, aiTeachCourseGetSources, aiTeachCourseWriteOutlineDraft, onAiTeachCourseRefresh,
@@ -21,7 +21,7 @@ import { CourseProgress } from './CourseProgress'
 import { CourseSources } from './CourseSources'
 import { RequirementsDrawer, type ReqLayer } from './RequirementsDrawer'
 import { buildCourseRail, activeChapterId as pickRailChapter, type RailChapterInput } from './courseRailPure'
-import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
+import { chapterSegments, courseProgressSummary, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
 import { SideLaneCenter } from './SideLaneCenter'
@@ -104,6 +104,20 @@ function wsAgo(iso: string | null): string {
   if (d < 86400000) return '今天'
   if (d < 172800000) return '昨天'
   return iso.slice(5, 10)
+}
+
+/** 3.26：预览「最近对话」的时间（今天 HH:MM / 昨天 HH:MM / M 月 D 日） */
+function wsRecentTime(iso: string | null): string {
+  if (!iso) return ''
+  const t = new Date(iso.replace(' ', 'T')).getTime()
+  if (Number.isNaN(t)) return ''
+  const d = new Date(t)
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const day = new Date()
+  const startOfToday = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime()
+  if (t >= startOfToday) return `今天 ${hm}`
+  if (t >= startOfToday - 86400000) return `昨天 ${hm}`
+  return `${d.getMonth() + 1} 月 ${d.getDate()} 日`
 }
 
 /** P4 §3.9-1：侧栏分区头（VS Code 式贴靠——收起只剩头，展开体占剩余高度） */
@@ -518,10 +532,35 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   useEffect(() => { wsMapRef.current = wsSessionMap }, [wsSessionMap])
   const [wsSearch, setWsSearch] = useState('')
   const [wsSwitcherOpen, setWsSwitcherOpen] = useState(false)
-  const [wsModal, setWsModal] = useState<{ mode: 'create' | 'rename'; id?: string; value: string } | null>(null)
+  // 3.26 选择页主从布局：左列表选中 → 右预览（单击选中，双击 / 按钮 / Enter 进入）
+  const [selWsId, setSelWsId] = useState<string | null>(null)
+  /** 行内新建（列表底） */
+  const [wsCreating, setWsCreating] = useState(false)
+  const [wsCreateName, setWsCreateName] = useState('')
+  const [wsCreateErr, setWsCreateErr] = useState('')
+  const [wsCreateBusy, setWsCreateBusy] = useState(false)
+  /** 行内改名（预览标题） */
+  const [wsRenaming, setWsRenaming] = useState(false)
+  const [wsRenameName, setWsRenameName] = useState('')
+  const [wsRenameErr, setWsRenameErr] = useState('')
+  const [wsRenameBusy, setWsRenameBusy] = useState(false)
+  /** 行内删除确认（覆盖预览面板） */
+  const [wsConfirmDel, setWsConfirmDel] = useState(false)
+  const [wsDelBusy, setWsDelBusy] = useState(false)
+  /** 刚创建的行：进场动画只放一次 */
+  const [wsNewId, setWsNewId] = useState<string | null>(null)
+  /** 预览课程进度：按 wsId 缓存（选中才请求一次；从工作区返回 / 列表刷新时清空） */
+  const wsProgCache = useRef(new Map<string, { learned: number; total: number; pct: number } | 'none'>())
+  const wsProgPending = useRef(new Set<string>())
+  const wsListRef = useRef<HTMLDivElement | null>(null)
+  const [wsProgTick, setWsProgTick] = useState(0)
   const refreshWorkspaces = useCallback(async () => {
     const r = await aiTeachListWorkspaces().catch(() => null)
     if (!r) return
+    // 进入工作区期间进度可能已变：列表刷新即视为缓存失效信号
+    wsProgCache.current.clear()
+    wsProgPending.current.clear()
+    setWsProgTick(v => v + 1)
     setWsList(r.workspaces); setWsSessionMap(r.sessionWs); setLastWsId(r.lastWorkspaceId)
   }, [])
   useEffect(() => { void refreshWorkspaces() }, [refreshWorkspaces])
@@ -1266,41 +1305,128 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setActiveWs(null); activeWsRef.current = null
     void refreshWorkspaces()
   }, [refreshWorkspaces])
-  const submitWsModal = useCallback(async () => {
-    if (!wsModal) return
-    const name = wsModal.value.trim()
-    if (!name) { setWsModal(null); return }
-    if (wsModal.mode === 'create') {
-      const r = await aiTeachCreateWorkspace(name)
-      setWsModal(null)
-      if (!r.ok || !r.workspace) { showToast({ type: 'error', message: r.error ?? '创建工作区失败' }); return }
-      showToast({ type: 'info', message: `已创建工作区「${r.workspace.name}」` })
-      await refreshWorkspaces()
-      enterWs(r.workspace.id)
-    } else {
-      const r = await aiTeachRenameWorkspace(wsModal.id ?? '', name)
-      if (!r.ok) showToast({ type: 'error', message: r.error ?? '工作区改名失败' })
-      else showToast({ type: 'info', message: '工作区已改名（产物文件夹同步）' })
-      await refreshWorkspaces()
-      setWsModal(null)
-    }
-  }, [wsModal, refreshWorkspaces, enterWs])
-  const removeWs = useCallback(async (w: AiTeachWorkspaceInfo) => {
-    const okGo = await showGlobalConfirm({
-      title: `删除工作区「${w.name}」`,
-      message: '只删除工作区本身（归属元数据）：「AI教学」下的文件夹与其中对话都保留在原处（3-39：不迁移、也不再显示在界面中），产物文件不删。',
-      confirmLabel: '删除工作区', variant: 'danger',
-    })
-    if (!okGo) return
-    const r = await aiTeachDeleteWorkspace(w.id)
-    if (!r.ok) { showToast({ type: 'error', message: r.error ?? '删除失败' }); return }
-    if (activeWs === w.id) { setActiveWs(null); activeWsRef.current = null }
-    await refreshWorkspaces()
-  }, [activeWs, refreshWorkspaces])
+  /** 选择页排序：上次工作区置顶 → 最近活跃倒序（空值最后）→ 名称 */
   const wsFiltered = useMemo(() => {
     const q = wsSearch.trim().toLowerCase()
-    return q ? wsList.filter(w => w.name.toLowerCase().includes(q)) : wsList
-  }, [wsList, wsSearch])
+    const rows = q
+      ? wsList.filter(w => w.name.toLowerCase().includes(q) || w.folderRel.toLowerCase().includes(q))
+      : [...wsList]
+    return rows.sort((a, b) => {
+      if (a.id === lastWsId) return -1
+      if (b.id === lastWsId) return 1
+      const la = a.lastActive ?? ''
+      const lb = b.lastActive ?? ''
+      if (la !== lb) return lb.localeCompare(la)
+      return a.name.localeCompare(b.name, 'zh')
+    })
+  }, [wsList, wsSearch, lastWsId])
+  /** 选中回落：初始选上次工作区，否则第一条；过滤 / 删除后不在结果里则回落到第一条可见项 */
+  const wsSelInit = useRef(false)
+  useEffect(() => {
+    setSelWsId(prev => {
+      if (prev && wsFiltered.some(w => w.id === prev)) return prev
+      if (!wsSelInit.current && lastWsId && wsFiltered.some(w => w.id === lastWsId)) { wsSelInit.current = true; return lastWsId }
+      wsSelInit.current = true
+      return wsFiltered[0]?.id ?? null
+    })
+  }, [wsFiltered, lastWsId])
+  // 切课程时收起行内改名 / 删除确认（避免把上一个工作区的表单带到下一个）
+  useEffect(() => { setWsRenaming(false); setWsRenameErr(''); setWsConfirmDel(false) }, [selWsId])
+  // 选中才取一次课程进度（按 wsId 缓存；离开 / 刷新列表时缓存已清空，这里重取）
+  useEffect(() => {
+    if (activeWs) return
+    const id = selWsId
+    if (!id || wsProgCache.current.has(id) || wsProgPending.current.has(id)) return
+    wsProgPending.current.add(id)
+    void aiTeachCourseGetState(id)
+      .then(s => { wsProgCache.current.set(id, courseProgressSummary(s?.outline, s?.progress, s?.lessons)) })
+      .catch(() => { wsProgCache.current.set(id, 'none') })
+      .finally(() => { wsProgPending.current.delete(id); setWsProgTick(v => v + 1) })
+  }, [selWsId, activeWs, wsProgTick])
+
+  const openWsCreate = useCallback(() => {
+    setWsCreateErr(''); setWsCreateName(''); setWsCreating(true)
+  }, [])
+  const closeWsCreate = useCallback(() => { setWsCreating(false); setWsCreateErr(''); setWsCreateName('') }, [])
+  const submitWsCreate = useCallback(async () => {
+    const name = wsCreateName.trim()
+    if (!name) { setWsCreateErr('请输入工作区名称'); return }
+    setWsCreateBusy(true)
+    const r = await aiTeachCreateWorkspace(name)
+    setWsCreateBusy(false)
+    if (!r.ok || !r.workspace) { setWsCreateErr(r.error ?? '创建工作区失败'); return }
+    const created = r.workspace
+    setWsCreating(false); setWsCreateName(''); setWsCreateErr('')
+    setWsNewId(created.id)
+    showToast({ type: 'info', message: `已创建工作区「${created.name}」` })
+    await refreshWorkspaces()
+    enterWs(created.id)
+  }, [wsCreateName, refreshWorkspaces, enterWs])
+  const openWsRename = useCallback((w: AiTeachWorkspaceInfo) => {
+    setWsRenameName(w.name); setWsRenameErr(''); setWsRenaming(true)
+  }, [])
+  const closeWsRename = useCallback(() => { setWsRenaming(false); setWsRenameErr('') }, [])
+  const submitWsRename = useCallback(async () => {
+    const id = selWsId
+    if (!id) return
+    const name = wsRenameName.trim()
+    if (!name) { setWsRenameErr('请输入工作区名称'); return }
+    setWsRenameBusy(true)
+    const r = await aiTeachRenameWorkspace(id, name)
+    setWsRenameBusy(false)
+    if (!r.ok) { setWsRenameErr(r.error ?? '工作区改名失败'); return }
+    setWsRenaming(false); setWsRenameErr('')
+    showToast({ type: 'info', message: '工作区已改名（产物文件夹同步）' })
+    await refreshWorkspaces()
+  }, [selWsId, wsRenameName, refreshWorkspaces])
+  /** 删除（行内确认）：成功后选中相邻项（优先下一条，其次上一条） */
+  const confirmDeleteWs = useCallback(async () => {
+    const w = wsList.find(x => x.id === selWsId)
+    if (!w) return
+    const idx = wsFiltered.findIndex(x => x.id === w.id)
+    const neighbor = wsFiltered[idx + 1]?.id ?? wsFiltered[idx - 1]?.id ?? null
+    setWsDelBusy(true)
+    const r = await aiTeachDeleteWorkspace(w.id)
+    setWsDelBusy(false)
+    if (!r.ok) { showToast({ type: 'error', message: r.error ?? '删除失败' }); return }
+    setWsConfirmDel(false)
+    if (activeWs === w.id) { setActiveWs(null); activeWsRef.current = null }
+    await refreshWorkspaces()
+    setSelWsId(neighbor)
+    showToast({ type: 'info', message: `已删除工作区「${w.name}」（文件夹与对话保留）` })
+  }, [wsList, wsFiltered, selWsId, activeWs, refreshWorkspaces])
+  /** 预览的「打开」：在系统文件管理器中打开工作区文件夹（渲染层仍只传 rootId + relPath） */
+  const openWsFolder = useCallback(async (w: AiTeachWorkspaceInfo) => {
+    const cur = await workspaceGetCurrent().catch(() => null)
+    const rootId = (cur as { rootId?: string } | null)?.rootId
+    if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
+    const r = await workspaceOpenInSystem(rootId, w.folderRel).catch(() => null)
+    if (!r?.ok) showToast({ type: 'error', message: r?.error ?? '打开文件夹失败' })
+  }, [])
+  /** 列表键盘：↑/↓ 移动选中（焦点跟随行），Enter 进入 */
+  const onWsListKey = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!wsFiltered.length) return
+    const i = wsFiltered.findIndex(w => w.id === selWsId)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const next = e.key === 'ArrowDown'
+        ? Math.min(wsFiltered.length - 1, (i < 0 ? -1 : i) + 1)
+        : Math.max(0, i - 1)
+      const nextId = wsFiltered[next].id
+      setSelWsId(nextId)
+      // 焦点跟随行：下一次渲染后把焦点落到该行（同时自动滚入可视区）
+      requestAnimationFrame(() => {
+        wsListRef.current?.querySelector<HTMLElement>(`[data-ws-row="${nextId}"]`)?.focus()
+      })
+      return
+    }
+    if (e.key === 'Enter' && selWsId) { e.preventDefault(); enterWs(selWsId) }
+  }, [wsFiltered, selWsId, enterWs])
+  const selWs = useMemo(() => wsFiltered.find(w => w.id === selWsId) ?? null, [wsFiltered, selWsId])
+  const selWsProgress = useMemo(() => {
+    void wsProgTick
+    return selWs ? (wsProgCache.current.get(selWs.id) ?? null) : null
+  }, [selWs, wsProgTick])
 
   /** 打开已存在的段（不新建） */
   const openSegmentBySid = useCallback(async (sid: string) => {
@@ -1618,7 +1744,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       }
       if (reqOpen) { setReqOpen(false); return }
       if (preflight) { setPreflight(null); return }
-      if (wsModal) { setWsModal(null); return }
+      if (wsConfirmDel) { setWsConfirmDel(false); return }
+      if (wsRenaming) { setWsRenaming(false); return }
+      if (wsCreating) { setWsCreating(false); return }
       if (instrOpen) { setInstrOpen(false); return }
       if (tokenOpen) { setTokenOpen(false); return }
       if (modelMenuOpen) { setModelMenuOpen(false); return }
@@ -1628,7 +1756,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, reqOpen, preflight, wsModal, instrOpen, tokenOpen, modelMenuOpen])
+  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, reqOpen, preflight, wsConfirmDel, wsRenaming, wsCreating, instrOpen, tokenOpen, modelMenuOpen])
   /**
    * 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件）。
    * v3.2.0 第 20 项起：围栏正文先过 `parseProfileFence` —— 解得出 JSON 条目数组就是新形态，
@@ -2126,12 +2254,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <div className="flex items-center gap-2 mt-0.5">
                   {/* 条目7：AI 生成内容合规提示——常驻左端空白处（原 flex-1 空占位），弱化小字不新增行高；
                       静态渲染与流式/停止两种右端状态正交，布局零跳动（AGENTS.md#12 帮助披露：禁醒目标签轰炸） */}
-                  <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+                  <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" data-tip="AI 生成内容可能存在错误，请自行核实" aria-label="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
                   {/* 模型 + 思考强度合一菜单（P3b R12/R14）：仅本对话生效 */}
                   <div className="relative">
                     <button onClick={openModelMenu}
                       className="flex items-center gap-1 h-7 px-2 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                      title="本对话模型与思考强度（仅本对话生效，默认跟随 设置→AI 默认模型）">
+                      data-tip="本对话模型与思考强度（仅本对话生效，默认跟随 设置→AI 默认模型）" aria-label="本对话模型与思考强度（仅本对话生效，默认跟随 设置→AI 默认模型）">
                       <Bot size={11} />
                       <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
                       {convoEffort !== 'off' && <span className="text-[var(--accent)]">· 🧠{EFFORT_LABEL[convoEffort]}</span>}
@@ -2221,7 +2349,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     <div className="relative group">
                       <button onClick={() => setTokenOpen(v => !v)}
                         className={`flex items-center gap-1 h-7 px-2 rounded-md transition-colors ${tokenOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
-                        title={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 点击查看明细（窗口大小在 设置→AI教学 配置）` : '本会话累计 LLM tokens · 点击查看明细（设置模型上下文窗口后圆环按占用比例着色）'}>
+                        data-tip={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 点击查看明细（窗口大小在 设置→AI教学 配置）` : '本会话累计 LLM tokens · 点击查看明细（设置模型上下文窗口后圆环按占用比例着色）'} aria-label={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 点击查看明细（窗口大小在 设置→AI教学 配置）` : '本会话累计 LLM tokens · 点击查看明细（设置模型上下文窗口后圆环按占用比例着色）'}>
                         <UsageRing pct={ctxWindow > 0 ? ctxPct : null} used={ctxUsed || tokenStats.llmTokens} />
                         {usageDetail === 'detailed' && (
                           <span className="tabular-nums whitespace-nowrap text-[10.5px]">
@@ -2259,7 +2387,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           <div className="p-3 space-y-2.5 text-[11.5px] max-h-[60vh] overflow-y-auto">
                             <div className="flex items-center justify-between">
                               <span className="text-[var(--text-muted)]">模型</span>
-                              <span className="text-[var(--text-primary)] truncate max-w-[190px]" title={effModel}>{effModelBare || defaultModel || '（默认配置）'}</span>
+                              <span className="text-[var(--text-primary)] truncate max-w-[190px]" data-tip={effModel} aria-label={effModel}>{effModelBare || defaultModel || '（默认配置）'}</span>
                             </div>
                             <div className="border-b border-[var(--border-color)] pb-2">
                               <div className="flex items-center justify-between mb-1">
@@ -2331,11 +2459,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   {pending ? (
                     <button onClick={abortActive}
                       className="w-8 h-8 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity"
-                      title="停止生成（已完成的轮次保留）">
+                      data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）">
                       <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
                     </button>
                   ) : (
-                    <button onClick={() => { void doSend() }} disabled={!input.trim()} title="发送"
+                    <button onClick={() => { void doSend() }} disabled={!input.trim()} data-tip="发送" aria-label="发送"
                       className="w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
                       <ArrowUp size={15} />
                     </button>
@@ -2350,7 +2478,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       {activeWs ? (
       <>
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 shrink-0 select-none">
-        <button onClick={exitToPicker} title="返回工作区选择页"
+        <button onClick={exitToPicker} data-tip="返回工作区选择页" aria-label="返回工作区选择页"
           className="shrink-0 flex items-center gap-1 max-w-[260px] px-1.5 py-0.5 rounded-md text-[11.5px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           <Folder size={12} className="shrink-0 text-[var(--accent)]" />
           <span className="shrink-0 opacity-60">AI教学</span>
@@ -2370,23 +2498,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               非当前会话不需要的入口不渲染；工件分栏 chip 只有存在工件页签时才出现 */}
           <button
             onClick={() => { if (activeId) void openProfile('session'); else showToast({ type: 'warning', message: '本主题画像随对话存放：先选择或新建一个对话' }) }}
-            title="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准"
+            data-tip="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准" aria-label="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准"
             className="relative p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
             <User size={14} />
-            {profPending && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" title="AI 有画像更新建议待确认" />}
+            {profPending && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" data-tip="AI 有画像更新建议待确认" aria-label="AI 有画像更新建议待确认" />}
           </button>
           {/* 工件分栏开关（v3.8.0：工件 = 中栏右侧的独立分栏，与对话并排同屏）——
               有工件页签时才出现；点＝收/放分栏（页签不丢，收起后再点即回），页签数与状态进 title */}
           {artExpanded && (
             <button onClick={() => applyArtOpen(!artOpen)}
-              title={artOpen ? `收起工件分栏（含 ${artTabs.length} 个页签，页签保留，再点即回）` : `展开工件分栏，与对话并排同屏（${artTabs.length} 个页签）`}
+              data-tip={artOpen ? `收起工件分栏（含 ${artTabs.length} 个页签，页签保留，再点即回）` : `展开工件分栏，与对话并排同屏（${artTabs.length} 个页签）`} aria-label={artOpen ? `收起工件分栏（含 ${artTabs.length} 个页签，页签保留，再点即回）` : `展开工件分栏，与对话并排同屏（${artTabs.length} 个页签）`}
               className={`p-1 rounded-md transition-colors ${artOpen ? 'text-[var(--accent)] hover:bg-[var(--bg-hover)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
               <FileText size={14} />
             </button>
           )}
           {/* 右栏展开入口：右栏不可见时顶栏显示，点击展开（v3.8.0 §二改：右栏只剩 素材 / 支线，保持上次分区） */}
           {!srcVisible && (
-            <button onClick={openRail} title="展开右栏（进度 / 素材 / 支线）"
+            <button onClick={openRail} data-tip="展开右栏（进度 / 素材 / 支线）" aria-label="展开右栏（进度 / 素材 / 支线）"
               className="relative p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <PanelRightOpen size={14} />
               {!!courseState?.sourceCounts.total && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
@@ -2400,7 +2528,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             <button
               onClick={() => { setInstrDraft(activeInstr); setInstrOpen(v => !v); if (activeId) void aiTeachReadConstraints(activeId).then(r => { const t = r?.ok && r.relPath ? (r.text ?? '').trim() : ''; setActiveInstr(t); setInstrDraft(t); if (r?.relPath) setInstrRel(r.relPath) }).catch(() => null) }}
               className={`relative p-1 rounded-md transition-colors ${activeInstr ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'} ${instrOpen ? 'bg-[var(--bg-hover)]' : ''}`}
-              title="会话约束：写入本会话文件夹的 CONSTRAINTS.md，AI 每轮发送时重读（编辑器里可直接改）">
+              data-tip="会话约束：写入本会话文件夹的 CONSTRAINTS.md，AI 每轮发送时重读（编辑器里可直接改）" aria-label="会话约束：写入本会话文件夹的 CONSTRAINTS.md，AI 每轮发送时重读（编辑器里可直接改）">
               <PenLine size={14} />
               {activeInstr && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
             </button>
@@ -2429,7 +2557,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   </details>
                   {/* v3.1.2 条目6：本工作区要求入口（三层约束中间档）——仅当会话归属工作区时出现 */}
                   {activeWs && activeWs !== '__none__' && (
-                    <button onClick={() => { setInstrOpen(false); void openWorkspaceConstraints() }} title={`编辑本工作区要求（${wsActive?.name ?? '工作区'}/CONSTRAINTS.md）——本工作区所有会话共同遵循，优先级低于本会话要求、高于全局要求`}
+                    <button onClick={() => { setInstrOpen(false); void openWorkspaceConstraints() }} data-tip={`编辑本工作区要求（${wsActive?.name ?? '工作区'}/CONSTRAINTS.md）——本工作区所有会话共同遵循，优先级低于本会话要求、高于全局要求`} aria-label={`编辑本工作区要求（${wsActive?.name ?? '工作区'}/CONSTRAINTS.md）——本工作区所有会话共同遵循，优先级低于本会话要求、高于全局要求`}
                       className="mt-1.5 flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline transition-colors">
                       🏷️ 本工作区要求（{wsActive?.name ?? '工作区'}）→
                     </button>
@@ -2446,10 +2574,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 />
                 <div className="shrink-0 flex items-center gap-2 px-4 py-3">
                   {instrRel && (
-                    <button onClick={() => { setInstrOpen(false); void openArtFile(instrRel) }} title="在工件栏阅读视图中打开本文件"
+                    <button onClick={() => { setInstrOpen(false); void openArtFile(instrRel) }} data-tip="在工件栏阅读视图中打开本文件" aria-label="在工件栏阅读视图中打开本文件"
                       className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors truncate max-w-[220px]" >📖 在阅读视图中打开 →</button>
                   )}
-                  {instrRel && <span className="truncate text-[10px] text-[var(--text-muted)] flex-1 min-w-0" title={instrRel}>{instrRel}</span>}
+                  {instrRel && <span className="truncate text-[10px] text-[var(--text-muted)] flex-1 min-w-0" data-tip={instrRel} aria-label={instrRel}>{instrRel}</span>}
                   {!instrRel && <span className="flex-1" />}
                   {activeInstr && (
                     <button onClick={() => { setInstrDraft(''); void saveInstr() }}
@@ -2480,7 +2608,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           {/* v3.8.0 §二：工作区 switcher（顶部常驻）——选择页本身不变，这里只是快捷切换 */}
           {activeWs && (
             <div className="relative shrink-0 border-b border-[var(--border-color)]">
-              <button onClick={() => setWsSwitcherOpen(v => !v)} title="切换工作区"
+              <button onClick={() => setWsSwitcherOpen(v => !v)} data-tip="切换工作区" aria-label="切换工作区"
                 className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-[var(--bg-hover)] transition-colors">
                 <Folder size={12} className="shrink-0 text-[var(--accent)]" />
                 <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-[var(--text-primary)]">{wsActive?.name ?? '工作区'}</span>
@@ -2499,7 +2627,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       </button>
                     ))}
                     <div className="border-t border-[var(--border-color)]" />
-                    <button onClick={() => { setWsSwitcherOpen(false); setWsModal({ mode: 'create', value: '' }) }}
+                    <button onClick={() => { setWsSwitcherOpen(false); exitToPicker(); openWsCreate() }}
                       className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors">
                       <Plus size={11} /> 新建工作区
                     </button>
@@ -2515,7 +2643,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           {/* 收藏（顶部细行，v3.6.0）：钉住的活文档随手翻；0 条隐藏、默认收起、非并列分区 */}
           {favorites.length > 0 && (
             <div className="shrink-0 border-b border-[var(--border-color)]">
-              <button onClick={() => setFavOpen((o) => !o)} title="钉住的文档，随手翻"
+              <button onClick={() => setFavOpen((o) => !o)} data-tip="钉住的文档，随手翻" aria-label="钉住的文档，随手翻"
                 className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-[var(--bg-hover)] transition-colors">
                 <Star size={12} className="shrink-0 text-[var(--warning)]" />
                 <span className="text-[11.5px] font-semibold text-[var(--text-secondary)]">收藏</span>
@@ -2528,9 +2656,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   {favorites.map((f) => (
                     <div key={f.rel} className="group flex items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-[var(--bg-hover)]">
                       <FileText size={11} className="shrink-0 text-[var(--text-muted)]" />
-                      <button onClick={() => { void openArtFile(f.rel, { name: f.name }) }} title={f.rel}
+                      <button onClick={() => { void openArtFile(f.rel, { name: f.name }) }} data-tip={f.rel} aria-label={f.rel}
                         className="min-w-0 flex-1 truncate text-left text-[12px] text-[var(--text-primary)]">{f.name.replace(/\.md$/i, '')}</button>
-                      <button onClick={() => { void togglePin(f.rel, f.name) }} title="取消钉选"
+                      <button onClick={() => { void togglePin(f.rel, f.name) }} data-tip="取消钉选" aria-label="取消钉选"
                         className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"><X size={11} /></button>
                     </div>
                   ))}
@@ -2586,7 +2714,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     .finally(() => setTreeRefreshing(false))
                 }}
                 disabled={treeRefreshing}
-                title="刷新资源管理器"
+                data-tip="刷新资源管理器" aria-label="刷新资源管理器"
                 className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
               >
                 <RefreshCw size={12} className={treeRefreshing ? 'animate-spin' : undefined} />
@@ -2635,16 +2763,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
                   <span className="shrink-0 text-[11px] font-medium text-[var(--text-primary)]">{activeChapterObj?.name ?? '本段'}</span>
                   <span className="shrink-0 text-[10px] text-[var(--text-muted)]">第{activeSegment.order}段</span>
-                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={activeSegmentUnitNames.join('、')}>本段 {activeSegmentUnitNames.length} 个知识点 · 当前：{activeSegmentUnitName}</span>
+                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" data-tip={activeSegmentUnitNames.join('、')} aria-label={activeSegmentUnitNames.join('、')}>本段 {activeSegmentUnitNames.length} 个知识点 · 当前：{activeSegmentUnitName}</span>
                   {segmentStatus === 'ended' && <span className="shrink-0 rounded-full border border-[var(--border-color)] px-1.5 py-0.5 text-[9.5px] text-[var(--text-muted)]">已收尾</span>}
                   <div className="shrink-0 flex items-center gap-1">
                     {segmentStatus === 'open' && (
                       <button onClick={() => void courseEndSegment()} disabled={pending}
                         className="rounded-md border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40">收尾本段</button>
                     )}
-                    <button onClick={() => openRequirements('segment')} title="本段要求（CONSTRAINTS.md）"
+                    <button onClick={() => openRequirements('segment')} data-tip="本段要求（CONSTRAINTS.md）" aria-label="本段要求（CONSTRAINTS.md）"
                       className="rounded-md px-1.5 py-0.5 text-[10.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">要求</button>
-                    <button onClick={() => { setRailTab('progress'); openRail() }} title="打开右栏进度"
+                    <button onClick={() => { setRailTab('progress'); openRail() }} data-tip="打开右栏进度" aria-label="打开右栏进度"
                       className="rounded-md px-1.5 py-0.5 text-[10.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">进度</button>
                   </div>
                 </div>
@@ -2661,7 +2789,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <button onClick={courseWriteReview} disabled={pending}
                         className="rounded-md bg-[var(--accent)] px-2 py-0.5 text-[10.5px] text-white disabled:opacity-40">生成复习讲义</button>
                     )}
-                    <button onClick={() => openRequirements('workspace')} title="本课程要求（CONSTRAINTS.md）"
+                    <button onClick={() => openRequirements('workspace')} data-tip="本课程要求（CONSTRAINTS.md）" aria-label="本课程要求（CONSTRAINTS.md）"
                       className="rounded-md px-1.5 py-0.5 text-[10.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">要求</button>
                   </div>
                 </div>
@@ -2669,9 +2797,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               {activeInstr && !instrDismiss && (
                 <div className="shrink-0 flex items-center gap-2 mx-4 mt-2 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)]">
                   <PenLine size={11} className="shrink-0 text-[var(--accent)]" />
-                  <span className="flex-1 min-w-0 truncate" title={activeInstr}><b className="font-medium text-[var(--text-primary)]">本会话要求：</b>{activeInstr}</span>
+                  <span className="flex-1 min-w-0 truncate" data-tip={activeInstr} aria-label={activeInstr}><b className="font-medium text-[var(--text-primary)]">本会话要求：</b>{activeInstr}</span>
                   <button onClick={() => { setInstrOpen(true); setInstrDraft(activeInstr) }} className="shrink-0 text-[var(--accent)] hover:underline">编辑</button>
-                  <button onClick={() => setInstrDismiss(true)} title="隐藏（不删除）" className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X size={11} /></button>
+                  <button onClick={() => setInstrDismiss(true)} data-tip="隐藏（不删除）" aria-label="隐藏（不删除）" className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X size={11} /></button>
                 </div>
               )}
               <div className="relative flex-1 min-h-0">
@@ -2708,7 +2836,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <>
                         <div className="max-w-[86%] min-w-0 select-text bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{m.content}</div>
                         <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制本条消息' })).catch(() => null) }}
-                          title="复制本条消息"
+                          data-tip="复制本条消息" aria-label="复制本条消息"
                           className="absolute right-full top-1/2 -translate-y-1/2 mr-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md whitespace-nowrap text-[11.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-opacity">
                           <Copy size={11} />复制
                         </button>
@@ -2729,7 +2857,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           const hit = courseJumpByName.get(normName(name))
                           return (
                             <button key={k} disabled={!hit}
-                              title={hit ? `打开「${name}」的最近段` : '该知识点还没有可回看的段（先收尾）'}
+                              data-tip={hit ? `打开「${name}」的最近段` : '该知识点还没有可回看的段（先收尾）'} aria-label={hit ? `打开「${name}」的最近段` : '该知识点还没有可回看的段（先收尾）'}
                               onClick={() => { if (hit) courseJump(name) }}
                               className="mr-1.5 mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-[var(--accent)]/50 bg-[var(--accent)]/10 text-[11.5px] text-[var(--accent)] hover:bg-[var(--accent)]/20 disabled:opacity-50 transition-colors">
                               <ArrowRight size={11} />回顾：{name}
@@ -2745,7 +2873,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               const a = s.artifact as NonNullable<typeof s.artifact>
                               const isMind = a.kind === 'mindmap'
                               return (
-                                <button key={k} onClick={() => { void openArtFile(a.rel, { title: a.title, lines: a.lines }) }} title={a.rel}
+                                <button key={k} onClick={() => { void openArtFile(a.rel, { title: a.title, lines: a.lines }) }} data-tip={a.rel} aria-label={a.rel}
                                   className="w-full max-w-[440px] flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[var(--accent)]/50 transition-colors text-left">
                                   {isMind ? <GitBranch size={13} className="shrink-0 text-[var(--accent)]" /> : <ImageIcon size={13} className="shrink-0 text-[var(--accent)]" />}
                                   <span className="min-w-0 flex-1">
@@ -2806,9 +2934,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               <div className="mt-2 flex justify-end gap-2">
                                 {outlineCommitted ? (
                                   <>
-                                    <button type="button" onClick={goCourseRailFirstChapter} title="定位到左栏课程树；不会自动开讲"
+                                    <button type="button" onClick={goCourseRailFirstChapter} data-tip="定位到左栏课程树；不会自动开讲" aria-label="定位到左栏课程树；不会自动开讲"
                                       className="px-3 py-1 rounded-md bg-[var(--accent)] text-white text-[11.5px] hover:bg-[var(--accent-hover)] transition-colors">去左栏开段</button>
-                                    <button type="button" onClick={openCourseOutline} title={`在编辑区打开 ${outlineDone?.rel || '课程.md'}`}
+                                    <button type="button" onClick={openCourseOutline} data-tip={`在编辑区打开 ${outlineDone?.rel || '课程.md'}`} aria-label={`在编辑区打开 ${outlineDone?.rel || '课程.md'}`}
                                       className="px-3 py-1 rounded-md border border-[var(--accent)]/50 text-[var(--accent)] text-[11.5px] hover:bg-[var(--accent)]/10 transition-colors">打开课程</button>
                                   </>
                                 ) : (
@@ -2824,7 +2952,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           {/* A 方案：只有挂着 resumeInfo 的那条中断卡才有「继续」——与通用助手的按钮同源 */}
                           {resumeInfo && m.id && resumeInfo.messageId === m.id && !pending && (
                             <button onClick={() => void resumeRun()}
-                              title={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'}
+                              data-tip={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'} aria-label={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'}
                               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--accent)] bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 transition-colors">
                               <Play size={11} />继续
                             </button>
@@ -2837,7 +2965,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             const al = m.id ? anchorLanes[m.id] : undefined
                             return (
                               <button onClick={() => openCenter(al ? { kind: 'open', laneId: al.laneId } : { kind: 'create', anchorMessageId: m.id ?? '' })}
-                                title={al ? '这条回答已开过支线，点击在右栏重新打开' : '就这条回答的某一点开独立深挖线，不打断主线节奏'}
+                                data-tip={al ? '这条回答已开过支线，点击在右栏重新打开' : '就这条回答的某一点开独立深挖线，不打断主线节奏'} aria-label={al ? '这条回答已开过支线，点击在右栏重新打开' : '就这条回答的某一点开独立深挖线，不打断主线节奏'}
                                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${al ? 'text-[var(--accent)] hover:bg-[var(--bg-hover)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
                                 <GitBranch size={12} />{al ? '支线追问 · 已开' : '就这点追问'}
                               </button>
@@ -2852,7 +2980,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             const on = isPinned(rel)
                             return (
                               <button onClick={() => { void togglePin(rel, rel.split('/').pop() || rel) }}
-                                title={on ? '取消收藏' : '钉到收藏（左栏顶部随手翻）'}
+                                data-tip={on ? '取消收藏' : '钉到收藏（左栏顶部随手翻）'} aria-label={on ? '取消收藏' : '钉到收藏（左栏顶部随手翻）'}
                                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${on ? 'text-[var(--warning)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
                                 <Star size={12} fill={on ? 'currentColor' : 'none'} />
                               </button>
@@ -2922,7 +3050,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   <div className="absolute right-1 top-2 w-3 flex flex-col items-center justify-start gap-1.5 z-10">
                     {anchors.map((a, i) => (
                       <button key={a.idx} onClick={() => jumpToAnchor(a.idx)}
-                        title={a.title}
+                        data-tip={a.title} aria-label={a.title}
                         className={`group relative w-1.5 rounded-full transition-all ${i === activeAnchor ? 'h-3 bg-[var(--accent)]' : 'h-1.5 bg-[var(--border-color)] hover:bg-[var(--text-muted)]'}`}>
                         <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 hidden group-hover:block whitespace-nowrap max-w-[260px] truncate px-1.5 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[10px] text-[var(--text-primary)] shadow z-20">{a.title}</span>
                       </button>
@@ -2933,7 +3061,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     无边框 · 柔和阴影 · 细线 ↓。进场走 .kb-pop（已被统一 reduced-motion 兜底覆盖）；
                     退场不排队动画：滚底后立刻消失才不挡视线。底部 48px 留白见 scrollRef 上的注释。 */}
                 {jumpBottom && (
-                  <button type="button" onClick={jumpToBottom} title="回到底部" aria-label="回到底部"
+                  <button type="button" onClick={jumpToBottom} data-tip="回到底部" aria-label="回到底部"
                     className="kb-pop absolute right-3 bottom-3 z-20 w-9 h-9 rounded-full flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-secondary)] shadow-lg hover:text-[var(--text-primary)] transition-colors">
                     <ArrowDown size={16} strokeWidth={1.75} />
                   </button>
@@ -2945,7 +3073,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               {profQuiet && (
                 <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-1 pt-1.5">
                   <button type="button" onClick={() => setProfExpanded(true)}
-                    title={profThrottle.note || `本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮后恢复提示`}
+                    data-tip={profThrottle.note || `本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮后恢复提示`} aria-label={profThrottle.note || `本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮后恢复提示`}
                     className="kb-pop flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">
                     <User size={11} className="shrink-0" />
                     <span>{profileSuggestion?.mode === 'entries' ? `${profileSuggestion.entries.length} 条画像更新待确认` : '1 条画像更新待确认'}</span>
@@ -2966,7 +3094,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         <>
                           <span className="ml-auto shrink-0 text-[10.5px] text-[var(--text-muted)]">写入到</span>
                           {profLayers.filter((l) => l.enabled).map((l) => (
-                            <button key={l.id} type="button" onClick={() => setProfLayer(l.id)} title={l.title}
+                            <button key={l.id} type="button" onClick={() => setProfLayer(l.id)} data-tip={l.title} aria-label={l.title}
                               className={`shrink-0 px-1.5 py-0.5 rounded-md border text-[11px] transition-colors ${profLayer === l.id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>{l.label}</button>
                           ))}
                         </>
@@ -2987,7 +3115,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               <div key={`${r.field}-${r.op}-${i}`} className="flex items-start gap-2">
                                 <button type="button" disabled={!usable}
                                   onClick={() => setProfRows((rows) => rows.map((x, j) => (j === i ? { ...x, checked: !x.checked } : x)))}
-                                  title={usable ? '勾选后写入' : '上层画像只做追加，不改写已有内容'}
+                                  data-tip={usable ? '勾选后写入' : '上层画像只做追加，不改写已有内容'} aria-label={usable ? '勾选后写入' : '上层画像只做追加，不改写已有内容'}
                                   className={`shrink-0 mt-[2px] w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center transition-colors ${usable ? (r.checked ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'border-[var(--border-color)] hover:border-[var(--accent)]') : 'border-[var(--border-color)] opacity-40 cursor-not-allowed'}`}>
                                   {r.checked && usable && <Check size={10} strokeWidth={3} />}
                                 </button>
@@ -3015,7 +3143,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         <div className="mt-1.5">
                           {/* 条目7 根因2：由 scrollIntoView 改为就地展开；「建议内容全文」这行文案收进 title（铁律 12：只收不删） */}
                           <button type="button" onClick={() => setProfPreviewOpen(v => !v)} aria-expanded={profPreviewOpen}
-                            title={profPreviewOpen ? '收起（建议内容全文）' : '预览（建议内容全文）'}
+                            data-tip={profPreviewOpen ? '收起（建议内容全文）' : '预览（建议内容全文）'} aria-label={profPreviewOpen ? '收起（建议内容全文）' : '预览（建议内容全文）'}
                             className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">{profPreviewOpen ? '收起' : '预览'}</button>
                         </div>
                         {/* 折叠走既有 .kb-collapse（经 Collapsible 封装）——铁律 13 的面板开合令牌，不另造过渡。
@@ -3035,7 +3163,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       </span>
                       <div className="ml-auto flex items-center gap-1.5">
                         <button type="button" onClick={() => muteProfileSuggestion('ignored')}
-                          title={`忽略本条建议：本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮、或 30 分钟后才恢复提示（窗口内可点输入区上方那行小字重新打开）`}
+                          data-tip={`忽略本条建议：本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮、或 30 分钟后才恢复提示（窗口内可点输入区上方那行小字重新打开）`} aria-label={`忽略本条建议：本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮、或 30 分钟后才恢复提示（窗口内可点输入区上方那行小字重新打开）`}
                           className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">忽略</button>
                         <button type="button" onClick={() => { void applyProfileSuggestion() }}
                           disabled={profileSuggestion.mode === 'entries' && profUsableCount === 0}
@@ -3118,11 +3246,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     <div className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3.5 pt-3 pb-2.5">
                       {/* 头行（条目9 双态把手）：展开 = 题干 + ‹k/n› + 收起钮 + ✕；收起 = 细 chip（点击展开，✕ 仍可直接忽略） */}
                       {askCollapsed ? (
-                        <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => setAskCollapsed(false)} title="展开提问卡（Esc 再按 = 忽略）">
+                        <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => setAskCollapsed(false)} data-tip="展开提问卡（Esc 再按 = 忽略）" aria-label="展开提问卡（Esc 再按 = 忽略）">
                           <ChevronDown size={13} className="shrink-0 text-[var(--text-muted)]" />
                           <span className="flex-1 min-w-0 truncate text-[12.5px] text-[var(--text-secondary)]">待回答：{curQ}</span>
                           {exam && <span className="shrink-0 text-[10.5px] text-[var(--text-muted)] tabular-nums">已答 {pickedCount}/{n}</span>}
-                          <button onClick={e => { e.stopPropagation(); setAskDismissed(askPending.id) }} title="关闭提问卡，自由打字回答"
+                          <button onClick={e => { e.stopPropagation(); setAskDismissed(askPending.id) }} data-tip="关闭提问卡，自由打字回答" aria-label="关闭提问卡，自由打字回答"
                             className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"><X size={13} /></button>
                         </div>
                       ) : (
@@ -3137,9 +3265,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                                 className="p-0.5 rounded hover:bg-[var(--bg-hover)] disabled:opacity-30 transition-colors"><ChevronRight size={13} /></button>
                             </div>
                           )}
-                          <button onClick={() => setAskCollapsed(true)} title="收起提问卡（Esc 亦可），点选状态保留"
+                          <button onClick={() => setAskCollapsed(true)} data-tip="收起提问卡（Esc 亦可），点选状态保留" aria-label="收起提问卡（Esc 亦可），点选状态保留"
                             className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"><ChevronDown size={13} /></button>
-                          <button onClick={() => setAskDismissed(askPending.id)} title="关闭提问卡，自由打字回答"
+                          <button onClick={() => setAskDismissed(askPending.id)} data-tip="关闭提问卡，自由打字回答" aria-label="关闭提问卡，自由打字回答"
                             className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"><X size={13} /></button>
                         </div>
                       )}
@@ -3181,7 +3309,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             {customOpen ? (
                               <span className="shrink-0 text-[10px] text-[var(--accent)]">编辑中</span>
                             ) : (
-                              <button onClick={openCustom} disabled={pending} title="修改这条补充回答"
+                              <button onClick={openCustom} disabled={pending} data-tip="修改这条补充回答" aria-label="修改这条补充回答"
                                 className="shrink-0 px-1.5 py-0.5 rounded text-[10.5px] text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-40 transition-colors">编辑</button>
                             )}
                             <ArrowRight size={13} className="text-[var(--accent)] shrink-0" />
@@ -3203,7 +3331,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               placeholder="补充你的回答…（Enter 确认）"
                               data-wb="aiTeachAskCustomInput"
                               className="flex-1 bg-transparent text-[12.5px] text-[var(--text-primary)] outline-none disabled:opacity-50" />
-                            <button onClick={cancelCustom} disabled={pending} title="取消补充（保留原答案）"
+                            <button onClick={cancelCustom} disabled={pending} data-tip="取消补充（保留原答案）" aria-label="取消补充（保留原答案）"
                               className="shrink-0 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40">取消</button>
                             <span className="text-[10px] text-[var(--text-muted)] shrink-0">Enter 确认</span>
                           </div>
@@ -3241,7 +3369,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             submitAskExam()
                           }}
                           disabled={pending || (exam ? !canSubmitExam : !(customOpen && customDraft.trim()))}
-                          title={exam
+                          data-tip={exam
+                            ? (otherDraftPending ? '还有未确认的补充：翻回该题按 Enter 或取消' : `统一发送全部回答（${submitCount}/${n}）`)
+                            : '发送补充回答'} aria-label={exam
                             ? (otherDraftPending ? '还有未确认的补充：翻回该题按 Enter 或取消' : `统一发送全部回答（${submitCount}/${n}）`)
                             : '发送补充回答'}
                           className="ml-auto w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
@@ -3264,11 +3394,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         <div className="flex items-center gap-1.5">
                           <button type="button" onClick={() => setQuotesOpen(o => !o)}
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                            title="点击查看/管理引用片段">
+                            data-tip="点击查看/管理引用片段" aria-label="点击查看/管理引用片段">
                             <Quote size={10} className="text-[var(--accent)]" />
                             <span>{quotes.length} 条对话引用</span>
                           </button>
-                          <button type="button" onClick={() => { quotesRef.current = []; setQuotes([]); setQuotesOpen(false) }} title="移除全部引用"
+                          <button type="button" onClick={() => { quotesRef.current = []; setQuotes([]); setQuotesOpen(false) }} data-tip="移除全部引用" aria-label="移除全部引用"
                             className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
                             <X size={11} />
                           </button>
@@ -3279,7 +3409,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               <div key={`${i}-${q.slice(0, 16)}`} className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)]">
                                 <Quote size={11} className="mt-[3px] shrink-0 text-[var(--accent)]" />
                                 <span className="flex-1 min-w-0 text-[11px] leading-[1.5] text-[var(--text-secondary)] line-clamp-3">【引用 {i + 1}】{q}</span>
-                                <button type="button" onClick={() => setQuotes(prev => { const next = prev.filter((_, j) => j !== i); quotesRef.current = next; return next })} title="移除此引用"
+                                <button type="button" onClick={() => setQuotes(prev => { const next = prev.filter((_, j) => j !== i); quotesRef.current = next; return next })} data-tip="移除此引用" aria-label="移除此引用"
                                   className="shrink-0 p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
                                   <X size={11} />
                                 </button>
@@ -3300,7 +3430,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         <span className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                           <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
                           <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
-                          <button type="button" onClick={() => setPickedSkill(null)} title="移除该 Skill"
+                          <button type="button" onClick={() => setPickedSkill(null)} data-tip="移除该 Skill" aria-label="移除该 Skill"
                             className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
                         </span>
                       </div>
@@ -3399,13 +3529,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           visible={srcVisible} onSnapClose={() => toggleSide('right')} onSnapOpen={() => toggleSide('right')} collapsedWidth={12}>
           <div className="h-full min-h-0 flex flex-col">
             <div className="shrink-0 flex items-center gap-1 border-b border-[var(--border-color)] px-1.5 py-1 bg-[var(--bg-secondary)]">
-              <button onClick={() => setRailTab('progress')} title="课程进度：章 / 段 / 复习" className={railTabCls('progress')}>
+              <button onClick={() => setRailTab('progress')} data-tip="课程进度：章 / 段 / 复习" aria-label="课程进度：章 / 段 / 复习" className={railTabCls('progress')}>
                 <Layers size={11} />进度
               </button>
-              <button onClick={() => setRailTab('sources')} title="素材：本段 / 本章 / 未分配" className={railTabCls('sources')}>
+              <button onClick={() => setRailTab('sources')} data-tip="素材：本段 / 本章 / 未分配" aria-label="素材：本段 / 本章 / 未分配" className={railTabCls('sources')}>
                 <Paperclip size={11} />素材{courseState?.sourceCounts.total ? `（${courseState.sourceCounts.total}）` : ''}
               </button>
-              <button onClick={() => setRailTab('lanes')} title="支线追问" className={railTabCls('lanes')}>
+              <button onClick={() => setRailTab('lanes')} data-tip="支线追问" aria-label="支线追问" className={railTabCls('lanes')}>
                 <GitBranch size={11} />支线{laneInfos.length > 0 ? ` ${laneInfos.length}` : ''}
               </button>
             </div>
@@ -3455,7 +3585,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     <li key={i}>
                       {c.file ? (
                         <button onClick={() => (c.tool === 'visual.html' || c.tool === 'image' ? void openArtFile(String(c.file), { title: c.target }) : window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })))}
-                          title={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : c.tool === 'image' ? '在工件栏查看图片' : '在编辑器中打开'}
+                          data-tip={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : c.tool === 'image' ? '在工件栏查看图片' : '在编辑器中打开'} aria-label={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : c.tool === 'image' ? '在工件栏查看图片' : '在编辑器中打开'}
                           className="w-full flex items-center gap-1 px-2 py-0.5 text-left text-[10.5px] hover:bg-[var(--bg-hover)] transition-colors">
                           <FileText size={9} className="shrink-0 text-[var(--accent)]" />
                           <span className="shrink-0 text-[var(--accent)]">{c.action}</span>
@@ -3478,7 +3608,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 className="px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors text-left">
                 刷新当前会话
               </button>
-              <button onClick={() => toggleSide('right')} title="折叠右栏"
+              <button onClick={() => toggleSide('right')} data-tip="折叠右栏" aria-label="折叠右栏"
                 className="p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                 <PanelRightClose size={12} />
               </button>
@@ -3488,132 +3618,315 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       </div>
       </>
       ) : (
-      /* P5：工作区选择页（进入模块首屏；3-7 未拍板 → 按验收条款每次先见选择页 + 「继续上次工作区」快捷入口） */
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[760px] px-6 py-12">
-          <div className="flex items-center gap-2 text-[var(--text-muted)]">
-            <Sparkles size={16} className="text-[var(--accent)]" />
-            <span className="text-[12px] tracking-wide">AI教学</span>
-          </div>
-          <h1 className="mt-3 text-[22px] font-semibold text-[var(--text-primary)]">选择工作区</h1>
-          {lastWsId && wsList.find(w => w.id === lastWsId) && (
-            <button onClick={() => enterWs(lastWsId)}
-              className="mt-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[12.5px] text-[var(--accent)] hover:bg-[var(--accent)]/20 transition-colors">
-              <ArrowLeft size={12} className="rotate-180" /> 继续上次工作区「{wsList.find(w => w.id === lastWsId)?.name}」
-            </button>
-          )}
-          <div className="mt-6 flex items-center gap-2">
-            <div className="flex-1 relative">
-              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input value={wsSearch} onChange={e => setWsSearch(e.target.value)} placeholder="搜索工作区…"
-                className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+      /* P5：工作区选择页（3.26 改版：左课程清单 + 右预览 = 方案 E；单击选中、双击 / 按钮 / Enter 进入） */
+      <div className="kb-view-in flex-1 min-h-0 overflow-y-auto">
+        <div className="mx-auto flex min-h-full w-full max-w-[1040px] flex-col px-6 pt-7 pb-4">
+          {/* 页头 */}
+          <div className="shrink-0">
+            <div className="flex items-center gap-2 text-[var(--text-muted)]">
+              <Sparkles size={16} className="text-[var(--accent)]" />
+              <span className="text-[12px] tracking-wide">AI 教学</span>
             </div>
-            <button onClick={() => setWsModal({ mode: 'create', value: '' })}
-              className="flex shrink-0 items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12.5px] hover:opacity-90 transition-opacity"><Plus size={12} /><span className="kb-l1">新建工作区</span></button>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            {wsFiltered.map(w => (
-              <div key={w.id} onClick={() => enterWs(w.id)}
-                className="group relative rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 cursor-pointer hover:border-[var(--accent)]/50 transition-colors"
-                title={w.folderRel}>
-                <div className="flex items-center gap-2 min-w-0">
-                  <Folder size={14} className="shrink-0 text-[var(--accent)]" />
-                  <span className="text-[14px] font-medium text-[var(--text-primary)] truncate">{w.name}</span>
-                  {w.id === lastWsId && <span className="ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)]">上次</span>}
-                </div>
-                <div className="mt-2 text-[11.5px] text-[var(--text-muted)]">{w.sessionCount} 个对话 · {w.docCount} 个产物 · 最近活跃 {wsAgo(w.lastActive)}</div>
-                {/* 卡片 hover 操作行：4 个「图标+文字」按钮挤在卡片宽（grid 两列 → 卡片约 200–500px）里。
-                    文字按容器宽度退化（styles/index.css 的 .kb-fit 段）：卡片 <200px 时隐文字只留图标，
-                    避免「改名/画像/要求/删除」被压成竖排。 */}
-                <div className="kb-fit kb-fit-aiws mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                  <button onClick={() => setWsModal({ mode: 'rename', id: w.id, value: w.name })}
-                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><PenLine size={11} /><span className="kb-l1">改名</span></button>
-                  {/* UI 优化条目8.2.2：工作区画像第三层入口（卡片 hover 行） */}
-                  <button onClick={() => { void openProfile('workspace', w.id) }} title={`工作区画像 · ${aiTeachRoot}/${w.folderRel.startsWith(`${aiTeachRoot}/`) ? w.folderRel.slice(aiTeachRoot.length + 1) : w.folderRel}/PROFILE.md（本课程目标/进度，覆盖全局画像）`}
-                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><User size={11} /><span className="kb-l1">画像</span></button>
-                  {/* v3.1.2 条目6：工作区要求入口（卡片 hover 行，与画像并列）——本工作区所有会话共同遵循的 CONSTRAINTS.md */}
-                  <button onClick={() => { void openWorkspaceConstraints(w.id) }} title={`工作区要求 · ${w.folderRel}/CONSTRAINTS.md（本工作区所有会话共同遵循，优先级：本会话要求 > 工作区要求 > 全局要求）`}
-                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ScrollText size={11} /><span className="kb-l1">要求</span></button>
-                  <button onClick={() => void removeWs(w)}
-                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:text-red-400 transition-colors"><Trash2 size={11} /><span className="kb-l1">删除</span></button>
-                </div>
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h1 className="text-[22px] font-semibold text-[var(--text-primary)]">选择工作区</h1>
+              <span className="text-[11px] text-[var(--text-muted)]">{wsList.length} 个工作区</span>
+              <p className="text-[11.5px] text-[var(--text-muted)]">一门课 / 一个主题一个工作区；对话、产物、画像与要求都跟着它走。</p>
+            </div>
+            {lastWsId && wsList.find(w => w.id === lastWsId) && (
+              <button onClick={() => enterWs(lastWsId)}
+                className="mt-3 flex items-center gap-1.5 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-[12px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/20">
+                <ArrowLeft size={12} className="rotate-180" />
+                <span className="opacity-80">继续上次工作区</span>
+                <b className="font-medium">「{wsList.find(w => w.id === lastWsId)?.name}」</b>
+              </button>
+            )}
+            <div className="mt-3 flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                <input value={wsSearch} onChange={e => setWsSearch(e.target.value)} placeholder="搜索工作区（名称 / 目录）…"
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      if (wsSearch) setWsSearch('')
+                      else (e.target as HTMLInputElement).blur()
+                      return
+                    }
+                    if (e.key === 'Enter' && selWsId && !e.nativeEvent.isComposing) { e.preventDefault(); enterWs(selWsId) }
+                  }}
+                  className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] py-1.5 pl-8 pr-8 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                {wsSearch && (
+                  <button onClick={() => setWsSearch('')} data-tip="清空搜索" aria-label="清空搜索"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={11} /></button>
+                )}
               </div>
-            ))}
-            <button onClick={() => setWsModal({ mode: 'create', value: '' })}
-              className="rounded-xl border border-dashed border-[var(--border-color)] p-4 text-left cursor-pointer hover:border-[var(--accent)]/60 transition-colors">
-              <div className="flex items-center gap-2 text-[var(--text-muted)]"><Plus size={14} /><span className="text-[14px] font-medium">新建工作区</span></div>
-              <div className="mt-2 text-[11.5px] text-[var(--text-muted)]">如「数学冲刺」「英语精读」，一个课程/主题一个</div>
-            </button>
-            {wsFiltered.length === 0 && wsSearch.trim() && (
-              <div className="col-span-2 py-6 text-center text-[12px] text-[var(--text-muted)]">没有匹配「{wsSearch.trim()}」的工作区</div>
+              <button onClick={openWsCreate}
+                className="flex shrink-0 items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12.5px] text-white transition-opacity hover:opacity-90">
+                <Plus size={12} /><span className="kb-l1">新建工作区</span>
+              </button>
+            </div>
+            {wsSearch.trim() && (
+              <div className="mt-2 flex items-center gap-1 text-[10.5px] text-[var(--text-muted)]">
+                <Search size={10} />匹配 {wsFiltered.length} 个 · 「{wsSearch.trim()}」
+              </div>
             )}
           </div>
-          {/* UI 优化条目8.2.1 → 10.x 帮助披露改造：说明文字默认收起，悬停卡片平滑展开（同 TaskTray 交换条模式）；ⓘ 提示悬停有说明 */}
-          <div className="group mt-4 flex items-start gap-3 rounded-xl border border-[var(--accent)]/35 bg-[var(--accent)]/6 px-4 py-3.5">
-            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/15 text-[var(--accent)]">
-              <User size={14} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--text-primary)]">
-                学习者画像 · 三层
-                <Info size={12} className="shrink-0 text-[var(--text-disabled)]" />
-              </div>
-              <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
-                <div className="overflow-hidden">
-                  <div className="mt-1 text-[11.5px] text-[var(--text-muted)] leading-relaxed">
-                    <b className="text-[var(--text-secondary)]">全局</b>（跨仓库，你是谁/会什么/偏好） · <b className="text-[var(--text-secondary)]">工作区</b>（本课程目标与进度） · <b className="text-[var(--text-secondary)]">本主题</b>（当前水平）——AI 每轮自动注入，冲突时以更细颗粒层为准。
-                  </div>
+
+          {/* 主从分栏：左列 absolute 填充行高 → 两块永远等高；页面本身不滚，只滚列表 / 预览内部 */}
+          <div className="mt-4 grid min-h-[320px] max-h-[480px] flex-1 grid-cols-[260px_minmax(0,1fr)] gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
+            {/* 左：课程清单 */}
+            <div className="relative min-w-0">
+              <div className="absolute inset-0 flex flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                <div ref={wsListRef} role="listbox" aria-label="工作区列表" tabIndex={0} onKeyDown={onWsListKey}
+                  className="kb-thin-scroll flex-1 min-h-0 overflow-y-auto p-1.5 outline-none">
+                  {wsFiltered.length === 0 ? (
+                    <div className="px-2 py-6 text-center text-[11.5px] text-[var(--text-muted)]">
+                      {wsList.length === 0
+                        ? <>还没有工作区<span className="mt-1 block text-[10.5px]">从下方新建一个开始</span></>
+                        : <>没有匹配「{wsSearch.trim()}」的工作区
+                            <button onClick={() => setWsSearch('')} className="mt-1.5 block w-full rounded-md py-1 text-[10.5px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]">清空搜索</button></>}
+                    </div>
+                  ) : wsFiltered.map(w => {
+                    const on = w.id === selWs?.id
+                    return (
+                      <button key={w.id} role="option" aria-selected={on} data-ws-row={w.id}
+                        onClick={() => setSelWsId(w.id)} onDoubleClick={() => enterWs(w.id)}
+                        className={`relative flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${on ? 'bg-[var(--accent)]/12' : 'hover:bg-[var(--bg-hover)]'} ${w.id === wsNewId ? 'kb-item-in' : ''}`}>
+                        {on && <span className="absolute bottom-1.5 left-0 top-1.5 w-[2px] rounded-full bg-[var(--accent)]" />}
+                        <Folder size={13} className={`mt-0.5 shrink-0 ${on ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[12.5px] font-medium text-[var(--text-primary)]">{w.name}</span>
+                          <span className="mt-0.5 block truncate text-[10.5px] text-[var(--text-muted)]">{w.sessionCount} 对话 · {w.docCount} 产物</span>
+                        </span>
+                        <span className="mt-0.5 shrink-0 text-[10px] text-[var(--text-muted)]">{wsAgo(w.lastActive)}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="shrink-0 border-t border-[var(--border-color)] p-1.5">
+                  {wsCreating ? (
+                    <form onSubmit={e => { e.preventDefault(); void submitWsCreate() }} className="kb-item-in px-0.5 py-0.5">
+                      <input autoFocus value={wsCreateName} maxLength={40}
+                        onChange={e => { setWsCreateName(e.target.value); setWsCreateErr('') }}
+                        placeholder="课程或主题名，如：数学冲刺"
+                        className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                      {wsCreateErr && <div className="mt-1 text-[10.5px] text-red-400">{wsCreateErr}</div>}
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <button type="submit" disabled={wsCreateBusy}
+                          className="rounded-md bg-[var(--accent)] px-2.5 py-1 text-[11px] text-white transition-opacity hover:opacity-90 disabled:opacity-50">创建并进入</button>
+                        <button type="button" onClick={closeWsCreate}
+                          className="rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]">取消</button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button onClick={openWsCreate}
+                      className="flex w-full items-center gap-1.5 rounded-lg border border-dashed border-[var(--border-color)] px-2.5 py-1.5 text-[11.5px] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)]/60 hover:text-[var(--text-primary)]">
+                      <Plus size={12} /><span>新建工作区</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
-            <button onClick={() => { void openProfile('global') }} title={`全局学习者画像 · 编辑区打开 ${aiTeachRoot}/PROFILE.md（跨工作区共享）`}
-              className="shrink-0 self-center flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[var(--accent)]/45 text-[12px] text-[var(--accent)] hover:bg-[var(--accent)]/12 transition-colors">
-              全局画像
-            </button>
+
+            {/* 右：选中课程预览 */}
+            <div className="relative min-w-0 overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              {selWs ? (
+                <div key={selWs.id} className="kb-view-in flex h-full min-h-0 flex-col">
+                  <div className="kb-hide-scrollbar flex-1 min-h-0 overflow-y-auto p-3.5">
+                    {/* 标题 + 目录路径 + 打开 */}
+                    <div className="flex items-start gap-2.5">
+                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/12 text-[var(--accent)]"><Folder size={15} /></span>
+                      <div className="min-w-0 flex-1">
+                        {wsRenaming ? (
+                          <form onSubmit={e => { e.preventDefault(); void submitWsRename() }} className="kb-item-in">
+                            <input autoFocus value={wsRenameName} maxLength={40}
+                              onChange={e => { setWsRenameName(e.target.value); setWsRenameErr('') }}
+                              className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+                            {wsRenameErr && <div className="mt-1 text-[10.5px] text-red-400">{wsRenameErr}</div>}
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <button type="submit" disabled={wsRenameBusy}
+                                className="rounded-md bg-[var(--accent)] px-2.5 py-1 text-[11px] text-white transition-opacity hover:opacity-90 disabled:opacity-50">保存</button>
+                              <button type="button" onClick={closeWsRename}
+                                className="rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]">取消</button>
+                            </div>
+                          </form>
+                        ) : (
+                          <>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <h2 className="min-w-0 truncate text-[15px] font-semibold text-[var(--text-primary)]">{selWs.name}</h2>
+                              {selWs.id === lastWsId && <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">上次活跃</span>}
+                            </div>
+                            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-[10.5px] text-[var(--text-muted)]">{selWs.folderRel}</span>
+                              <button onClick={() => void openWsFolder(selWs)} data-tip="在系统文件管理器中打开该工作区" aria-label="打开工作区文件夹"
+                                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-color)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                                <Folder size={10} />打开
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 统计 */}
+                    <div className="mt-3.5 grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                        <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.sessionCount}</div>
+                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">对话</div>
+                      </div>
+                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                        <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.docCount}</div>
+                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">产物</div>
+                      </div>
+                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                        <div className="text-[13px] font-semibold text-[var(--text-primary)]">{wsAgo(selWs.lastActive)}</div>
+                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">最近活跃</div>
+                      </div>
+                    </div>
+
+                    {/* 课程进度（选中时懒加载一次） */}
+                    <div className="mt-3.5">
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-[var(--text-secondary)]">课程进度</span>
+                        <span className="truncate text-[var(--text-muted)]">
+                          {selWsProgress === null ? '加载中…'
+                            : selWsProgress === 'none' ? '—'
+                            : selWsProgress.total === 0 ? '还没有课程大纲'
+                            : `${selWsProgress.learned} / ${selWsProgress.total} · ${selWsProgress.pct}%`}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--bg-hover)]">
+                        <div className="h-full origin-left rounded-full bg-[var(--accent)] transition-transform duration-300"
+                          style={{ transform: `scaleX(${(selWsProgress && selWsProgress !== 'none' ? selWsProgress.pct : 0) / 100})` }} />
+                      </div>
+                    </div>
+
+                    {/* 最近对话（只读，不直接跳会话） */}
+                    <div className="mt-3.5">
+                      <div className="text-[11px] text-[var(--text-secondary)]">最近对话</div>
+                      <div className="mt-1.5 space-y-1">
+                        {selWs.recentSessions.length === 0 ? (
+                          <div className="text-[11px] text-[var(--text-muted)]">还没有对话，进入后直接开第一段。</div>
+                        ) : selWs.recentSessions.map(s => (
+                          <div key={s.id} className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5">
+                            <MessagesSquare size={11} className="shrink-0 text-[var(--text-muted)]" />
+                            <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{s.title || '未命名对话'}</span>
+                            <span className="shrink-0 text-[10px] text-[var(--text-muted)]">{wsRecentTime(s.updatedAt)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 操作条：永远贴面板底 */}
+                  <div className="flex shrink-0 items-center gap-1 border-t border-[var(--border-color)] px-2.5 py-2">
+                    <button onClick={() => enterWs(selWs.id)}
+                      className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12px] text-white transition-opacity hover:opacity-90">
+                      <ArrowRight size={12} />进入工作区
+                    </button>
+                    <button onClick={() => openWsRename(selWs)} data-tip="重命名工作区（产物文件夹同步改名）" aria-label="重命名工作区"
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                      <PenLine size={11} /><span className="kb-l1">改名</span>
+                    </button>
+                    <button onClick={() => { void openProfile('workspace', selWs.id) }} data-tip={`工作区画像 · ${selWs.folderRel}/PROFILE.md（本课程目标/进度，覆盖全局画像）`} aria-label="编辑工作区画像"
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                      <User size={11} /><span className="kb-l1">画像</span>
+                    </button>
+                    <button onClick={() => { void openWorkspaceConstraints(selWs.id) }} data-tip={`工作区要求 · ${selWs.folderRel}/CONSTRAINTS.md（优先级：本会话要求 > 工作区要求 > 全局要求）`} aria-label="编辑工作区要求"
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                      <ScrollText size={11} /><span className="kb-l1">要求</span>
+                    </button>
+                    <div className="flex-1" />
+                    <button onClick={() => setWsConfirmDel(true)} data-tip="删除工作区（只解除归属，文件夹与对话保留）" aria-label="删除工作区"
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-red-400">
+                      <Trash2 size={11} /><span className="kb-l1">删除</span>
+                    </button>
+                  </div>
+
+                  {/* 行内删除确认：覆盖整个预览面板，默认焦点在「取消」 */}
+                  {wsConfirmDel && (
+                    <div className="kb-view-fade absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg-primary)]/93 p-4">
+                      <div className="w-full max-w-[320px] text-center">
+                        <div className="text-[13px] font-medium text-[var(--text-primary)]">删除工作区「{selWs.name}」？</div>
+                        <div className="mt-2 text-[11.5px] leading-relaxed text-[var(--text-muted)]">只解除归属：{aiTeachRoot} 下的文件夹与其中 {selWs.sessionCount} 个对话都保留在原处，产物文件不删。</div>
+                        <div className="mt-3 flex items-center justify-center gap-2">
+                          <button autoFocus onClick={() => setWsConfirmDel(false)}
+                            className="rounded-md px-3 py-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]">取消</button>
+                          <button onClick={() => void confirmDeleteWs()} disabled={wsDelBusy}
+                            className="rounded-md bg-red-500 px-3 py-1 text-[12px] text-white transition-opacity hover:opacity-90 disabled:opacity-50">删除</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+                  <Folder size={22} className="text-[var(--text-muted)]" />
+                  <div className="text-[12.5px] text-[var(--text-secondary)]">
+                    {wsList.length === 0 ? '还没有工作区' : wsFiltered.length === 0 ? '没有匹配的工作区' : '没有选中的工作区'}
+                  </div>
+                  <button onClick={openWsCreate}
+                    className="mt-1 flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12px] text-white transition-opacity hover:opacity-90">
+                    <Plus size={12} />新建工作区
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-          {/* 全局要求（global-constraints 方案）：跨会话共同遵守的约束，与画像全局层同级同交互；说明文字同款悬停展开 */}
-          <div className="group mt-3 flex items-start gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] px-4 py-3.5">
-            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--bg-hover)] text-[var(--text-secondary)]">
-              <ScrollText size={14} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 text-[13px] font-medium text-[var(--text-primary)]">
-                全局要求 · 所有会话每轮遵循
-                <Info size={12} className="shrink-0 text-[var(--text-disabled)]" />
-              </div>
-              <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
-                <div className="overflow-hidden">
-                  <div className="mt-1 text-[11.5px] text-[var(--text-muted)] leading-relaxed">
-                    写在 <code className="rounded bg-[var(--bg-hover)] px-1">{aiTeachRoot}/CONSTRAINTS.md</code> 的个人通用要求（语言/结构/风格），跨工作区共享；冲突时优先级：用户当下消息 &gt; 会话要求 &gt; 工作区要求 &gt; 全局要求。
+
+          {/* 页尾：画像 / 全局要求（说明默认收起，悬停展开）+ 目录规则 */}
+          <div className="mt-3 grid shrink-0 gap-2 lg:grid-cols-2">
+            <div className="group flex items-start gap-2.5 rounded-xl border border-[var(--accent)]/35 bg-[var(--accent)]/6 px-3 py-2.5">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/15 text-[var(--accent)]">
+                <User size={12} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
+                  学习者画像 · 三层
+                  <Info size={11} className="shrink-0 text-[var(--text-disabled)]" />
+                </div>
+                <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
+                  <div className="overflow-hidden">
+                    <div className="mt-1 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+                      <b className="text-[var(--text-secondary)]">全局</b>（跨仓库，你是谁/会什么/偏好） · <b className="text-[var(--text-secondary)]">工作区</b>（本课程目标与进度） · <b className="text-[var(--text-secondary)]">本主题</b>（当前水平）——AI 每轮自动注入，冲突时以更细颗粒层为准。
+                    </div>
                   </div>
                 </div>
               </div>
+              <button onClick={() => { void openProfile('global') }} data-tip={`全局学习者画像 · 编辑区打开 ${aiTeachRoot}/PROFILE.md（跨工作区共享）`} aria-label="编辑全局学习者画像"
+                className="shrink-0 self-center rounded-lg border border-[var(--accent)]/45 px-2 py-1 text-[11px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/12">
+                全局画像
+              </button>
             </div>
-            <button onClick={() => { void openGlobalConstraints() }} title={`编辑全局要求 · 确保并打开 ${aiTeachRoot}/CONSTRAINTS.md（首次点击按骨架创建）`}
-              className="shrink-0 self-center flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-              编辑全局要求
-            </button>
+            <div className="group flex items-start gap-2.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2.5">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--bg-hover)] text-[var(--text-secondary)]">
+                <ScrollText size={12} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
+                  全局要求 · 所有会话每轮遵循
+                  <Info size={11} className="shrink-0 text-[var(--text-disabled)]" />
+                </div>
+                <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
+                  <div className="overflow-hidden">
+                    <div className="mt-1 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+                      写在 <code className="rounded bg-[var(--bg-hover)] px-1">{aiTeachRoot}/CONSTRAINTS.md</code> 的个人通用要求（语言/结构/风格），跨工作区共享；冲突时优先级：用户当下消息 &gt; 会话要求 &gt; 工作区要求 &gt; 全局要求。
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => { void openGlobalConstraints() }} data-tip={`编辑全局要求 · 确保并打开 ${aiTeachRoot}/CONSTRAINTS.md（首次点击按骨架创建）`} aria-label="编辑全局要求"
+                className="shrink-0 self-center rounded-lg border border-[var(--border-color)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                编辑
+              </button>
+            </div>
           </div>
-          <div className="mt-8 text-[11px] text-[var(--text-muted)] leading-relaxed">
-            对话产物目录：<code className="px-1 rounded bg-[var(--bg-hover)]">{treeBase}/{'{MM-DD 会话标题}'}/</code>；「课程助手」固定为 <code className="px-1 rounded bg-[var(--bg-hover)]">{treeBase}/{'{工作区}/课程助手/output'}/</code>。删除工作区只解除归属，文件夹与对话保留。
-          </div>
+          <details className="mt-2 shrink-0 text-[10.5px] text-[var(--text-muted)]">
+            <summary className="cursor-pointer select-none transition-colors hover:text-[var(--text-secondary)]">对话产物目录规则</summary>
+            <div className="mt-1 leading-relaxed">
+              产物落在 <code className="rounded bg-[var(--bg-hover)] px-1">{`${treeBase}/{MM-DD 会话标题}/`}</code>；「课程助手」固定为 <code className="rounded bg-[var(--bg-hover)] px-1">{`${treeBase}/{工作区}/课程助手/output/`}</code>。删除工作区只解除归属，文件夹与对话保留。
+            </div>
+          </details>
         </div>
-        {wsModal && (
-          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30" onClick={() => setWsModal(null)}>
-            <div className="w-80 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 shadow-xl" onClick={e => e.stopPropagation()}>
-              <div className="mb-2 text-[13px] font-medium text-[var(--text-primary)]">{wsModal.mode === 'create' ? '新建工作区' : '工作区改名'}</div>
-              <input autoFocus value={wsModal.value} maxLength={40} onChange={e => setWsModal({ ...wsModal, value: e.target.value })}
-                placeholder="课程或主题名，如：数学冲刺"
-                className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                onKeyDown={e => { if (e.key === 'Enter') void submitWsModal(); if (e.key === 'Escape') setWsModal(null) }} />
-              <div className="mt-3 flex justify-end gap-2">
-                <button onClick={() => setWsModal(null)} className="rounded-md px-3 py-1 text-[12.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">取消</button>
-                <button onClick={() => void submitWsModal()} className="rounded-md bg-[var(--accent)] px-3 py-1 text-[12.5px] text-white hover:opacity-90">{wsModal.mode === 'create' ? '创建并进入' : '改名'}</button>
-              </div>
-            </div>
-          </div>
-        )}
-        {/* UI 优化条目5.2（A1）：素材表单与画像弹层已上提至根层（文件尾）——原误挂在 picker 分支，工作区视图永远渲染不到 */}
       </div>
       )}
       {/* UI 优化条目8.1/8.2.2 + 条目5.2（A1）：素材表单与画像弹层上提根层（两视图通用）；画像升三层 */}

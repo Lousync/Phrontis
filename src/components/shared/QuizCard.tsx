@@ -206,7 +206,7 @@ export function QuizCard({ quiz, index, onAnswered, redo = false }: Props) {
         {persist && (
           <button
             onClick={toggleFav}
-            title={fav ? '取消收藏' : '收藏此题'}
+            data-tip={fav ? '取消收藏' : '收藏此题'} aria-label={fav ? '取消收藏' : '收藏此题'}
             className={`inline-flex items-center justify-center w-6 h-6 rounded transition-colors ${
               fav ? 'text-[#f5b301]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             }`}

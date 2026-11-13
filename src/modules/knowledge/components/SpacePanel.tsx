@@ -58,7 +58,7 @@ export function SpacePanel({ space, onCollapse, onRename, onMoveOut, extraAction
       <button
         onClick={onCollapse}
         className="p-0.5 rounded hover:bg-[var(--input-bg)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-        title="返回空间列表"
+        data-tip="返回空间列表" aria-label="返回空间列表"
       >
         <ArrowLeft size={18} />
       </button>
@@ -79,7 +79,7 @@ export function SpacePanel({ space, onCollapse, onRename, onMoveOut, extraAction
             <button
               onClick={() => { setName(space.name); setEditing(true) }}
               className="p-0.5 rounded hover:bg-[var(--input-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-              title="重命名空间"
+              data-tip="重命名空间" aria-label="重命名空间"
             >
               <Pencil size={12} />
             </button>

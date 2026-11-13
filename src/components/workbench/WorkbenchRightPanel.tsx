@@ -311,7 +311,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               data-wb-rp-tab={id}
               data-wb-rp-active={effectiveTab === id ? '1' : '0'}
               onClick={() => setPanelTab(id)}
-              title={PANEL_TAB_TITLE[id] ?? id}
+              data-tip={PANEL_TAB_TITLE[id] ?? id} aria-label={PANEL_TAB_TITLE[id] ?? id}
               className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                 effectiveTab === id
                   ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
@@ -328,7 +328,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               data-wb-rp-tab="reading"
               data-wb-rp-active={effectiveTab === 'reading' ? '1' : '0'}
               onClick={() => patch({ rightTab: 'reading', rightCollapsed: false })}
-              title="阅读"
+              data-tip="阅读" aria-label="阅读"
               className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                 effectiveTab === 'reading'
                   ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
@@ -345,7 +345,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               data-wb-rp-tab="account"
               data-wb-rp-active={effectiveTab === 'account' ? '1' : '0'}
               onClick={() => patch({ rightTab: 'account', rightCollapsed: false })}
-              title="记账"
+              data-tip="记账" aria-label="记账"
               className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                 effectiveTab === 'account'
                   ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
@@ -362,7 +362,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               data-wb-rp-tab="schedule"
               data-wb-rp-active={effectiveTab === 'schedule' ? '1' : '0'}
               onClick={() => patch({ rightTab: 'schedule', rightCollapsed: false })}
-              title="日程"
+              data-tip="日程" aria-label="日程"
               className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                 effectiveTab === 'schedule'
                   ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
@@ -379,7 +379,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               data-wb-rp-tab="intel"
               data-wb-rp-active={effectiveTab === 'intel' ? '1' : '0'}
               onClick={() => patch({ rightTab: 'intel', rightCollapsed: false })}
-              title="情报助手（情报模块激活时出现）"
+              data-tip="情报助手（情报模块激活时出现）" aria-label="情报助手（情报模块激活时出现）"
               className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                 effectiveTab === 'intel'
                   ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
@@ -393,7 +393,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
             <button
               ref={ptMoreRef}
               onClick={ptMenu.toggle}
-              title="管理面板 Tab"
+              data-tip="管理面板 Tab" aria-label="管理面板 Tab"
               className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${ptMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
             >
               <MoreHorizontal size={13} />
@@ -443,7 +443,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
                       onDrop={(e) => { e.preventDefault(); handleWidgetDrop(id) }}
                       onClick={() => setActiveWidget(id)}
-                      title={meta.label}
+                      data-tip={meta.label} aria-label={meta.label}
                       className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
                         isActive
                           ? 'bg-[var(--bg-hover)] text-[var(--accent)] shadow-[inset_0_0_0_1px_var(--border-color)]'
@@ -459,7 +459,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                     ref={wsMoreRef}
                     data-wb="wsMore"
                     onClick={wsMenu.toggle}
-                    title="显示的小控件"
+                    data-tip="显示的小控件" aria-label="显示的小控件"
                     className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${wsMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
                   >
                     <MoreHorizontal size={13} />
@@ -479,7 +479,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                     data-wb="detachedStub"
                     onClick={onDockDayPanel}
                     className="m-auto flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                    title="该小组件已脱离为独立桌面窗口，点击收回右栏"
+                    data-tip="该小组件已脱离为独立桌面窗口，点击收回右栏" aria-label="该小组件已脱离为独立桌面窗口，点击收回右栏"
                   >
                     <MonitorX size={16} />
                     <span className="text-[11.5px]">已在桌面</span>
@@ -627,7 +627,7 @@ function RecentEdited({ onOpenFile, onOpenPage, absorbSurplus = false }: { onOpe
             key={p.id}
             onClick={() => (p.path ? onOpenFile(p.path) : onOpenPage(p.id))}
             className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-[5px] text-left transition-colors hover:bg-[var(--bg-hover)]"
-            title={p.path ?? p.title}
+            data-tip={p.path ?? p.title} aria-label={p.path ?? p.title}
           >
             <FileText size={11} className="shrink-0 text-[var(--text-muted)]" />
             <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{p.title || p.path}</span>

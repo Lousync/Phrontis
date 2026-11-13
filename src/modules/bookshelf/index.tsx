@@ -247,7 +247,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   onClick={() => openBook(b)}
                   onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ relPath: b.relPath, x: e.clientX, y: e.clientY }) }}
                   className={`kb-item-in group flex w-[210px] shrink-0 items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 text-left hover:border-[var(--accent)]${delCls(b.relPath)}`}
-                  title={b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`}
+                  data-tip={b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`} aria-label={b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`}
                 >
                   <div className="relative w-[44px] shrink-0" style={{ aspectRatio: '3 / 4' }}>
                     <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={b.displayName} coverRef={b.coverRef} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
@@ -280,7 +280,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                 onClick={() => openBook(b)}
                 onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ relPath: b.relPath, x: e.clientX, y: e.clientY }) }}
                 className={`kb-item-in group text-left${delCls(b.relPath)}`}
-                title={b.relPath}
+                data-tip={b.relPath} aria-label={b.relPath}
               >
                 <div className="relative transition-shadow group-hover:shadow-[0_8px_22px_rgba(0,0,0,0.14)] rounded-[10px]">
                   <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={b.displayName} coverRef={b.coverRef} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />

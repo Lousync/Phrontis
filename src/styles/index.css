@@ -96,6 +96,26 @@
   --kbd-bg: var(--input-bg);
   --kbd-border: var(--border-color);
 
+  /* ===== 悬停提示（Tooltip，2026-11-13）=====
+     形状定稿 = 方案 B「浮起一档 + 9px 微箭头」（先在 tmp/tooltip-proto 对比六种皮肤，
+     用户拍板）。主题包 / 插件**只覆写这组令牌**，组件不认主题 id：
+       --tip-bg / --tip-fg / --tip-border-color / --tip-radius / --tip-shadow
+     两条约束：
+       · --tip-bg 只比 --bg-tertiary 提一档，禁止拿品牌色整块铺（大面积会盖住正文）；
+       · 键帽颜色沿用 --kbd-*（14 套主题的对比度已在 verify-keycap-contrast 里锁过）。 */
+  --tip-bg: var(--bg-tertiary);
+  --tip-fg: var(--text-secondary);
+  --tip-border-color: color-mix(in srgb, var(--border-color) 72%, var(--text-primary) 28%);
+  --tip-radius: 7px;
+  --tip-pad-y: 5px;
+  --tip-pad-x: 9px;
+  --tip-max-width: 320px;
+  --tip-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.28);
+  --tip-arrow: 9px;
+  /* 图案：主题包 / 插件经声明式 tooltip.pattern 注入（只允许渐变，见 lib/tooltipPattern.ts） */
+  --tip-pattern: none;
+  --tip-pattern-size: auto;
+
 }
 
 /* ===== 主题覆写（通过 html.theme-<id> 控制，新增主题只需加一个同名块）===== */
@@ -129,6 +149,9 @@ html.theme-light {
   --drop-border: #0078d4;
 
   --glass-edge: rgba(255, 255, 255, 0.65);
+
+  /* 气泡阴影：浅底上 55% 黑会糊成一圈黑边，单独收轻；深色主题沿用 :root 的默认值 */
+  --tip-shadow: 0 10px 26px -12px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
 /* ===== 昼夜动态主题（html.theme-daycycle，docs/daycycle-theme-plan.md）=====
@@ -209,6 +232,7 @@ html[data-code-tone="light"] {
 /* 昼夜主题日间：代码表面与页面同调（浅绿灰），不额外引入一块中性灰。
    夜间 data-code-tone=dark 时本块失效，回落到 :root 的 #282828 / 深色色板。 */
 html.theme-daycycle:not([data-code-tone="dark"]) {
+  --tip-shadow: 0 10px 26px -12px rgba(31, 42, 34, 0.24), 0 2px 6px rgba(31, 42, 34, 0.07);
   --code-surface: #e9ede6;
   --code-border: #aab8a6;
   --code-fg: #1f2a22;
@@ -226,6 +250,73 @@ html.theme-daycycle:not([data-code-tone="dark"]) {
   color: var(--kbd-fg);
   background: var(--kbd-bg);
   border: 1px solid var(--kbd-border);
+}
+
+/* ===== 悬停提示气泡（.kb-tip）=====
+   触发方式是事件委托（TooltipHost 认 data-tip / data-keys），所以这里只负责皮肤：
+   位置 / 显示时机都在渲染层，CSS 不参与 `:hover` 判定 —— `title` 那种「浏览器自己画」
+   的 1s 延迟与不可键盘触达，正是这次要换掉的。
+   同一套视觉也给 HelpHint 复用（.kb-tip-surface），两处不许各写一份配色。 */
+.kb-tip,
+.kb-tip-surface {
+  box-sizing: border-box;
+  max-width: var(--tip-max-width);
+  padding: var(--tip-pad-y) var(--tip-pad-x);
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+  color: var(--tip-fg);
+  background: var(--tip-bg);
+  background-image: var(--tip-pattern, none);
+  background-size: var(--tip-pattern-size, auto);
+  border: 1px solid var(--tip-border-color);
+  border-radius: var(--tip-radius);
+  box-shadow: var(--tip-shadow);
+}
+
+/* 委托层的实体：固定定位，位置由 placeTooltip() 写 left/top（不用 transform，
+   把 transform 留给进场动画，避免两者互相覆盖）。 */
+.kb-tip {
+  position: fixed;
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: normal;
+  pointer-events: none;
+}
+.kb-tip__label { min-width: 0; }
+.kb-tip__keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+.kb-tip .kb-kbd {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 9.5px;
+  border-radius: 4px;
+}
+/* 箭头：左缘由 --tip-arrow-x 定（气泡被夹回视口后仍指回锚点中心），
+   旋转后的方块只留两条边，避免四边都描一遍。 */
+.kb-tip__arrow {
+  position: absolute;
+  left: var(--tip-arrow-x, 50%);
+  width: var(--tip-arrow);
+  height: var(--tip-arrow);
+  margin-left: calc(var(--tip-arrow) / -2);
+  background: var(--tip-bg);
+  border-right: 1px solid var(--tip-border-color);
+  border-bottom: 1px solid var(--tip-border-color);
+  transform: rotate(45deg);
+}
+.kb-tip[data-place="top"] .kb-tip__arrow { bottom: -5px; }
+.kb-tip[data-place="bottom"] .kb-tip__arrow {
+  top: -5px;
+  transform: rotate(225deg);
 }
 
 /* ===== 主题渐变底（主题包经 --bg-gradient 注入，缺省 none 与纯色零差异）=====
@@ -930,6 +1021,29 @@ input:focus, textarea:focus, select:focus {
      那样上面那批静态锚点会全部失效。 */
 .kb-pop-layer > :first-child { transform-origin: top left; }
 
+/* --- B 悬停提示进场：淡入 + 3px 上浮（方向随翻面反转） ---
+   只动 opacity / transform（铁律 13）。用 data-ready 触发：气泡先隐藏挂载、量完宽高再进场，
+   否则「量尺寸 → 落位」那一帧会先在 (0,0) 闪一下。 */
+@keyframes kb-tip-in-up {
+  from { opacity: 0; transform: translateY(3px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes kb-tip-in-down {
+  from { opacity: 0; transform: translateY(-3px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+.kb-tip[data-ready="1"][data-place="top"] {
+  animation: kb-tip-in-up calc(var(--dur-micro) + 20ms) var(--ease-kb) both;
+  transform-origin: center bottom;
+}
+.kb-tip[data-ready="1"][data-place="bottom"] {
+  animation: kb-tip-in-down calc(var(--dur-micro) + 20ms) var(--ease-kb) both;
+  transform-origin: center top;
+}
+/* HelpHint 走 AnchoredLayer 定位，但进场与全局 Tooltip 同一套（不再用菜单的 kb-pop） */
+.kb-tip-anim[data-place="top"] { animation: kb-tip-in-up calc(var(--dur-micro) + 20ms) var(--ease-kb) both; }
+.kb-tip-anim[data-place="bottom"] { animation: kb-tip-in-down calc(var(--dur-micro) + 20ms) var(--ease-kb) both; }
+
 /* --- B 侧边抽屉：从**右缘整幅滑入** / 反向滑出（书市条目详情抽屉，2026-09-22 补的基建）---
    与 .kb-modal-in 的区别：那是「居中面板缩放进场」，用在贴边、通高的抽屉上会显得面板在
    原地缩放；抽屉的语义是「从边上推出来」，所以只动 translateX（100% → 0，纯合成器动画）。
@@ -1166,6 +1280,7 @@ input:focus, textarea:focus, select:focus {
   .kb-modal-in, .kb-modal-out, .kb-pop, .kb-drawer-in, .kb-drawer-out,
   .kb-toast-in, .kb-toast-out,
   .kb-item-in, .kb-micro-pop, .kb-dock-hint,
+  .kb-tip[data-ready="1"], .kb-tip-anim,
   .kb-wiki-flash,
   .kb-overlay > :first-child, .kb-overlay-out > :first-child,
   .kb-pop-layer > :first-child { animation: none; }
@@ -1747,11 +1862,8 @@ input:focus, textarea:focus, select:focus {
 .kb-fit-aisrc { container-name: kb-aisrc; }
 @container kb-aisrc (max-width: 280px) { .kb-l1 { display: none; } }
 
-/* ---- ④ AI 教学 · 工作区卡片 hover 操作行（改名 / 画像 / 要求 / 删除）----
-   卡片由 `grid grid-cols-2` 均分，宽约 200–500px；4 个按钮需求 ≈ 196px，
-   卡片收到 <200px 时文字会换行成竖排 → 隐文字只留图标。 */
-.kb-fit-aiws { container-name: kb-aiws; }
-@container kb-aiws (max-width: 200px) { .kb-l1 { display: none; } }
+/* ---- ④ AI 教学 · 工作区卡片 hover 操作行 —— 3.26 选择页改为主从布局（左清单 + 右预览），
+   卡片与 hover 操作行已删除，`.kb-fit-aiws` 容器规则随之移除；编号保留不重排。 ---- */
 
 /* ---- ⑤ AI 教学 · 「开始答题（N 题）」行 —— v3.8.0 已随题目视图删除（出题改为落「题目文档」），
    故 `.kb-fit-aiquiz` 容器规则一并移除；其余编号保持不动（多处代码注释按号引用）。 ---- */
@@ -1848,6 +1960,12 @@ input:focus, textarea:focus, select:focus {
 .kb-thin-scroll::-webkit-scrollbar-thumb { border-radius: 2px; background: transparent; }
 .kb-thin-scroll:hover::-webkit-scrollbar-thumb,
 .kb-thin-scroll:focus-within::-webkit-scrollbar-thumb { background: rgba(128, 128, 128, 0.45); }
+
+/* 完全不画滚动条（仍可滚）：AI 教学选择页的预览面板用——面板高度固定、内容可溢出，
+   但操作条永远贴底，不希望右侧多出一条竖线。与 .kb-thin-scroll 的分工：
+   列表「要滚动条但要安静」，预览「不要滚动条」。 */
+.kb-hide-scrollbar { scrollbar-width: none; }
+.kb-hide-scrollbar::-webkit-scrollbar { display: none; }
 
 /* 没有任何可见条目（无页面停靠 / 全关）时不渲染空页面条行（2026-09-19 反馈：不要空的一行） */
 [data-wb='pagebar']:not(:has([data-pb-item])) { display: none; }

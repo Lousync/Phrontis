@@ -95,7 +95,7 @@ function LevelBadge({ level, size = 'sm' }: { level: PluginRiskLevel; size?: 'sm
     <span
       className={`inline-flex items-center gap-1 rounded font-medium shrink-0 ${size === 'lg' ? 'px-2 py-0.5 text-[11px]' : 'px-1.5 py-px text-[10px]'}`}
       style={{ color: meta.color, border: `1px solid ${meta.color}55`, background: `${meta.color}14` }}
-      title={`安全等级 ${level} · ${meta.label}`}
+      data-tip={`安全等级 ${level} · ${meta.label}`} aria-label={`安全等级 ${level} · ${meta.label}`}
     >
       {meta.icon}{meta.label}
     </span>
@@ -469,7 +469,7 @@ export function PluginsModule() {
             {p.engineVersion && (
               <span
                 className="shrink-0 rounded px-1 text-[9.5px] leading-[15px] text-[var(--warning)] bg-[var(--warning)]/10 border border-[var(--warning)]/30"
-                title={`需要应用版本 ${p.engineVersion}`}
+                data-tip={`需要应用版本 ${p.engineVersion}`} aria-label={`需要应用版本 ${p.engineVersion}`}
               >需{p.engineVersion.replace(/^>=/, '≥')}</span>
             )}
           </div>
@@ -670,7 +670,7 @@ export function PluginsModule() {
               onClick={() => handleToggle(p)}
               disabled={busy || p.broken}
               className={`shrink-0 relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${p.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--bg-tertiary)] border border-[var(--border-color)]'}`}
-              title={p.enabled ? '点击禁用' : '点击启用'}
+              data-tip={p.enabled ? '点击禁用' : '点击启用'} aria-label={p.enabled ? '点击禁用' : '点击启用'}
             >
               <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${p.enabled ? 'left-[22px]' : 'left-0.5'}`} />
             </button>
@@ -754,7 +754,7 @@ export function PluginsModule() {
                             <button
                               onClick={() => window.dispatchEvent(new CustomEvent('knowledge:open'))}
                               className="px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] border border-[var(--border-color)] rounded hover:bg-[var(--bg-hover)] transition-colors"
-                              title="打开知识库模块"
+                              data-tip="打开知识库模块" aria-label="打开知识库模块"
                             >
                               去知识库查看
                             </button>
@@ -763,7 +763,7 @@ export function PluginsModule() {
                             onClick={() => setKpConfirm({ overwrite: false })}
                             disabled={st === 'disabled'}
                             className="px-3 py-1.5 text-[11px] font-medium text-white bg-[var(--accent)] rounded hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                            title={st === 'disabled' ? '启用插件后可导入' : undefined}
+                            data-tip={st === 'disabled' ? '启用插件后可导入' : undefined} aria-label={st === 'disabled' ? '启用插件后可导入' : undefined}
                           >
                             {st === 'disabled' ? '已禁用' : st === 'not-imported' ? '导入到知识库' : st === 'update-available' ? '检查更新' : '重新导入'}
                           </button>
@@ -899,11 +899,11 @@ export function PluginsModule() {
             />
           </div>
           {tab === 'market' ? (
-            <button onClick={() => loadMarket(true)} disabled={marketLoading} className="p-2 rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors" title="刷新市场">
+            <button onClick={() => loadMarket(true)} disabled={marketLoading} className="p-2 rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors" data-tip="刷新市场" aria-label="刷新市场">
               <RefreshCw size={12} className={marketLoading ? 'animate-spin' : ''} />
             </button>
           ) : (
-            <button onClick={handleInstallFromFile} disabled={busy} className="p-2 rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors" title="从本地 ZIP 安装">
+            <button onClick={handleInstallFromFile} disabled={busy} className="p-2 rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors" data-tip="从本地 ZIP 安装" aria-label="从本地 ZIP 安装">
               <FolderOpen size={12} />
             </button>
           )}
@@ -1071,7 +1071,7 @@ export function PluginsModule() {
                     }}
                     className="accent-[var(--accent)] shrink-0"
                   />
-                  <span className="text-[12.5px] text-[var(--text-primary)] truncate flex-1 min-w-0" title={c.title}>{c.title}</span>
+                  <span className="text-[12.5px] text-[var(--text-primary)] truncate flex-1 min-w-0" data-tip={c.title} aria-label={c.title}>{c.title}</span>
                   <span className={`shrink-0 text-[10px] px-1.5 py-px rounded ${c.reason === '本地已修改' ? 'bg-[var(--warning)]/10 text-[var(--warning)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>{c.reason}</span>
                 </label>
               ))}

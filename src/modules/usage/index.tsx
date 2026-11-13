@@ -193,14 +193,14 @@ export function UsageModule() {
           <div className="flex rounded-[7px] border border-[var(--border-color)] p-0.5">
             <button
               onClick={() => setChartStyle('bar')}
-              title="柱状"
+              data-tip="柱状" aria-label="柱状"
               className={`rounded-[5px] px-2 py-1 ${chartStyle === 'bar' ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
             >
               <BarChart3 size={14} />
             </button>
             <button
               onClick={() => setChartStyle('line')}
-              title="折线"
+              data-tip="折线" aria-label="折线"
               className={`rounded-[5px] px-2 py-1 ${chartStyle === 'line' ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
             >
               <LineChart size={14} />
@@ -219,7 +219,7 @@ export function UsageModule() {
             <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2.5">
               <div className="rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3.5 py-3">
                 <div className="text-[11.5px] text-[var(--text-muted)]">总消耗 <span className="text-[var(--text-disabled)]">{WIN_LABEL[win]}</span></div>
-                <div className="mt-1 text-[24px] font-semibold tabular-nums text-[var(--text-primary)]" title={exactTokens(totalTok)}>{fmtTokens(totalTok)}</div>
+                <div className="mt-1 text-[24px] font-semibold tabular-nums text-[var(--text-primary)]" data-tip={exactTokens(totalTok)} aria-label={exactTokens(totalTok)}>{fmtTokens(totalTok)}</div>
                 <div className="mt-2 flex h-[7px] overflow-hidden rounded-full bg-[var(--bg-hover)]">
                   {([[t?.i0, 'var(--accent)'], [t?.ir, 'color-mix(in srgb, var(--accent) 62%, var(--bg-hover))'], [t?.iw, 'color-mix(in srgb, var(--accent) 34%, var(--bg-hover))'], [t?.out, 'var(--success)']] as Array<[number | undefined, string]>).map(([v, c], i) => (
                     <div key={i} style={{ width: `${totalTok > 0 ? ((v ?? 0) / totalTok) * 100 : 0}%`, background: c }} />
@@ -228,7 +228,7 @@ export function UsageModule() {
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--text-muted)]">
                   <span>未缓存输入 <b className="tabular-nums text-[var(--text-secondary)]">{fmtTokens(t?.i0 ?? 0)}</b></span>
                   <span>缓存读 <b className="tabular-nums text-[var(--text-secondary)]">{fmtTokens(t?.ir ?? 0)}</b></span>
-                  <span>缓存写 <b className="tabular-nums text-[var(--text-secondary)]" title="上游未上报即为 0">{fmtTokens(t?.iw ?? 0)}</b></span>
+                  <span>缓存写 <b className="tabular-nums text-[var(--text-secondary)]" data-tip="上游未上报即为 0" aria-label="上游未上报即为 0">{fmtTokens(t?.iw ?? 0)}</b></span>
                   <span>输出 <b className="tabular-nums text-[var(--text-secondary)]">{fmtTokens(t?.out ?? 0)}</b></span>
                 </div>
               </div>

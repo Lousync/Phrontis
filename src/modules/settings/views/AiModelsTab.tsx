@@ -358,7 +358,7 @@ function ProviderRow({ p, open, onToggle, onChanged, onSetDefault, onAdopt }: {
         <button
           onClick={e => { e.stopPropagation(); void testActiveAccount() }}
           disabled={busy}
-          title="测试当前账号连通性"
+          data-tip="测试当前账号连通性"
           aria-label="测试当前账号连通性"
           className={`kb-hoveronly ${peek ? 'is-peek' : ''} shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors`}
         >
@@ -658,19 +658,19 @@ function ProviderEditor({ p, onChanged, onSaved, onClose, onAdopt, initialModelL
                   isOn ? 'bg-[var(--accent)]/5' : 'hover:bg-[var(--bg-hover)]'
                 } ${a.enabled ? '' : 'opacity-60'}`}>
                 <button onClick={() => { void acctAction(() => llmSetActiveAccount(p.id, a.id), `已切换到账号「${a.name}」`) }}
-                  title={isOn ? '当前使用中' : '切换到这个账号'} aria-label={`切换到账号 ${a.name}`}
+                  data-tip={isOn ? '当前使用中' : '切换到这个账号'} aria-label={`切换到账号 ${a.name}`}
                   className={`w-3 h-3 rounded-full border shrink-0 transition-colors ${isOn ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--text-disabled)] hover:border-[var(--accent)]'}`} />
                 <span className="text-[12px] text-[var(--text-primary)] truncate">{a.name}</span>
                 {isOn && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">使用中</span>}
                 {a.keyUnreadable
-                  ? <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--danger)]/40 text-[var(--danger)]" title="Key 密文由其他系统加密，本机解不开；重新填写该账号的 API Key 即可恢复">Key 无法解密</span>
+                  ? <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--danger)]/40 text-[var(--danger)]" data-tip="Key 密文由其他系统加密，本机解不开；重新填写该账号的 API Key 即可恢复" aria-label="Key 密文由其他系统加密，本机解不开；重新填写该账号的 API Key 即可恢复">Key 无法解密</span>
                   : a.hasKey || p.type === 'ollama'
                     ? <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-400">{p.type === 'ollama' ? '无需 Key' : '已配置 Key'}</span>
                     : <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-400">无 Key</span>}
                 {!a.enabled && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-disabled)]">已停用</span>}
                 <span className="min-w-0 flex-1 truncate text-right text-[10.5px] text-[var(--text-muted)]">{status}</span>
                 <button onClick={() => { void testAccount(a) }} disabled={acctTesting !== null}
-                  title="测试这个账号" aria-label={`测试账号 ${a.name}`}
+                  data-tip="测试这个账号" aria-label={`测试账号 ${a.name}`}
                   className="kb-hoveronly shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
                   {acctTesting === a.id ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
                 </button>
@@ -729,14 +729,14 @@ function ProviderEditor({ p, onChanged, onSaved, onClose, onAdopt, initialModelL
                 const t = modelTest[m]
                 return (
                   <div key={m} className="kb-hoveronly-host flex items-center gap-2 py-1">
-                    <code className="min-w-0 flex-1 truncate text-[11.5px] font-mono text-[var(--text-secondary)]" title={m}>{m}</code>
+                    <code className="min-w-0 flex-1 truncate text-[11.5px] font-mono text-[var(--text-secondary)]" data-tip={m} aria-label={m}>{m}</code>
                     {t && (
                       <span className={`shrink-0 text-[10.5px] ${t.ok ? 'text-emerald-400' : 'text-red-400'}`}>
                         {t.ok ? `✓ 可用（${t.latencyMs}ms）` : `✗ ${t.error}`}
                       </span>
                     )}
                     <button onClick={() => { void testModelRow(m) }} disabled={modelTesting !== null}
-                      title="测试这个模型" aria-label={`测试模型 ${m}`}
+                      data-tip="测试这个模型" aria-label={`测试模型 ${m}`}
                       className="kb-hoveronly shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
                       {modelTesting === m ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
                     </button>
@@ -880,7 +880,7 @@ function PresetPicker({ onPick, onCcSwitch }: { onPick: (id: string) => void; on
     <div className="mt-3 p-3 grid grid-cols-2 gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] kb-pop">
       {LLM_PRESETS.map(pr => (
         <button key={pr.id} onClick={() => onPick(pr.id)}
-          title={pr.base || '自定义端点：地址与类型自己填'}
+          data-tip={pr.base || '自定义端点：地址与类型自己填'} aria-label={pr.base || '自定义端点：地址与类型自己填'}
           className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] text-left transition-colors">
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: pr.color }} />
           <span className="min-w-0">
@@ -1128,7 +1128,7 @@ function ModelFamilyPanel({ p, onChanged, open, onToggle }: {
           </span>
           {fillable.length > 0 && (
             <button onClick={() => { void fillFromHints() }} disabled={busy}
-              title="按 opencode Go 官方端点表预填：GPT / Grok 使用 Responses，Claude / Qwen / MiniMax 使用 Messages，其余使用对话补全"
+              data-tip="按 opencode Go 官方端点表预填：GPT / Grok 使用 Responses，Claude / Qwen / MiniMax 使用 Messages，其余使用对话补全" aria-label="按 opencode Go 官方端点表预填：GPT / Grok 使用 Responses，Claude / Qwen / MiniMax 使用 Messages，其余使用对话补全"
               className="px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
               {busy ? '处理中…' : `按官方端点表标记（${fillable.length}）`}
             </button>
@@ -1145,9 +1145,9 @@ function ModelFamilyPanel({ p, onChanged, open, onToggle }: {
             const hint = familyHintOf(m)
             return (
               <div key={m} className="flex items-center gap-2 px-2.5 py-1.5 border-b border-[var(--border-color)] last:border-b-0">
-                <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-[var(--text-secondary)]" title={m}>{m}</span>
+                <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-[var(--text-secondary)]" data-tip={m} aria-label={m}>{m}</span>
                 {hint && (
-                  <span className="shrink-0 text-[10px] text-[var(--text-muted)]" title="官方端点表标注的协议">
+                  <span className="shrink-0 text-[10px] text-[var(--text-muted)]" data-tip="官方端点表标注的协议" aria-label="官方端点表标注的协议">
                     官方 {FAMILY_LABEL[hint]}
                   </span>
                 )}
@@ -1354,9 +1354,9 @@ function SceneRow({ sc, providers, freeSet, onToggleFree, visionSpecs }: {
           onlySpecs={sc.visionOnly && visionSpecs.size > 0 ? visionSpecs : undefined}
         />
       </div>
-      {out && <span title={out} className={`shrink-0 max-w-[45%] truncate text-[10.5px] ${out.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{out}</span>}
+      {out && <span data-tip={out} aria-label={out} className={`shrink-0 max-w-[45%] truncate text-[10.5px] ${out.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{out}</span>}
       <button onClick={() => { void testModel() }} disabled={!cur || testing}
-        title="用当前选中的模型发一次最小请求" aria-label={`测试模型 ${sc.label}`}
+        data-tip="用当前选中的模型发一次最小请求" aria-label={`测试模型 ${sc.label}`}
         className="kb-hoveronly shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
         {testing && <Loader2 size={11} className="animate-spin" />} 测试这个模型
       </button>

@@ -190,7 +190,7 @@ export function ShareCardPanel() {
       <div
         ref={boxRef}
         onClick={() => data && setEditorOpen(true)}
-        title={data ? '点击放大编辑文字' : ''}
+        data-tip={data ? '点击放大编辑文字' : ''} aria-label={data ? '点击放大编辑文字' : ''}
         className="group relative mt-2.5 flex h-[404px] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)]"
       >
         {data ? (
@@ -300,7 +300,7 @@ export function ShareCardPanel() {
                   {!t.builtin && (
                     <button
                       onClick={(e) => { e.stopPropagation(); renameTemplate(t.id) }}
-                      title="重命名"
+                      data-tip="重命名" aria-label="重命名"
                       className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <Pencil size={11} />
@@ -308,7 +308,7 @@ export function ShareCardPanel() {
                   )}
                   <button
                     onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id) }}
-                    title={t.builtin ? '删除这个内置模板' : '删除'}
+                    data-tip={t.builtin ? '删除这个内置模板' : '删除'} aria-label={t.builtin ? '删除这个内置模板' : '删除'}
                     className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   >
                     <Trash2 size={11} />

@@ -180,7 +180,7 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
               onDragOver={canDrag ? (e) => handleDragOver(e, it.id) : undefined}
               onDragLeave={canDrag ? handleDragLeave : undefined}
               onDrop={canDrag ? (e) => handleDrop(e, it.id) : undefined}
-              title={tip}
+              data-tip={tip} aria-label={tip}
               className={`kb-edge-tab group flex min-w-[104px] max-w-[360px] cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
                 isDragged ? 'opacity-40' : ''
               } ${
@@ -208,7 +208,8 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
                       ? 'opacity-100 text-[var(--accent)]'
                       : 'opacity-0 text-[var(--text-muted)] group-hover:opacity-100 hover:text-[var(--text-primary)]'
                   }`}
-                  title={it.pinned ? '取消固定' : '固定标签（双击标签也可）'}
+                  data-tip={it.pinned ? '取消固定' : '固定标签（双击标签也可）'}
+                  aria-label={it.pinned ? '取消固定' : '固定标签（双击标签也可）'}
                 >
                   <Pin size={11} className={it.pinned ? 'fill-current' : undefined} />
                 </button>
@@ -219,7 +220,8 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
                 className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
                   isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                 }`}
-                title="关闭（中键点击也可）"
+                data-tip="关闭（中键点击也可）"
+                aria-label="关闭（中键点击也可）"
               >
                 <X size={13} />
               </button>

@@ -153,7 +153,7 @@ export function RemoteSupervise({ onBack }: Props) {
         <button
           onClick={onBack}
           className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title="返回"
+          data-tip="返回" aria-label="返回"
         >
           <ArrowLeft size={12} />
         </button>
@@ -291,7 +291,7 @@ export function RemoteSupervise({ onBack }: Props) {
                     <button
                       onClick={() => { update('quietStart', ''); update('quietEnd', '') }}
                       className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] px-1"
-                      title="清空即关闭免打扰"
+                      data-tip="清空即关闭免打扰" aria-label="清空即关闭免打扰"
                     >
                       清除
                     </button>

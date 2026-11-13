@@ -45,6 +45,7 @@ import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceCon
 import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
 import { readUnitConstraintsForSession } from './aiTeachingScope'
 import { buildScopePrompt } from './scopePrompt'
+import { CONSTRAINT_AUTHORING_PROMPT } from './constraintAuthoring'
 import { buildTeachStyleHint, normalizeTeachStyleMode } from './teachStylePrompt'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
@@ -1287,7 +1288,8 @@ async function runAgentLoop(
     ? '\n\n【示意图工具 visual.html（AI教学）】讲解命中以下四类内容且画图能显著帮助理解时，调用 visual.html 工具生成单文件 HTML 示意图：' +
       '① 抽象概念需具象化 ② 过程/演变有先后 ③ 结构/对比（多对象关系）④ 函数图像/几何图形。纯文字/表格够用的不要画。' +
       '用户明确说「画个示意图/图示一下」时必须调用。若工具列表中没有 visual.html，先用 builtin.tool.request（tools="visual.html"）申请。' +
-      '产物约束：单文件自包含、CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、不超过 150 行。配色对比度：正文与背景 ≥4.5:1（WCAG AA）——深底只配近白文字（#FFFFFF/#E5E7EB），浅底只配深灰/黑文字；禁止同色系深浅叠加（深蓝底配深灰字、白底配浅灰正文这类翻车形态）；强调色 ≤3 种。画幅：SVG 用 viewBox（如 680×400）定比例 + style="width:100%;height:auto" 自适应，禁止外层固定 px 宽度与 min-height/100vh——客户端按栏宽渲染并会自动等比放大到全屏，流式宽度才能铺满。中文标注、示意而非网页（无复杂交互/多页）。' +
+      '产物是「给用户查看、可交互的示意图」，不是网页——不做站点导航/多页结构，但可按讲解需要加入点击、悬停、拖拽、滑杆等轻量交互，让用户自己观察变化。' +
+      '技术约束：单文件自包含、CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）。画幅：SVG 用 viewBox（如 680×400）定比例 + style="width:100%;height:auto" 自适应，禁止外层固定 px 宽度与 min-height/100vh——客户端按栏宽渲染并会自动等比放大到全屏，流式宽度才能铺满。中文标注；画面不必精美，清晰可读优先（文字与背景保持基本对比，别用同色系深浅叠加）。' +
       '文档内禁止写 <meta http-equiv> CSP 与 <base> 标签（宿主统一注入安全策略，自带 CSP 会因策略取交集禁掉脚本）。' +
       'slug 用 kebab-case 小写英文；title 给中文短标题。HTML 全文只作为工具参数传递，**绝不把 HTML 源码写进回答正文或 markdown 代码块**；生成后在回答里用一句话说明右侧工件栏已打开该图。'
     : ''
@@ -1374,6 +1376,7 @@ async function runAgentLoop(
       + '用户要查看 / 重写整篇要求时，用 course.constraints.read 读全文（不在工具列表时一并申请；注入每层只取前 12 条 / 1200 字符，读工具不受限）。'
       + '不要用 vault.write / course.organize.archive 创建要求文档，也不要另起文件名。'
       + '每层注入上限 12 条 / 1200 字符，内容保持精炼；超出部分不会进入 AI 上下文。'
+      + CONSTRAINT_AUTHORING_PROMPT
     : ''
   /**
    * 生图（v3.6.0 对话内生图 `/生图`，docs/ai-image-gen-plan.md §4.5）。

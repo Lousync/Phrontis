@@ -2574,3 +2574,16 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约 `verify-daycycle.mjs` 扩展到 C13，锁整窗层 / 通透表面 / 专注设置 / celAlt。
 
 **验收**：双 tsc 0 错；`verify-daycycle.mjs` 全绿；真机 devbridge 截图验收 05:30 / 12:30 / 18:15 / 21:00 四时段与专注开关。
+
+## 2026-11-13 · 悬停提示（Tooltip）统一换肤（内部记录；按用户要求不写进应用内更新说明）
+
+**现状 / 用户反馈**：所有悬停提示都是浏览器原生 `title` —— 方角、系统字、约 1s 延迟、键盘聚焦不触发；同一句提示有的写成「打开命令面板（Ctrl + Shift + P）」括号串，键位与文案混在一起。全仓 978 处 `title=`（对用户可见约 840 处）。
+
+**改动点**：
+- 新增 `src/lib/tooltip.ts`（纯函数）：定位 / 翻面 / 左右钳制 / 箭头回指锚点、键位解析与 `tipAttrs` 迁移助手。
+- 新增 `src/components/shared/TooltipHost.tsx`：事件委托识别 `data-tip` / `data-keys`，一个宿主全仓共用；120ms 开、离开即收；键盘 `:focus-visible` 零延迟（鼠标点出的焦点不弹，避免点完按钮气泡赖着不走）；滚动 / 切窗 / pointerdown 即关；`role="tooltip"` + 临时 `aria-describedby`。
+- `src/styles/index.css`：新增 `--tip-bg` / `--tip-fg` / `--tip-border-color` / `--tip-radius` / `--tip-pad-*` / `--tip-shadow` / `--tip-arrow` 令牌（全部引用既有色板，插件主题自动跟随），以及 `.kb-tip` / `.kb-tip-surface` / `.kb-tip-anim`；只动 transform / opacity，reduced-motion 统一兜底。
+- `HelpHint` 的 ⓘ 浮层改用同一套皮肤与进场；`AnchoredLayer` 增加 `animClassName`（菜单仍是 `.kb-pop`）。
+- 首批迁移：工作台空态三条指令、编辑器页签条、PDF / EPUB / TXT 阅读器工具条、知识库树头部按钮与截断标签、设置 ⓘ；第二批：左侧活动栏、AI 助手面板（会话列表 / 消息操作 / 引用片段 / 生图卡）、标题栏窗控与状态栏。第三批：设置各页 DOM 按钮、知识库编辑器 / 章节面板 / 错题本 / 图谱视图；第四批：桌面 / 看板 / 回收站；第五批：说说 / 博客 / 书市 / 记账 / 用量 / 工具箱（含密码本、书签导航、番茄钟、习惯打卡、局域网分享等）；随后完成全仓收尾：AI 教学 / AI 助手、日程、情报、插件市场、终端、分享卡、工作台各面板与公共组件。**全仓 DOM 元素已无原生 `title=`**（836 处 data-tip，契约 §4 持续拦截）。图标按钮同步补 `aria-label` —— 原先无障碍名是靠 `title` 兼任的，换掉后必须显式补上。
+
+**验收**：双 tsc 0 错；`npm run build` 通过；`verify-tooltip.mjs` 109/109（含插件图案校验）；工作台空态 / 设置披露 / PDF 三套 / 附件 / 页面条 / 启动页 / 回收站 / 桌面崩溃与拖拽契约通过；`verify-workbench-shell.mjs` 仍有 2 项与本次无关的既有失败（E5d / E6）。剩余组件 props（`ConfirmDialog` / `SettingsGroup` / `SectionHead` / `iframe` 等）不是悬停提示，保持 `title`。

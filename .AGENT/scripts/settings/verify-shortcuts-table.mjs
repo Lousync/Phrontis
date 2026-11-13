@@ -245,8 +245,8 @@ ok(/e\.ctrlKey\s*&&\s*e\.altKey\s*&&\s*!e\.shiftKey\s*&&\s*e\.key\.toLowerCase\(
   'I2 博客大纲改挂 Ctrl+Alt+O（且排除 Shift，避免与 Ctrl+Shift+O 混淆）')
 ok(/Ctrl\+Alt\+O/.test(BLOG), 'I3 本文件的按钮提示已改成 Ctrl+Alt+O')
 const MDED = stripComments(read('src/modules/blog/components/MarkdownEditor.tsx'))
-ok(/title="大纲 \(Ctrl\+Alt\+O\)"/.test(MDED), 'I4 MarkdownEditor 的按钮提示也已同步')
-ok(!/title="大纲 \(Ctrl\+O\)"/.test(BLOG) && !/title="大纲 \(Ctrl\+O\)"/.test(MDED),
+ok(/data-tip="大纲 \(Ctrl\+Alt\+O\)"/.test(MDED), 'I4 MarkdownEditor 的按钮提示也已同步')
+ok(!/data-tip="大纲 \(Ctrl\+O\)"/.test(BLOG) && !/data-tip="大纲 \(Ctrl\+O\)"/.test(MDED),
   'I5 两处旧提示字符串都已不存在（防只改一处）')
 
 // App 那条全局 Ctrl+O 必须**保持不变** —— 本次是给博客让位，不是给全局改键

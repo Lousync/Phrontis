@@ -519,7 +519,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
       {/* 顶栏：刷新（保底）+ 编辑桌面 + 预设 */}
       <div className="desk-bar">
         <div className="desk-bar-right">
-          <button className="desk-tool" onClick={() => data.refresh()} title="重新读取数据">
+          <button className="desk-tool" onClick={() => data.refresh()} data-tip="重新读取数据" aria-label="重新读取数据">
             <RefreshCw size={14} />
           </button>
           <div className="desk-preset-wrap">
@@ -546,7 +546,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
           <button
             className={`desk-tool desk-tool-wide${editing ? ' is-on' : ''}`}
             onClick={() => setEditing((v) => !v)}
-            title="编辑桌面布局（Esc 退出）"
+            data-tip="编辑桌面布局（Esc 退出）" aria-label="编辑桌面布局（Esc 退出）"
           >
             {editing ? <Check size={14} /> : <LayoutGrid size={14} />}
             {editing ? '完成' : '编辑桌面'}
@@ -577,7 +577,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
                 {hits.length === 0 ? (
                   <div className="desk-search-none">{searching ? '搜索中…' : '没有匹配的页面'}</div>
                 ) : hits.map((p) => (
-                  <button key={p.id} className="desk-search-row" onClick={() => openHit(p)} title={p.path ?? p.title}>
+                  <button key={p.id} className="desk-search-row" onClick={() => openHit(p)} data-tip={p.path ?? p.title} aria-label={p.path ?? p.title}>
                     <span className="desk-search-txt">{p.title || '(未命名)'}</span>
                     {p.excerpt !== undefined && p.excerpt !== '' && (
                       <span className="desk-search-exc">{p.excerpt.slice(0, 40)}</span>
@@ -587,7 +587,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
               </div>
             )}
           </div>
-          <button className="desk-newbtn" onClick={onNewPage} title="新建知识页（在编辑器中）">
+          <button className="desk-newbtn" onClick={onNewPage} data-tip="新建知识页（在编辑器中）" aria-label="新建知识页（在编辑器中）">
             <Plus size={15} />新建
           </button>
         </div>
@@ -595,7 +595,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
         {/* 图标快捷行：常驻模块入口（与左侧活动栏同源；桌面形态下不必再回到最左边） */}
         <div className="desk-dock">
           {DESK_MODULES.map((m) => (
-            <button key={m.tab} className="desk-dock-btn" title={m.label} onClick={() => onOpenModule(m.tab)}>
+            <button key={m.tab} className="desk-dock-btn" data-tip={m.label} aria-label={m.label} onClick={() => onOpenModule(m.tab)}>
               {m.icon(18)}
             </button>
           ))}
@@ -634,13 +634,13 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
                 />
                 {editing && (
                   <>
-                    <button className="desk-del" data-desk-del title="移除控件" onClick={() => removeTile(tile.id)}>
+                    <button className="desk-del" data-desk-del data-tip="移除控件" aria-label="移除控件" onClick={() => removeTile(tile.id)}>
                       <X size={11} />
                     </button>
                     <button
                       className="desk-size"
                       data-desk-resize
-                      title="拖动改尺寸（单击按档轮换）"
+                      data-tip="拖动改尺寸（单击按档轮换）" aria-label="拖动改尺寸（单击按档轮换）"
                       onPointerDown={(e) => onSizePointerDown(e, tile)}
                       onPointerMove={onSizePointerMove}
                       onPointerUp={onSizePointerUp}
@@ -709,7 +709,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
                         className="desk-panel-item desk-pick-item"
                         role="button"
                         tabIndex={0}
-                        title={`添加「${t.label}」`}
+                        data-tip={`添加「${t.label}」`} aria-label={`添加「${t.label}」`}
                         onClick={() => addTile(t.key)}
                         onKeyDown={(e) => onPickKey(e, t.key)}
                       >
@@ -738,7 +738,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
                           className="desk-pick-cell"
                           role="button"
                           tabIndex={0}
-                          title={`添加「${t.label}」`}
+                          data-tip={`添加「${t.label}」`} aria-label={`添加「${t.label}」`}
                           onClick={() => addTile(t.key)}
                           onKeyDown={(e) => onPickKey(e, t.key)}
                         >

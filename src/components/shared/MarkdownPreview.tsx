@@ -219,13 +219,13 @@ function CodeBlockCard({ lang, source, streaming, children }: {
       <div className="kb-code-card__acts">
         {!streaming && (
           <button type="button" className="kb-code-card__act" aria-pressed={wrap}
-            title={wrap ? '关闭自动换行' : '自动换行（超长行折到下一行）'}
+            data-tip={wrap ? '关闭自动换行' : '自动换行（超长行折到下一行）'}
             aria-label={wrap ? '关闭代码块自动换行' : '开启代码块自动换行'}
             onClick={() => update('codeBlockWordWrap', !wrap)}>
             <WrapText size={12} /><span>自动换行</span>
           </button>
         )}
-        <button type="button" className="kb-code-card__act" title="复制纯代码（不含围栏与高亮标记）"
+        <button type="button" className="kb-code-card__act" data-tip="复制纯代码（不含围栏与高亮标记）"
           aria-label="复制代码" onClick={onCopy}>
           {copied ? <Check size={12} /> : <Copy size={12} />}
           <span>{copied ? '已复制' : '复制'}</span>
@@ -411,7 +411,7 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
                 })
               }}
               className="absolute top-1.5 right-1.5 p-1 rounded bg-black/55 text-white opacity-0 group-hover/img:opacity-100 hover:bg-black/80 transition-opacity"
-              title="复制图片"
+              data-tip="复制图片" aria-label="复制图片"
             >
               <Copy size={14} />
             </button>
@@ -513,7 +513,7 @@ function VaultRelImg({ rel, alt, ...props }: { rel: string } & React.ImgHTMLAttr
     return (
       <span
         data-wb="mdImgBroken"
-        title={rel}
+        data-tip={rel} aria-label={rel}
         className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded border border-dashed border-[var(--danger)] bg-[var(--bg-secondary)] text-[12px] text-[var(--danger)]"
       >
         <span>图片无法显示</span>
@@ -560,7 +560,7 @@ function FootnoteWord({ word, note }: { word: string; note: string }) {
     <span ref={ref} className="relative inline-block">
       <span
         className="border-b border-dashed border-[var(--accent)] cursor-help hover:bg-[var(--accent)]/10 transition-colors"
-        title="点击查看脚注"
+        data-tip="点击查看脚注" aria-label="点击查看脚注"
         onClick={e => { e.stopPropagation(); setOpen(v => !v) }}
       >
         {word}
@@ -641,7 +641,7 @@ function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string)
                 : 'text-[var(--text-muted)]/70 cursor-pointer hover:text-[var(--accent)] border-b border-dashed border-[var(--text-muted)]/50')
               + (exists && display === highlightWiki ? ' kb-wiki-flash' : '')
             }
-            title={exists ? display : `创建页面「${display}」`}
+            data-tip={exists ? display : `创建页面「${display}」`} aria-label={exists ? display : `创建页面「${display}」`}
             onClick={() => onWikiLink(display)}
           >
             {display}

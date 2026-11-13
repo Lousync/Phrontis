@@ -118,17 +118,17 @@ export function NoteTopBar({
     <div ref={rootRef} data-wb="noteTopBar" className="relative flex h-10 shrink-0 select-none items-center gap-1 px-2">
       {/* 左：页面访问历史（历史栈在模块层，这里只消费 can/on 四件） */}
       <div className="flex items-center gap-0.5">
-        <button data-wb="noteTopBack" onClick={onBack} disabled={!canBack} title="后退 (Alt+←)" className={iconBtn}>
+        <button data-wb="noteTopBack" onClick={onBack} disabled={!canBack} data-tip="后退 (Alt+←)" aria-label="后退 (Alt+←)" className={iconBtn}>
           <ChevronLeft size={17} />
         </button>
-        <button data-wb="noteTopForward" onClick={onForward} disabled={!canForward} title="前进 (Alt+→)" className={iconBtn}>
+        <button data-wb="noteTopForward" onClick={onForward} disabled={!canForward} data-tip="前进 (Alt+→)" aria-label="前进 (Alt+→)" className={iconBtn}>
           <ChevronRight size={17} />
         </button>
       </div>
 
       {/* 中：文件名 + 保存点。绝对居中（两侧宽度变化时不漂）；点击无操作（拍板 B2）→ 整块不吃事件 */}
       <div className="pointer-events-none absolute left-1/2 top-0 flex h-full min-w-0 max-w-[calc(100%-210px)] -translate-x-1/2 items-center gap-2">
-        <span data-wb="noteTopTitle" title={titleHint} className="truncate text-[13.5px] font-medium text-[var(--text-primary)]">
+        <span data-wb="noteTopTitle" data-tip={titleHint} aria-label={titleHint} className="truncate text-[13.5px] font-medium text-[var(--text-primary)]">
           {title}
         </span>
         {subtitle && (
@@ -137,7 +137,7 @@ export function NoteTopBar({
         {showSaveDot && (
           <span
             data-wb="noteSaveDot"
-            title={saving ? '保存中…' : '已保存'}
+            data-tip={saving ? '保存中…' : '已保存'} aria-label={saving ? '保存中…' : '已保存'}
             className={`h-[7px] w-[7px] shrink-0 rounded-full ${saving ? 'animate-pulse bg-[var(--warning)]' : 'bg-[var(--success)]'}`}
           />
         )}
@@ -145,13 +145,13 @@ export function NoteTopBar({
 
       {/* 右：常驻 ✨ / 阅读切换 / ⋮ */}
       <div className="ml-auto flex items-center gap-0.5">
-        {showInline && inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]" title="AI 续写请求中…" />}
+        {showInline && inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]" data-tip="AI 续写请求中…" aria-label="AI 续写请求中…" />}
         {showInline && (
         <button
           data-wb="inlineSuggestBtn"
           {...(inlineOn ? {} : { 'data-wb-inline-off': '1' })}
           onClick={onToggleInline}
-          title={inlineBusy ? 'AI 续写建议：生成中…' : inlineOn ? 'AI 续写建议：已开启 · 点击关闭（单次要一条按 Alt+A）' : 'AI 续写建议：已关闭 · 点击开启'}
+          data-tip={inlineBusy ? 'AI 续写建议：生成中…' : inlineOn ? 'AI 续写建议：已开启 · 点击关闭（单次要一条按 Alt+A）' : 'AI 续写建议：已关闭 · 点击开启'} aria-label={inlineBusy ? 'AI 续写建议：生成中…' : inlineOn ? 'AI 续写建议：已开启 · 点击关闭（单次要一条按 Alt+A）' : 'AI 续写建议：已关闭 · 点击开启'}
           className={`relative rounded p-1.5 transition-colors hover:bg-[var(--bg-hover)] ${inlineStateClass}`}
         >
           <Sparkles size={17} className={inlineBusy ? 'animate-pulse' : ''} />
@@ -174,7 +174,7 @@ export function NoteTopBar({
             按 title 文案找按钮会在改文案时静默假红（2026-10-11 顶栏改版后
             「切换到预览」变成「切换到阅读视图」，两个探针各红了一片）。 */}
         {showViewToggle && (
-          <button data-wb="noteTopViewToggle" data-view={preview ? 'preview' : 'edit'} onClick={onToggleView} title={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到阅读视图 (Ctrl+E / Ctrl+/)'} className={iconBtn}>
+          <button data-wb="noteTopViewToggle" data-view={preview ? 'preview' : 'edit'} onClick={onToggleView} data-tip={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到阅读视图 (Ctrl+E / Ctrl+/)'} aria-label={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到阅读视图 (Ctrl+E / Ctrl+/)'} className={iconBtn}>
             {preview ? <PenLine size={17} /> : <BookOpen size={17} />}
           </button>
         )}
@@ -189,7 +189,7 @@ export function NoteTopBar({
             data-wb="noteTopMore"
             onClick={onToggleMore}
             aria-expanded={moreOpen}
-            title="更多操作"
+            data-tip="更多操作" aria-label="更多操作"
             className={`rounded p-1.5 transition-colors ${moreOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
           >
             <MoreHorizontal size={17} />

@@ -92,7 +92,7 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
   return (
     <div className="relative">
       <button ref={btnRef} onClick={() => { setOpen(v => !v); setQ('') }} aria-expanded={open}
-        title={cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder}
+        data-tip={cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder} aria-label={cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder}
         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-left text-[12px] hover:border-[var(--accent)]/50 transition-colors">
         <span className="min-w-0 flex-1 truncate">
           {cur
@@ -131,7 +131,7 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
                   const isCur = value === spec
                   const free = freeSet.has(m) || /(^|[-._])free([-._]|$)/i.test(m)
                   return (
-                    <div key={spec} title={spec}
+                    <div key={spec} data-tip={spec} aria-label={spec}
                       className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] cursor-pointer transition-colors ${isCur ? 'bg-[var(--accent)]/10' : 'hover:bg-[var(--bg-hover)]'}`}
                       onClick={() => { onChange(spec); setOpen(false) }}>
                       <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{prettyModelName(m)}</span>
@@ -139,7 +139,7 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
                       <FamilyChip family={effectiveFamily(p, m)} />
                       <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)] max-w-[38%] truncate">{m}</span>
                       <button onClick={e => { e.stopPropagation(); onToggleFree(m) }}
-                        title={free ? '取消免费标记' : '标记为免费模型'}
+                        data-tip={free ? '取消免费标记' : '标记为免费模型'} aria-label={free ? '取消免费标记' : '标记为免费模型'}
                         className={`shrink-0 p-0.5 rounded transition-colors ${free ? 'text-amber-400' : 'text-[var(--text-disabled)] hover:text-amber-400'}`}>
                         <Star size={11} className={free ? 'fill-amber-400' : ''} />
                       </button>

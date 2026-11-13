@@ -55,7 +55,7 @@ async function main() {
   await sleep(800)
   await evalJs(`(() => {
     if (document.querySelector('[data-wb="toolsZone"]')) return true
-    const hs = [...document.querySelectorAll('[data-wb="shell"] [title="拖拽或点击展开"]')]
+    const hs = [...document.querySelectorAll('[data-wb="shell"] [data-tip="拖拽或点击展开"]')]
     hs[hs.length - 1]?.click(); return true
   })()`)
   await sleep(900)
@@ -119,7 +119,7 @@ async function main() {
 
   // 4) 右栏现存的按钮与图标清单（核对「中间这个图标」指哪个）
   const buttons = await evalJs(`[...document.querySelectorAll('[data-wb="rightPanel"] button')].map((b) => ({
-    title: b.getAttribute('title') || '', text: (b.textContent || '').trim().slice(0, 12),
+    title: b.getAttribute('data-tip') || '', text: (b.textContent || '').trim().slice(0, 12),
     wb: b.dataset.wb || '', svg: !!b.querySelector('svg'), box: Math.round(b.getBoundingClientRect().width) + 'x' + Math.round(b.getBoundingClientRect().height),
   }))`)
   console.log('=== 右栏现存按钮清单 ===')

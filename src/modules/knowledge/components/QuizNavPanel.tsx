@@ -179,7 +179,7 @@ export function QuizNavPanel() {
                     key={t.id}
                     onClick={() => toggleTag(t.id)}
                     onContextMenu={e => { e.preventDefault(); void removeTag(t.id) }}
-                    title={on ? '取消筛选（右键删除标签）' : '按此标签筛选（右键删除标签）'}
+                    data-tip={on ? '取消筛选（右键删除标签）' : '按此标签筛选（右键删除标签）'} aria-label={on ? '取消筛选（右键删除标签）' : '按此标签筛选（右键删除标签）'}
                     className={`rounded-full border px-1.5 py-0.5 text-[11px] transition-colors ${
                       on ? 'text-white' : 'bg-transparent'
                     }`}
@@ -227,7 +227,7 @@ export function QuizNavPanel() {
               <button
                 onClick={() => void removeCol(c.id)}
                 className="hidden shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--danger)] group-hover:block"
-                title="删除分组"
+                data-tip="删除分组" aria-label="删除分组"
               >
                 <Trash2 size={11} />
               </button>
@@ -242,7 +242,7 @@ export function QuizNavPanel() {
               spellCheck={false}
               className="min-w-0 flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[12px] text-[var(--text-primary)] outline-none transition-colors focus:border-[var(--accent)]"
             />
-            <button onClick={() => void createCol()} className="shrink-0 p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--accent)]" title="新建分组">
+            <button onClick={() => void createCol()} className="shrink-0 p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--accent)]" data-tip="新建分组" aria-label="新建分组">
               <FolderPlus size={14} />
             </button>
           </div>

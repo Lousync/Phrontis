@@ -30,12 +30,21 @@ interface WsMeta {
   lastWorkspaceId: string | null
 }
 
+/** 选择页预览用：最近 2 条对话（只读摘要，不新增读盘——listAgentSessions 已在内存里） */
+export interface WorkspaceRecentSession {
+  id: string
+  title: string
+  updatedAt: string
+}
+
 export interface WorkspaceInfo extends AiWorkspace {
   sessionCount: number
   /** 工作区文件夹内 .md 产物数（不含 CONSTRAINTS/锚点/模板，深度≤2 封顶 500） */
   docCount: number
   folderRel: string
   lastActive: string | null
+  /** 最近活跃的 2 条对话（按 updated_at 倒序；无对话为空数组） */
+  recentSessions: WorkspaceRecentSession[]
 }
 
 const KEY = 'workspaces.json'
@@ -119,12 +128,18 @@ export function listWorkspaces(getSetting: (key: string) => unknown): { workspac
     const folderRel = `${rootDir}/${wsFolderName(w.name)}`
     let lastActive: string | null = null
     for (const s of own) if (!lastActive || s.updated_at > lastActive) lastActive = s.updated_at
+    // 选择页预览的「最近对话」：own 已在内存里，排序取 2 条不产生额外读盘
+    const recentSessions = [...own]
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+      .slice(0, 2)
+      .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updated_at ?? '' }))
     return {
       ...w,
       sessionCount: own.length,
       docCount: vault ? countDocs(join(vault.rootPath, folderRel)) : 0,
       folderRel,
       lastActive,
+      recentSessions,
     }
   })
   const unassignedCount = sessions.filter((s) => !m.sessionWs[s.id]).length

@@ -47,10 +47,10 @@ const JS_TABS = `(() => ({
   bookmarks: [...document.querySelectorAll('[data-wb="bookmarks"] [data-wb-bookmark]')].map((b) => b.dataset.wbBookmark),
   tabbarEmpty: !!document.querySelector('[data-wb="tabbar"]')?.textContent.includes('没有打开的标签页'),
   emptyPage: [...document.querySelectorAll('div')].some((d) => d.textContent?.trim() === '所有标签页已关闭' && d.children.length === 0),
-  closeBtns: document.querySelectorAll('[data-wb="tab"] button[title="关闭标签页"]').length,
+  closeBtns: document.querySelectorAll('[data-wb="tab"] button[data-tip="关闭标签页"]').length,
 }))()`
 const clickBookmark = (key) => evalJs(`(() => { document.querySelector('[data-wb-bookmark="${key}"]')?.click(); return true })()`)
-const clickClose = (key) => evalJs(`(() => { const b=document.querySelector('[data-wb="tab"][data-wb-tab="${key}"] button[title="关闭标签页"]'); b?.click(); return !!b })()`)
+const clickClose = (key) => evalJs(`(() => { const b=document.querySelector('[data-wb="tab"][data-wb-tab="${key}"] button[data-tip="关闭标签页"]'); b?.click(); return !!b })()`)
 
 async function main() {
   const page = await waitPage()
@@ -122,13 +122,13 @@ async function main() {
   ok(fwTabbarGone, 'D6c 整窗形态下标签条隐藏')
   // D6e 整窗形态下左右栏**连折叠边条一并退场**（2026-09-17 bug 修复轮）：
   // 「拖拽或点击展开」边缘条 = ResizablePanel 折叠残留物，suppressSides 下不得存在
-  const fwEdgeGone = await evalJs(`!document.querySelector('[data-wb="shell"] [title="拖拽或点击展开"]')`)
+  const fwEdgeGone = await evalJs(`!document.querySelector('[data-wb="shell"] [data-tip="拖拽或点击展开"]')`)
   ok(fwEdgeGone, 'D6e 整窗形态无残留折叠边条（标签条旁的「手柄」已清除）')
   // D6d 图标条顶部「工作台」按钮 → 回到工作台（schedule 标签恢复显示）
   //（2026-09-17 bug 修复轮：右上角浮动「返回工作台」钮删除，入口收敛到 ActivityBar 顶部）
-  const wbBtnThere = await evalJs(`!!document.querySelector('button[title="工作台"]')`)
+  const wbBtnThere = await evalJs(`!!document.querySelector('button[data-tip="工作台"]')`)
   ok(wbBtnThere, 'D6d-0 整窗态下图标条顶部有「工作台」按钮')
-  await evalJs(`(() => { document.querySelector('button[title="工作台"]')?.click(); return true })()`)
+  await evalJs(`(() => { document.querySelector('button[data-tip="工作台"]')?.click(); return true })()`)
   await sleep(700)
   st = await evalJs(JS_TABS)
   ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule' && st.tabs[0]?.active === '1',
@@ -173,7 +173,7 @@ async function main() {
   // 入口区在右栏内 → 先确保右栏展开（布局键刚被清空，rightCollapsed 必为默认收起）
   await evalJs(`(() => {
     if (document.querySelector('[data-wb="toolsZone"]')) return true
-    const hs = [...document.querySelectorAll('[data-wb="shell"] [title="拖拽或点击展开"]')]
+    const hs = [...document.querySelectorAll('[data-wb="shell"] [data-tip="拖拽或点击展开"]')]
     hs[hs.length - 1]?.click(); return true
   })()`)
   await sleep(800)
@@ -195,7 +195,7 @@ async function main() {
   await evalJs(`(() => {
     const tabs = [...document.querySelectorAll('[data-wb="tabbar"] [data-wb-tab]')]
     const t = tabs.find((x) => x.dataset.wbTab === 'tool:pdf-toolkit')
-    t?.querySelector('button[title="关闭标签页"]')?.click(); return true
+    t?.querySelector('button[data-tip="关闭标签页"]')?.click(); return true
   })()`)
   await sleep(700)
   const afterClose = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
@@ -217,7 +217,7 @@ async function main() {
   await sleep(300)
   const bar = await evalJs(`(() => {
     const btns = [...document.querySelectorAll('[data-wb="wsBtn"]')]
-    return { n: btns.length, labels: btns.map((b) => b.getAttribute('title')), hasMore: !!document.querySelector('[data-wb="wsMore"]') }
+    return { n: btns.length, labels: btns.map((b) => b.getAttribute('data-tip')), hasMore: !!document.querySelector('[data-wb="wsMore"]') }
   })()`)
   ok(bar.n === 1 && bar.labels[0] === '番茄钟' && bar.hasMore, 'D11b 切换条 = 番茄钟一个图标 + ⋯（形态保留、内容收窄）', JSON.stringify(bar))
   const firstActive = await evalJs(`document.querySelector('[data-wb="wsBtn"][data-ws-widget="pomo"]')?.className.includes('bg-[var(--bg-hover)]') ?? false`)

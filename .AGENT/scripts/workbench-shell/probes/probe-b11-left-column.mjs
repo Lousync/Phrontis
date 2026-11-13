@@ -233,11 +233,11 @@ async function main() {
   await evalJs(`(() => { document.querySelector('[data-wb-bookmark="bookshelf"]')?.click(); return true })()`)
   await sleep(1500)
   const picked = await evalJs(`(() => {
-    const cards = [...document.querySelectorAll('main button')].filter(b => (b.getAttribute('title') || '').toLowerCase().endsWith('.pdf'))
-    const card = cards.find(b => /Reader Sample|样书|Sample/i.test(b.getAttribute('title') || '')) || cards[0]
-    if (!card) return { ok: false, titles: [...document.querySelectorAll('main button')].map(b => b.getAttribute('title')).filter(Boolean).slice(0, 8) }
+    const cards = [...document.querySelectorAll('main button')].filter(b => (b.getAttribute('data-tip') || '').toLowerCase().endsWith('.pdf'))
+    const card = cards.find(b => /Reader Sample|样书|Sample/i.test(b.getAttribute('data-tip') || '')) || cards[0]
+    if (!card) return { ok: false, titles: [...document.querySelectorAll('main button')].map(b => b.getAttribute('data-tip')).filter(Boolean).slice(0, 8) }
     card.click()
-    return { ok: true, title: card.getAttribute('title') }
+    return { ok: true, title: card.getAttribute('data-tip') }
   })()`)
   console.log('[打开样书]', JSON.stringify(picked))
   if (!picked?.ok) { console.error('没找到 PDF 卡片'); process.exit(3) }

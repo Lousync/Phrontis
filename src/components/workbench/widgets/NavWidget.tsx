@@ -109,7 +109,7 @@ export function NavWidget({ onManage, favoritesOnly = false }: Props) {
               key={b.id}
               onClick={() => void open(b)}
               className="flex min-w-0 items-center gap-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5 text-left transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]"
-              title={`${b.title}${b.description ? `\n${b.description}` : ''}`}
+              data-tip={`${b.title}${b.description ? `\n${b.description}` : ''}`} aria-label={`${b.title}${b.description ? `\n${b.description}` : ''}`}
             >
               <span
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold text-white"
@@ -137,7 +137,7 @@ export function NavWidget({ onManage, favoritesOnly = false }: Props) {
         <button
           onClick={onManage}
           className="mx-auto flex items-center gap-1 rounded-lg border border-dashed border-[var(--border-color)] px-3.5 py-1 text-[11px] text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-          title="打开网址导航工具添加 / 编辑"
+          data-tip="打开网址导航工具添加 / 编辑" aria-label="打开网址导航工具添加 / 编辑"
         >
           <ExternalLink size={10} /> 管理书签
         </button>

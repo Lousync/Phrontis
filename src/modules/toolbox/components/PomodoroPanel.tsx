@@ -277,7 +277,7 @@ export function PomodoroPanel() {
           type="button"
           onClick={pom.collapse}
           className="grid h-7 w-7 place-items-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          title="返回工作台（计时继续）"
+          data-tip="返回工作台（计时继续）" aria-label="返回工作台（计时继续）"
         >
           <ArrowLeft size={14} />
         </button>
@@ -934,7 +934,7 @@ function WeekChart({ days }: { days: ReturnType<typeof computePomodoroStats>['da
       {days.map((d) => {
         const isToday = new Date().toDateString() === d.date.toDateString()
         return (
-          <div key={d.key} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1" title={`${d.date.getMonth() + 1}月${d.date.getDate()}日 · ${Math.round(d.minutes)} 分钟`}>
+          <div key={d.key} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-1" data-tip={`${d.date.getMonth() + 1}月${d.date.getDate()}日 · ${Math.round(d.minutes)} 分钟`} aria-label={`${d.date.getMonth() + 1}月${d.date.getDate()}日 · ${Math.round(d.minutes)} 分钟`}>
             <div className="h-[10px] text-[8px] text-[var(--text-muted)]">{d.minutes ? Math.round(d.minutes) : ''}</div>
             <div className="flex w-full max-w-[38px] flex-1 items-end justify-center">
               {d.minutes > 0 ? (
@@ -967,7 +967,7 @@ function TodayChart({ hourMinutes }: { hourMinutes: number[] }) {
         {hourMinutes.map((m, h) => (
           <span
             key={h}
-            title={`${String(h).padStart(2, '0')}:00 · ${Math.round(m)} 分钟`}
+            data-tip={`${String(h).padStart(2, '0')}:00 · ${Math.round(m)} 分钟`} aria-label={`${String(h).padStart(2, '0')}:00 · ${Math.round(m)} 分钟`}
             className={`flex-1 rounded-t-[2px] ${m ? 'bg-[var(--accent)] opacity-90' : 'bg-[var(--bg-tertiary)] opacity-60'}`}
             style={{ height: m ? `${Math.max(3, (m / max) * 100)}%` : '2px' }}
           />
@@ -1006,7 +1006,7 @@ function MonthChart({ stats }: { stats: ReturnType<typeof computePomodoroStats> 
               ) : (
                 <span
                   key={ri}
-                  title={`${cell.key} · ${Math.round(cell.minutes)} 分钟`}
+                  data-tip={`${cell.key} · ${Math.round(cell.minutes)} 分钟`} aria-label={`${cell.key} · ${Math.round(cell.minutes)} 分钟`}
                   className={`h-5 w-5 rounded-[4px] border transition-transform hover:scale-110 ${levelClass(cell.level)} ${cell.isToday ? 'ring-2 ring-[var(--accent)]' : ''}`}
                 />
               ))}

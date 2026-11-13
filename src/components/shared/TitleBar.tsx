@@ -165,7 +165,7 @@ export function TitleBar() {
         {isDevSession && (
           <button
             onClick={() => { if (freshUserArm) { setFreshUserArm(false); void simulateFirstRun() } else { setFreshUserArm(true); setTimeout(() => setFreshUserArm(false), 3000) } }}
-            title={freshUserArm ? '再点一次确认：退出当前仓库并重载（进入选择仓库阶段，数据不受影响）' : '模拟新用户第一次进入（退出当前仓库 → 选择仓库阶段，dev 专属）'}
+            data-tip={freshUserArm ? '再点一次确认：退出当前仓库并重载（进入选择仓库阶段，数据不受影响）' : '模拟新用户第一次进入（退出当前仓库 → 选择仓库阶段，dev 专属）'} aria-label={freshUserArm ? '再点一次确认：退出当前仓库并重载（进入选择仓库阶段，数据不受影响）' : '模拟新用户第一次进入（退出当前仓库 → 选择仓库阶段，dev 专属）'}
             className={`ml-2.5 flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded border select-none transition-colors ${freshUserArm ? 'bg-amber-500/25 text-amber-500 border-amber-500/60' : 'bg-amber-500/10 text-amber-500/70 border-amber-500/30 hover:text-amber-500 hover:bg-amber-500/20'}`}>
             <UserPlus size={10} />
             {freshUserArm ? '确认重置?' : '模拟新用户'}
@@ -176,7 +176,7 @@ export function TitleBar() {
         {isDevSession && (
           <button
             onClick={cycleStartScreen}
-            title="预览开始界面（dev 专属）：每点一次切换下一个——无仓库首启选择 / 每次启动选择，第三下关闭"
+            data-tip="预览开始界面（dev 专属）：每点一次切换下一个——无仓库首启选择 / 每次启动选择，第三下关闭" aria-label="预览开始界面（dev 专属）：每点一次切换下一个——无仓库首启选择 / 每次启动选择，第三下关闭"
             className={`ml-1.5 flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded border select-none transition-colors ${startScreenIdx >= 0 ? 'bg-sky-500/25 text-sky-400 border-sky-500/60' : 'bg-sky-500/10 text-sky-400/70 border-sky-500/30 hover:text-sky-400 hover:bg-sky-500/20'}`}>
             <MonitorPlay size={10} />
             {startScreenIdx < 0 ? '开始界面' : `${startScreenIdx + 1}/${START_SCREENS.length}`}
@@ -208,7 +208,7 @@ export function TitleBar() {
                       ? <AlertTriangle size={13} strokeWidth={2} className="text-[var(--danger)]" />
                       : <ArrowDownToLine size={14} strokeWidth={2} className="text-[var(--accent)]" />}
               {upd.phase === 'available' && (
-                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[var(--warning)] animate-pulse" title="" />
+                <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[var(--warning)] animate-pulse" data-tip="" aria-label="" />
               )}
             </WinBtn>
 
@@ -221,7 +221,7 @@ export function TitleBar() {
                         <ArrowDownToLine size={13} className="text-[var(--accent)]" />
                         <span className="text-[13px] font-medium text-[var(--text-primary)]">发现新版本 v{upd.check.latestVersion}</span>
                         <button onClick={() => { void openExternal(upd.check!.releaseUrl).catch(() => {}) }}
-                          className="ml-auto text-[var(--text-muted)] hover:text-[var(--accent)]" title="在浏览器打开发布页">
+                          className="ml-auto text-[var(--text-muted)] hover:text-[var(--accent)]" data-tip="在浏览器打开发布页" aria-label="在浏览器打开发布页">
                           <ExternalLink size={12} />
                         </button>
                       </div>
@@ -347,7 +347,7 @@ function WinBtn({ children, onClick, title, className = '' }: {
   children: React.ReactNode; onClick: () => void; title?: string; className?: string
 }) {
   return (
-    <button onClick={onClick} title={title}
+    <button onClick={onClick} data-tip={title} aria-label={title}
       className={`relative flex items-center justify-center h-full transition-colors duration-100 text-[var(--text-primary)] hover:bg-[var(--bg-hover)] ${className || 'w-11'}`}>
       {children}
     </button>
@@ -359,7 +359,7 @@ function TrafficLight({ color, title, onClick, children }: {
   color: string; title?: string; onClick: () => void; children?: React.ReactNode
 }) {
   return (
-    <button onClick={onClick} title={title}
+    <button onClick={onClick} data-tip={title} aria-label={title}
       className="flex items-center justify-center w-5 h-5 transition-[filter] duration-100 hover:brightness-90">
       <span className="flex items-center justify-center w-4 h-4 rounded-full text-black/60 leading-none"
         style={{ backgroundColor: color }}>

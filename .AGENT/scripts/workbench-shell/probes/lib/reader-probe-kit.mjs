@@ -331,14 +331,14 @@ export async function connect(o = {}) {
   async function openBook(name) {
     const clicked = await evalJs(`(() => {
       const re = new RegExp(${JSON.stringify(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))} + '$')
-      const b = [...document.querySelectorAll('main button[title]')].find((x) => re.test(x.getAttribute('title') || ''))
+      const b = [...document.querySelectorAll('main button[data-tip]')].find((x) => re.test(x.getAttribute('data-tip') || ''))
       if (!b) return 'no-card'
       b.scrollIntoView({ block: 'center' })
       b.click()
       return 'ok'
     })()`)
     if (clicked !== 'ok') {
-      const diag = await evalJs(`[...document.querySelectorAll('main button[title]')].map((b) => b.getAttribute('title')).slice(0, 20)`)
+      const diag = await evalJs(`[...document.querySelectorAll('main button[data-tip]')].map((b) => b.getAttribute('data-tip')).slice(0, 20)`)
       console.error('书架卡片清单:', JSON.stringify(diag))
       return false
     }

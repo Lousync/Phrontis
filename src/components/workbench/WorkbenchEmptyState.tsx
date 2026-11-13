@@ -66,7 +66,8 @@ export function WorkbenchEmptyState({ hints }: Props) {
             key={h.id}
             data-wb-hint={h.id}
             onClick={h.run}
-            title={`${h.label}（${h.keys.join(' + ')}）`}
+            data-tip={h.label} aria-label={h.label}
+            data-keys={h.keys.join(',')}
             style={{ animationDelay: `${i * 70}ms` }}
             className="kb-item-in flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-[var(--text-primary)] transition-colors hover:bg-[var(--accent)]/10"
           >

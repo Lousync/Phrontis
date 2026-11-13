@@ -55,7 +55,7 @@ export function ToolEvent({
     <div className={`kb-ev kb-ev-tool kb-item-in${state === 'running' ? ' is-running' : ''}${state === 'fail' ? ' is-fail' : ''}`}>
       <ToolIcon name={name} />
       <span className="kb-ev-tool__label">{label}</span>
-      {target && <code className="kb-ev-tool__target" title={target}>{target}</code>}
+      {target && <code className="kb-ev-tool__target" data-tip={target} aria-label={target}>{target}</code>}
       {dur && <span className="kb-ev-tool__dur">· {dur}</span>}
     </div>
   )

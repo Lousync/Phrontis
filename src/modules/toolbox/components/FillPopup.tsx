@@ -136,14 +136,14 @@ export function FillPopup() {
         <div className="flex items-center gap-0.5" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <button
             onClick={togglePin}
-            title={pinned ? '已置顶（点击取消置顶）' : '未置顶（点击置顶）'}
+            data-tip={pinned ? '已置顶（点击取消置顶）' : '未置顶（点击置顶）'} aria-label={pinned ? '已置顶（点击取消置顶）' : '未置顶（点击置顶）'}
             className={`p-0.5 rounded transition-colors ${pinned ? 'text-[var(--accent)] hover:bg-[var(--bg-hover)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
           >
             {pinned ? <Pin size={13} /> : <PinOff size={13} />}
           </button>
           <button
             onClick={openNew}
-            title="新增密码条目"
+            data-tip="新增密码条目" aria-label="新增密码条目"
             className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           >
             <Plus size={14} />
@@ -168,7 +168,7 @@ export function FillPopup() {
       {showNew ? (
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <div className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
-            <button onClick={closeNew} className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]" title="返回列表"><ArrowLeft size={13} /></button>
+            <button onClick={closeNew} className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]" data-tip="返回列表" aria-label="返回列表"><ArrowLeft size={13} /></button>
             新增密码条目
           </div>
           <div>
@@ -197,7 +197,7 @@ export function FillPopup() {
             <div className="flex items-center gap-1">
               <input value={fPassword} onChange={e => setFPassword(e.target.value)} type={fShowPwd ? 'text' : 'password'} placeholder="留空则稍后补填"
                 className={`${inputCls} font-mono`} style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} />
-              <button type="button" onClick={() => setFShowPwd(v => !v)} title={fShowPwd ? '隐藏' : '显示'}
+              <button type="button" onClick={() => setFShowPwd(v => !v)} data-tip={fShowPwd ? '隐藏' : '显示'} aria-label={fShowPwd ? '隐藏' : '显示'}
                 className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] shrink-0">
                 {fShowPwd ? <EyeOff size={12} /> : <Eye size={12} />}
               </button>

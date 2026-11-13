@@ -187,7 +187,7 @@ export function TaskWidget({ onOpenSchedule }: Props) {
       <div key={t.id}>
         <div className="group flex items-center gap-1.5 rounded-md px-1.5 py-1.5 hover:bg-[var(--bg-hover)]">
           {hasChevron ? (
-            <button onClick={() => void toggleExpand(t.id)} className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]" title="展开/收起子任务">
+            <button onClick={() => void toggleExpand(t.id)} className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]" data-tip="展开/收起子任务" aria-label="展开/收起子任务">
               {expanded.has(t.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             </button>
           ) : (
@@ -198,24 +198,24 @@ export function TaskWidget({ onOpenSchedule }: Props) {
             className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors ${
               done ? 'border-[var(--success)] bg-[var(--success)] text-white' : 'border-[var(--border-color)] hover:border-[var(--text-secondary)]'
             }`}
-            title={done ? '标记未完成' : '标记完成'}
+            data-tip={done ? '标记未完成' : '标记完成'} aria-label={done ? '标记未完成' : '标记完成'}
           >
             {done && <Check size={10} strokeWidth={3} />}
           </button>
           <span className={`flex-1 truncate text-xs ${done ? 'text-[var(--text-muted)] line-through' : ''} ${isOverdue && !done ? 'text-[var(--danger)]' : ''}`}>{t.title}</span>
           {isOverdue && !done && (
-            <button onClick={() => void moveToToday(t.id)} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] group-hover:block" title="改到今天">
+            <button onClick={() => void moveToToday(t.id)} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] group-hover:block" data-tip="改到今天" aria-label="改到今天">
               <CalendarClock size={12} />
             </button>
           )}
-          <button onClick={() => setEditing({ id: t.id, title: t.title, date: t.date, time: t.time ?? '' })} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] group-hover:block" title="编辑">
+          <button onClick={() => setEditing({ id: t.id, title: t.title, date: t.date, time: t.time ?? '' })} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] group-hover:block" data-tip="编辑" aria-label="编辑">
             <Pencil size={12} />
           </button>
-          <button onClick={() => void removeTodo(t)} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:block" title="删除">
+          <button onClick={() => void removeTodo(t)} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:block" data-tip="删除" aria-label="删除">
             <Trash2 size={12} />
           </button>
           {t.time && <span className="shrink-0 text-[11px] text-[var(--text-muted)]">{t.time}</span>}
-          {t.tag && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: t.tag.color }} title={t.tag.name} />}
+          {t.tag && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: t.tag.color }} data-tip={t.tag.name} aria-label={t.tag.name} />}
         </div>
         {isEditing && editing && (
           <div className="mx-1.5 mb-1 space-y-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
@@ -248,7 +248,7 @@ export function TaskWidget({ onOpenSchedule }: Props) {
                   {sub.status === 'done' && <Check size={8} strokeWidth={3} />}
                 </button>
                 <span className={`flex-1 truncate text-[11px] ${sub.status === 'done' ? 'text-[var(--text-muted)] line-through' : ''}`}>{sub.title}</span>
-                <button onClick={() => void removeTodo(sub)} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:block" title="删除">
+                <button onClick={() => void removeTodo(sub)} className="hidden shrink-0 text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:block" data-tip="删除" aria-label="删除">
                   <Trash2 size={11} />
                 </button>
               </div>
@@ -281,7 +281,7 @@ export function TaskWidget({ onOpenSchedule }: Props) {
             <button
               onClick={onOpenSchedule}
               className="inline-flex shrink-0 items-center text-[var(--text-muted)] hover:text-[var(--accent)]"
-              title="打开日程模块管理"
+              data-tip="打开日程模块管理" aria-label="打开日程模块管理"
             >
               <ExternalLink size={11} />
             </button>
@@ -304,7 +304,7 @@ export function TaskWidget({ onOpenSchedule }: Props) {
             <button
               onClick={() => void addQuick()}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)] text-white hover:opacity-90"
-              title="添加（回车）"
+              data-tip="添加（回车）" aria-label="添加（回车）"
             >
               <Plus size={14} />
             </button>
@@ -316,19 +316,19 @@ export function TaskWidget({ onOpenSchedule }: Props) {
                 type="time"
                 value={finalTime ?? ''}
                 onChange={e => setManualTime(e.target.value || null)}
-                title="时间（可填写 / 修改）"
+                data-tip="时间（可填写 / 修改）" aria-label="时间（可填写 / 修改）"
                 className="w-[74px] rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1 py-0.5 text-[11px] text-[var(--accent)] outline-none focus:border-[var(--accent)]"
               />
               {manualTime !== null && (
                 <button
                   onClick={() => setManualTime(null)}
                   className="rounded px-1 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-                  title="恢复自动解析时间"
+                  data-tip="恢复自动解析时间" aria-label="恢复自动解析时间"
                 >
                   重解析
                 </button>
               )}
-              <span className="min-w-0 flex-1 truncate" title={parsed.title}>{parsed.title || '（空）'}</span>
+              <span className="min-w-0 flex-1 truncate" data-tip={parsed.title} aria-label={parsed.title}>{parsed.title || '（空）'}</span>
             </div>
           )}
         </div>

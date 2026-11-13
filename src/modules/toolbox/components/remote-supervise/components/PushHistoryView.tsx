@@ -94,7 +94,7 @@ export function PushHistoryView() {
           <button
             onClick={() => void refresh()}
             className="flex items-center gap-1 px-2 py-1 rounded text-[11px] border border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]"
-            title="刷新"
+            data-tip="刷新" aria-label="刷新"
           >
             <RefreshCw size={12} /> 刷新
           </button>
@@ -102,7 +102,7 @@ export function PushHistoryView() {
             onClick={() => void handleRetryAll()}
             disabled={retryingAll || failedCount === 0}
             className="flex items-center gap-1 px-2 py-1 rounded text-[11px] border border-[var(--border-color)] hover:bg-[var(--bg-tertiary)] disabled:opacity-40 disabled:cursor-not-allowed"
-            title="重推全部失败项"
+            data-tip="重推全部失败项" aria-label="重推全部失败项"
           >
             {retryingAll ? <Loader2 size={12} className="animate-spin" /> : null}
             补推全部失败{failedCount > 0 ? `(${failedCount})` : ''}
@@ -115,7 +115,7 @@ export function PushHistoryView() {
                   ? 'border-red-500 bg-red-500/10 text-red-400'
                   : 'border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)]'
               }`}
-              title="清空全部推送记录"
+              data-tip="清空全部推送记录" aria-label="清空全部推送记录"
             >
               {confirmingClear ? <><Trash2 size={12} /> 确认清空？</> : <><Trash2 size={12} /> 清空历史</>}
             </button>

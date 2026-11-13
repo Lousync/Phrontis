@@ -143,7 +143,7 @@ export function QuizMode({ quizzes, pageTitle, onClose, pageId, onFinish }: Prop
         <button
           onClick={onClose}
           className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-          title="退出刷题 (Esc)"
+          data-tip="退出刷题 (Esc)" aria-label="退出刷题 (Esc)"
         >
           <X size={14} />
           退出
@@ -249,7 +249,7 @@ export function QuizMode({ quizzes, pageTitle, onClose, pageId, onFinish }: Prop
               {pageId && (
                 <button
                   onClick={toggleFav}
-                  title={favMap[quiz.no] ? '取消收藏' : '收藏此题'}
+                  data-tip={favMap[quiz.no] ? '取消收藏' : '收藏此题'} aria-label={favMap[quiz.no] ? '取消收藏' : '收藏此题'}
                   className={`ml-auto inline-flex items-center justify-center w-7 h-7 rounded transition-colors ${
                     favMap[quiz.no] ? 'text-[#f5b301]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                   }`}

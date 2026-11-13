@@ -188,7 +188,7 @@ export function EpubRailPanel({ readerDoc }: {
                     data-cbz-page={i}
                     onClick={() => jump(it)}
                     disabled={!it.href}
-                    title={it.label || `第 ${i + 1} 页`}
+                    data-tip={it.label || `第 ${i + 1} 页`} aria-label={it.label || `第 ${i + 1} 页`}
                     className="kb-cv-tile kb-item-in flex flex-col items-center rounded p-0.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
                   >
                     <span
@@ -228,7 +228,7 @@ export function EpubRailPanel({ readerDoc }: {
         <button
           onClick={() => jump(it)}
           disabled={!it.href}
-          title={it.href || it.label || ''}
+          data-tip={it.href || it.label || ''} aria-label={it.href || it.label || ''}
           className={`kb-item-in flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11.5px] leading-snug ${active ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'} disabled:opacity-50`}
           style={{ paddingLeft: 6 + depth * 12 }}
         >

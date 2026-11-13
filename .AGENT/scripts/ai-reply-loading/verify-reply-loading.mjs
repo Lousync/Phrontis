@@ -198,7 +198,7 @@ ok('思考行折叠走 .kb-collapse', has('rail', 'kb-collapse'))
 ok('生成态思考行仍受 aiShowThinking 设置约束', has('stream', 's.aiShowThinking !== false'))
 
 // ── ⑨ R7 停止入口：状态区零个、输入区一个 ─────────────────────────────────────
-ok('StreamBubble 不再接收 / 渲染停止按钮', !has('stream', 'onAbort') && !has('stream', 'title="停止'))
+ok('StreamBubble 不再接收 / 渲染停止按钮', !has('stream', 'onAbort') && !has('stream', 'data-tip="停止'))
 ok('两处兜底状态行也没有停止按钮', !has('list', '停止生成'))
 const SQUARE = 'w-2.5 h-2.5 rounded-[2px] bg-current'
 for (const k of ['teach', 'side', 'chatbody', 'learn']) {

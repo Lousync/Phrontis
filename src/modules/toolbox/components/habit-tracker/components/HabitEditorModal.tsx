@@ -111,7 +111,7 @@ export function HabitEditorModal({ mode, habit, onClose, onSaved }: Props) {
                 <button key={c} onClick={() => setColor(c)}
                   className={`w-6 h-6 rounded-full transition-transform ${color === c ? 'ring-2 ring-offset-2 scale-110 ring-[var(--accent)]' : 'hover:scale-105'}`}
                   style={{ backgroundColor: c, ['--tw-ring-offset-color' as never]: 'var(--bg-secondary)' }}
-                  title={c}
+                  data-tip={c} aria-label={c}
                 />
               ))}
             </div>
@@ -170,7 +170,7 @@ export function HabitEditorModal({ mode, habit, onClose, onSaved }: Props) {
           {mode === 'edit' ? (
             <button onClick={() => setConfirmDeleteOpen(true)}
               className="p-1.5 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 transition-colors"
-              title="删除习惯">
+              data-tip="删除习惯" aria-label="删除习惯">
               <Trash2 size={15} />
             </button>
           ) : <span />}

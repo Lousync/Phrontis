@@ -42,7 +42,7 @@ export function ScheduleSidebar({ view, activeTag, tags, counts, recurring, onSe
               <button
                 key={id}
                 onClick={() => onSelect(id)}
-                title={label}
+                data-tip={label} aria-label={label}
                 className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors ${active ? 'bg-[var(--accent)]/10 font-medium text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
               >
                 <Icon size={14} className="shrink-0" />
@@ -56,7 +56,7 @@ export function ScheduleSidebar({ view, activeTag, tags, counts, recurring, onSe
         <div className="mt-3 border-t border-[var(--border-color)] pt-2">
           <div className="mb-1 flex items-center justify-between px-2 @max-[120px]:hidden">
             <span className="text-[10.5px] font-medium uppercase tracking-wide text-[var(--text-disabled)]">标签</span>
-            <button onClick={onManageTags} title="管理标签" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+            <button onClick={onManageTags} data-tip="管理标签" aria-label="管理标签" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <Settings2 size={12} />
             </button>
           </div>
@@ -66,7 +66,7 @@ export function ScheduleSidebar({ view, activeTag, tags, counts, recurring, onSe
             <button
               key={tag.id}
               onClick={() => onSelectTag(tag.id)}
-              title={tag.name}
+              data-tip={tag.name} aria-label={tag.name}
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors ${view === 'tag' && activeTag === tag.id ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
@@ -83,7 +83,7 @@ export function ScheduleSidebar({ view, activeTag, tags, counts, recurring, onSe
       <div className="shrink-0 border-t border-[var(--border-color)] p-2">
         <button
           onClick={onNewTask}
-          title="新建任务"
+          data-tip="新建任务" aria-label="新建任务"
           className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--accent)] px-2 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
         >
           <Plus size={14} />

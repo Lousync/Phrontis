@@ -53,36 +53,36 @@ export function ExcerptCaptureBar({ rect, text, onCreate, onAsk, onTranslate, on
     <div className="kb-pop origin-top fixed z-[60] select-none" style={{ left, top }}>
       <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 px-1 py-0.5 text-[12px] text-[var(--text-secondary)] shadow-lg backdrop-blur">
         {EXCERPT_COLOR_IDS.map((c) => (
-          <button key={c} onClick={() => pickColor(c)} title={`以${EXCERPT_COLOR_NAMES[c]}色高亮`}
+          <button key={c} onClick={() => pickColor(c)} data-tip={`以${EXCERPT_COLOR_NAMES[c]}色高亮`} aria-label={`以${EXCERPT_COLOR_NAMES[c]}色高亮`}
             className={`kb-exc-dot kb-exc-${c} hover:scale-110 transition-transform`} />
         ))}
         <div className="mx-0.5 h-4 w-px bg-[var(--border-color)]" />
-        <button onClick={doExcerpt} title="存为摘录（右栏阅读侧栏可回看/跳回）"
+        <button onClick={doExcerpt} data-tip="存为摘录（右栏阅读侧栏可回看/跳回）" aria-label="存为摘录（右栏阅读侧栏可回看/跳回）"
           className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <Highlighter size={12.5} />摘录
         </button>
-        <button onClick={() => setIdeaOpen((v) => !v)} title="记想法（独立类型，存为备注）"
+        <button onClick={() => setIdeaOpen((v) => !v)} data-tip="记想法（独立类型，存为备注）" aria-label="记想法（独立类型，存为备注）"
           className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <Lightbulb size={12.5} />想法
         </button>
         <div className="mx-0.5 h-4 w-px bg-[var(--border-color)]" />
         {onAsk && (
-          <button onClick={() => onAsk(text)} title="选中片段发给 AI（收进侧栏引用胶囊）"
+          <button onClick={() => onAsk(text)} data-tip="选中片段发给 AI（收进侧栏引用胶囊）" aria-label="选中片段发给 AI（收进侧栏引用胶囊）"
             className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
             <Sparkles size={12.5} />问 AI
           </button>
         )}
         {onTranslate && (
-          <button onClick={() => onTranslate(text, rect)} title="翻译选中文本"
+          <button onClick={() => onTranslate(text, rect)} data-tip="翻译选中文本" aria-label="翻译选中文本"
             className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
             <Languages size={12.5} />翻译
           </button>
         )}
-        <button onClick={() => { void navigator.clipboard?.writeText(text).catch(() => {}) }} title="复制选中文本"
+        <button onClick={() => { void navigator.clipboard?.writeText(text).catch(() => {}) }} data-tip="复制选中文本" aria-label="复制选中文本"
           className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <Copy size={12.5} />复制
         </button>
-        <button onClick={onClose} title="关闭" className="rounded p-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+        <button onClick={onClose} data-tip="关闭" aria-label="关闭" className="rounded p-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <X size={11} />
         </button>
       </div>

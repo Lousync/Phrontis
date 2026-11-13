@@ -175,7 +175,7 @@ async function main() {
     //   2b 加进 .cbz 之后，DOM 第一张变成 \`探针样书.epub\` ⇒ 点开的是 EPUB、挂上 epubReader，
     //   下面「TXT 阅读器挂载」永远为假（表象是探针自缢，不是产品挂了）。
     const card = [...document.querySelectorAll('main button')]
-      .find((b) => (b.getAttribute('title') || '') === ${JSON.stringify(BOOK)})
+      .find((b) => (b.getAttribute('data-tip') || '') === ${JSON.stringify(BOOK)})
     card?.click(); return !!card
   })()`)
   ok('找到并点击 TXT 样书卡片', clicked)
@@ -206,7 +206,7 @@ async function main() {
     const b = document.querySelector('[data-wb="excerptExportBtn"]')
     if (!b) return null
     const r = b.getBoundingClientRect()
-    return { text: (b.textContent || '').trim(), title: b.getAttribute('title') || '', visible: r.width > 0 && r.height > 0, disabled: !!b.disabled }
+    return { text: (b.textContent || '').trim(), title: b.getAttribute('data-tip') || '', visible: r.width > 0 && r.height > 0, disabled: !!b.disabled }
   })()`)
   console.log('[导出按钮]', JSON.stringify(btn))
   ok('右栏书卡头有「导出为笔记」按钮且可见', !!btn?.visible)

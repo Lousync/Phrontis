@@ -199,7 +199,7 @@ export function IntelView() {
                   📰 <span className="truncate">{c.name}</span>
                   <span className="shrink-0 rounded bg-[var(--bg-tertiary)] px-1.5 py-[1px] text-[10px] text-[var(--text-muted)]">{SECTION_META[c.section].label}</span>
                 </span>
-                <span className="truncate text-[11px] text-[var(--text-muted)]" title={c.url}>{c.url}</span>
+                <span className="truncate text-[11px] text-[var(--text-muted)]" data-tip={c.url} aria-label={c.url}>{c.url}</span>
               </span>
               <SettingSwitch
                 checked={c.enabled}
@@ -207,7 +207,7 @@ export function IntelView() {
               />
               <button
                 onClick={() => { void intelRemoveCustomSource(c.id).then(() => reloadCustoms()) }}
-                title="删除该自定义源"
+                data-tip="删除该自定义源" aria-label="删除该自定义源"
                 className="flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--danger)]"
               >
                 <Trash2 size={13} />
@@ -241,7 +241,7 @@ export function IntelView() {
             <button
               onClick={() => { void addCustom() }}
               disabled={adding || customs.length >= 20}
-              title={customs.length >= 20 ? '已达上限 20 个' : '添加该源'}
+              data-tip={customs.length >= 20 ? '已达上限 20 个' : '添加该源'} aria-label={customs.length >= 20 ? '已达上限 20 个' : '添加该源'}
               className="h-[30px] shrink-0 rounded-md border border-[var(--accent)] px-3 text-[12px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10 disabled:cursor-default disabled:opacity-40"
             >
               添加

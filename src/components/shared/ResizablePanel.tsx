@@ -311,7 +311,7 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
           onPointerCancel={endEdgeDrag}
           onLostPointerCapture={endEdgeDrag}
           onClick={onSnapOpen}
-          title="拖拽或点击展开"
+          data-tip="拖拽或点击展开" aria-label="拖拽或点击展开"
         >
           <div className={`absolute top-0 bottom-0 ${isRight ? 'right-0' : 'left-0'} w-1 bg-[var(--accent)]/0 group-hover:bg-[var(--accent)]/60 transition-colors duration-150`} />
         </div>
@@ -329,7 +329,7 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
         <div
           role="separator"
           aria-orientation="vertical"
-          title="拖拽调整宽度，双击复位"
+          data-tip="拖拽调整宽度，双击复位" aria-label="拖拽调整宽度，双击复位"
           className="absolute top-0 h-full group"
           style={{
             width: HANDLE_HIT_WIDTH_PX,

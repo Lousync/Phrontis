@@ -140,7 +140,7 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
             {dayKey(0).slice(5)}
           </span>
         </div>
-        <div className="mt-1 text-[19px] font-semibold leading-tight text-[var(--text-primary)]" title={`${today.calls} 次 LLM 调用`}>
+        <div className="mt-1 text-[19px] font-semibold leading-tight text-[var(--text-primary)]" data-tip={`${today.calls} 次 LLM 调用`} aria-label={`${today.calls} 次 LLM 调用`}>
           {fmtTok(todayTotal)}
           <small className="ml-1 text-[10.5px] font-normal text-[var(--text-muted)]">tokens</small>
         </div>
@@ -154,7 +154,7 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
             {chartDays.map(d => {
               const total = d.in + d.out
               return (
-                <div key={d.key} className="group/bar relative flex h-full flex-1 items-end justify-center" title={d.title}>
+                <div key={d.key} className="group/bar relative flex h-full flex-1 items-end justify-center" data-tip={d.title} aria-label={d.title}>
                   {/* 淡轨道：今日用 accent 轻描，其余用中性；空白天只留这条轨道 */}
                   <div
                     className="absolute inset-0 mx-auto w-full max-w-[22px] rounded-[5px]"
@@ -213,7 +213,7 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
                   <div
                     key={s.id}
                     className="flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-[var(--bg-hover)]"
-                    title={`${s.title || '未命名会话'} · 输入 ${fmtTok(s.in)} / 输出 ${fmtTok(s.out)}`}
+                    data-tip={`${s.title || '未命名会话'} · 输入 ${fmtTok(s.in)} / 输出 ${fmtTok(s.out)}`} aria-label={`${s.title || '未命名会话'} · 输入 ${fmtTok(s.in)} / 输出 ${fmtTok(s.out)}`}
                   >
                     <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{s.title || '未命名会话'}</span>
                     <span className="shrink-0 font-mono text-[10.5px] font-medium text-[var(--success)]">{fmtTok(s.total)}</span>
@@ -242,7 +242,7 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
                   <button
                     onClick={() => c.file && onOpenChangeFile(c.file)}
                     disabled={!c.file}
-                    title={c.file ? `${c.action} · ${c.file}` : c.action}
+                    data-tip={c.file ? `${c.action} · ${c.file}` : c.action} aria-label={c.file ? `${c.action} · ${c.file}` : c.action}
                     className="group/cf flex h-full w-full items-center gap-1.5 rounded-md px-1 text-left transition-colors enabled:hover:bg-[var(--bg-hover)]"
                   >
                     <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9.5px] font-semibold ${

@@ -92,8 +92,8 @@ export function FlowView({ transactions, categories, onEdit, onDelete }: {
                     {isTransfer ? money(t.amount) : (isOut ? '-' : '+') + money(t.amount).replace('¥', '')}
                   </span>
                   <span className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button onClick={() => onEdit(t.id)} title="编辑" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"><Pencil size={14} /></button>
-                    <button onClick={() => onDelete(t.id)} title="删除" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--danger)]"><Trash2 size={14} /></button>
+                    <button onClick={() => onEdit(t.id)} data-tip="编辑" aria-label="编辑" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"><Pencil size={14} /></button>
+                    <button onClick={() => onDelete(t.id)} data-tip="删除" aria-label="删除" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--danger)]"><Trash2 size={14} /></button>
                   </span>
                 </div>
               )
@@ -136,7 +136,7 @@ function AccountsBalanceBlock({ accounts, transactions, balanceVisible, onToggle
     <div className="mt-8">
       <div className="mb-3 flex items-center gap-2">
         <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">账户余额</h3>
-        <button onClick={onToggleBalance} title={balanceVisible ? '隐藏余额' : '显示余额'} className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]">
+        <button onClick={onToggleBalance} data-tip={balanceVisible ? '隐藏余额' : '显示余额'} aria-label={balanceVisible ? '隐藏余额' : '显示余额'} className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]">
           {balanceVisible ? <EyeOff size={13} /> : <Eye size={13} />}
         </button>
         <span className="ml-auto text-[12px] tabular-nums text-[var(--text-secondary)]">总额 {balanceVisible ? money(total) : '••••••'}</span>
@@ -267,8 +267,8 @@ export function StatsView({ transactions, categories, accounts, month, balanceVi
         {trend.map((d) => (
           <div key={d.m} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
             <div className="flex h-full w-full items-end justify-center gap-1">
-              <div className="w-4 rounded-t" style={{ height: `${Math.round(d.out / maxv * 100)}%`, background: 'var(--money-out,#e06c4f)' }} title={`支出 ${money(d.out)}`} />
-              <div className="w-4 rounded-t" style={{ height: `${Math.round(d.inc / maxv * 100)}%`, background: 'var(--money-in,#2b9e8f)' }} title={`收入 ${money(d.inc)}`} />
+              <div className="w-4 rounded-t" style={{ height: `${Math.round(d.out / maxv * 100)}%`, background: 'var(--money-out,#e06c4f)' }} data-tip={`支出 ${money(d.out)}`} aria-label={`支出 ${money(d.out)}`} />
+              <div className="w-4 rounded-t" style={{ height: `${Math.round(d.inc / maxv * 100)}%`, background: 'var(--money-in,#2b9e8f)' }} data-tip={`收入 ${money(d.inc)}`} aria-label={`收入 ${money(d.inc)}`} />
             </div>
             <div className="text-[11px] text-[var(--text-muted)]">{Number(d.m.slice(5))}月</div>
           </div>

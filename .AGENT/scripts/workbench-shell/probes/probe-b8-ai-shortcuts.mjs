@@ -81,7 +81,7 @@ const key = (k, opts) => evalJs(`(() => {
 
 /** 点活动栏按钮（title= 是 ActivityBar 唯一的可见锚点） */
 const clickRail = (label) => evalJs(`(() => {
-  const btn = [...document.querySelectorAll('button[title]')].find(b => b.title === ${JSON.stringify(label)})
+  const btn = [...document.querySelectorAll('button[data-tip]')].find(b => b.title === ${JSON.stringify(label)})
   if (!btn) return false
   btn.click()
   return true
@@ -150,7 +150,7 @@ async function main() {
   ok(toSettings, 'P0 活动栏「设置」可点（探针导航前置）', `clicked=${toSettings}`)
   await sleep(1200)
   // 只读确认活动栏在（不写设置：探针不该改用户的 dev 设置；false 时后续 clickRail 会明确 FAIL）
-  const railOk = await evalJs(`(() => ({ bar: !!document.querySelector('button[title="工作台"]'), iconStyle: null }))()`)
+  const railOk = await evalJs(`(() => ({ bar: !!document.querySelector('button[data-tip="工作台"]'), iconStyle: null }))()`)
   if (!railOk.bar) console.log('[警告] 活动栏不可见 —— 后续导航会失败（settings.activityBarVisible=false？）')
   const beforeP1 = await evalJs(`(() => ({ panel: !!${PANEL} }))()`)
   await key('j', 'ctrlKey: true,')

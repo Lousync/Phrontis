@@ -80,7 +80,7 @@ export function WebClipper({ onBack }: { onBack: () => void }) {
         <button
           onClick={onBack}
           className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title="返回"
+          data-tip="返回" aria-label="返回"
         >
           <ArrowLeft size={12} />
         </button>
@@ -91,7 +91,7 @@ export function WebClipper({ onBack }: { onBack: () => void }) {
         <button
           onClick={refresh}
           className="ml-auto p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-          title="刷新状态"
+          data-tip="刷新状态" aria-label="刷新状态"
         >
           <RefreshCw size={12} />
         </button>
@@ -116,7 +116,7 @@ export function WebClipper({ onBack }: { onBack: () => void }) {
                 onClick={selfPing}
                 disabled={pinging || !st?.running}
                 className="ml-auto text-[11px] px-2 py-1 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors"
-                title="以扩展同款请求路径自检（含 Origin 白名单校验）"
+                data-tip="以扩展同款请求路径自检（含 Origin 白名单校验）" aria-label="以扩展同款请求路径自检（含 Origin 白名单校验）"
               >
                 {pinging ? '自检中…' : '自检'}
               </button>
@@ -138,13 +138,13 @@ export function WebClipper({ onBack }: { onBack: () => void }) {
               <code className="flex-1 min-w-0 truncate text-[11.5px] px-2.5 py-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-secondary)]">
                 {st ? (tokenVisible ? st.token : st.tokenHint) : '…'}
               </code>
-              <button onClick={() => setTokenVisible(v => !v)} className="text-[11px] px-2 py-1.5 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors" title={tokenVisible ? '隐藏令牌' : '显示完整令牌'}>
+              <button onClick={() => setTokenVisible(v => !v)} className="text-[11px] px-2 py-1.5 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors" data-tip={tokenVisible ? '隐藏令牌' : '显示完整令牌'} aria-label={tokenVisible ? '隐藏令牌' : '显示完整令牌'}>
                 {tokenVisible ? '隐藏' : '显示'}
               </button>
               <button onClick={() => copy('token', st?.token ?? '')} className="text-[11px] px-2 py-1.5 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors flex items-center gap-1">
                 {copied === 'token' ? <Check size={11} /> : <Copy size={11} />}{copied === 'token' ? '已复制' : '复制'}
               </button>
-              <button onClick={resetToken} className="text-[11px] px-2 py-1.5 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors flex items-center gap-1" title="重置后扩展需重新粘贴配对">
+              <button onClick={resetToken} className="text-[11px] px-2 py-1.5 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors flex items-center gap-1" data-tip="重置后扩展需重新粘贴配对" aria-label="重置后扩展需重新粘贴配对">
                 <RotateCcw size={11} />重置
               </button>
             </div>
@@ -189,7 +189,7 @@ export function WebClipper({ onBack }: { onBack: () => void }) {
             {st?.clips.items.map(c => (
               <div key={c.name} className="flex items-center gap-2 text-[11.5px] py-1 border-b border-[var(--border-color)] last:border-0">
                 <span className="text-[var(--text-disabled)] tabular-nums shrink-0">{formatTime(c.mtimeMs)}</span>
-                <span className="truncate text-[var(--text-secondary)]" title={c.name}>{clipTitle(c.name)}</span>
+                <span className="truncate text-[var(--text-secondary)]" data-tip={c.name} aria-label={c.name}>{clipTitle(c.name)}</span>
                 <span className="ml-auto shrink-0 text-[var(--text-disabled)]">{c.size > 1024 ? (c.size / 1024).toFixed(1) + ' KB' : c.size + ' B'}</span>
               </div>
             ))}

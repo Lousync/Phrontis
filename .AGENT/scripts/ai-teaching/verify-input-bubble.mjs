@@ -73,9 +73,9 @@ for (const k of ['teach', 'side', 'learn']) {
 ok('合规提示源文件数 = 3', ['teach', 'side', 'learn'].filter(k => count(code[k], COMPLIANCE) === 1).length === 3)
 ok('assistant 面不再放合规提示（删冗余说明行拍板，勿回填）',
   count(code.assistant, COMPLIANCE) === 0, `实际 ${count(code.assistant, COMPLIANCE)}`)
-ok('合规提示带 title 披露', code.teach.includes('title="AI 生成内容可能存在错误，请自行核实"')
-  && code.learn.includes('title="AI 生成内容可能存在错误，请自行核实"')
-  && code.side.includes('title="AI 生成内容可能存在错误，请自行核实"'))
+ok('合规提示带 data-tip 披露', code.teach.includes('data-tip="AI 生成内容可能存在错误，请自行核实"')
+  && code.learn.includes('data-tip="AI 生成内容可能存在错误，请自行核实"')
+  && code.side.includes('data-tip="AI 生成内容可能存在错误，请自行核实"'))
 
 // ── ② 外壳：不贴底留白（pb-2.5 pt-2）且去掉分割线 / 灰底 ────────────────────────────
 for (const k of ['teach', 'side', 'assistant', 'learn']) {
@@ -168,7 +168,7 @@ for (const k of ['teach', 'side', 'assistant', 'learn']) {
 }
 
 // ── ⑨ 文案保全（只收不删）────────────────────────────────────────────────────────
-ok('teach 发送/停止 title 保留', has('teach', 'title="发送"') && has('teach', '停止生成（已完成的轮次保留）'))
+ok('teach 发送/停止提示保留', has('teach', 'data-tip="发送"') && has('teach', '停止生成（已完成的轮次保留）'))
 ok('side 追问 placeholder 保留', has('side', '就这一点追问…'))
 ok('teach 合规提示上方旧占位注释语义保留（合规提示行仍在 footer 内）',
   has('teach', COMPLIANCE) && has('teach', 'composerFooter'))
@@ -191,7 +191,7 @@ ok('限宽只落在输入壳，不影响输入卡本体类名',
 // 拍板口径：「去掉大按钮，输入区只剩 输入框 + 发送」，生图入口是 `/生图` + 占位文字指路。
 // 负向断言（先剥注释）：输入卡里不得再长出「生图」按钮 —— 原型档有一个，落码不许复活。
 ok('assistant 输入区无「生图」大按钮（入口 = 斜杠指令）',
-  !/>\s*生图\s*</.test(code.assistant) && !/title="生图/.test(code.assistant))
+  !/>\s*生图\s*</.test(code.assistant) && !/data-tip="生图/.test(code.assistant))
 ok('assistant 占位文字指路 /生图（弹层只有敲 `/` 才出现，不点一句用户无从知道）',
   code.assistant.includes('要画图就敲 /生图'))
 

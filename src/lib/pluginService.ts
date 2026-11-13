@@ -1,4 +1,5 @@
 import { pluginListInstalled, pluginGetContribution } from './ipc'
+import { tooltipDeclarations } from './tooltipPattern'
 import type { PluginRiskLevel, PluginSummary } from '../types'
 
 /**
@@ -70,11 +71,13 @@ export async function ensurePluginThemeStyles(): Promise<PluginThemeWithVars[]> 
       const rec = d as Record<string, unknown>
       const vars = sanitizeVars(rec?.colors)
       if (typeof rec?.name !== 'string' || !rec.name.trim() || vars.length === 0) return
+      // 悬停提示图案：只允许渐变（校验规则在 src/lib/tooltipPattern.ts，有契约脚本逐条锁）
+      const tipVars = tooltipDeclarations(rec?.tooltip)
       // CSS 类名消毒:插件 id 可能含 "."(如 sample.study-pack),点在类选择器里是分隔符,必须替换
       // 单主题保持旧 id(兼容已保存的主题设置);多主题追加序号
       const themeId = `plugin-${item.pluginId.replace(/[^a-zA-Z0-9_-]/g, '-')}` + (arr.length > 1 ? `-${themeIdx}` : '')
       themes.push({ id: themeId, name: rec.name.trim(), pluginName: item.pluginName, colors: rec.colors as Record<string, string> })
-      rules.push(`html.theme-${themeId} {\n${vars.join('\n')}\n}`)
+      rules.push(`html.theme-${themeId} {\n${vars.join('\n')}${tipVars.length ? '\n' + tipVars.join('\n') : ''}\n}`)
     })
   }
   document.getElementById('kb-plugin-themes')?.remove()

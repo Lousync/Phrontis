@@ -97,7 +97,7 @@ const tileInfo = () => evalJs(`(() => {
   }
   return {
     grid: true, state: panel ? panel.getAttribute('data-wb-state') : null,
-    count: tiles.length, titles: tiles.map((t) => t.getAttribute('title') || ''),
+    count: tiles.length, titles: tiles.map((t) => t.getAttribute('data-tip') || ''),
     // ★ 只取**最后一个** span：格子内有两个 span —— 首 span 是缩略图框（图没就绪时里面还有
     //   一个页码占位 span（内容就是 i+1），见 EpubRailPanel.tsx:192-201），末 span 才是页号标签。
     //   读整个 textContent 会把占位号与标签号**粘在一起**（「2323」），页号断言从 index 22 起全红。
@@ -315,7 +315,7 @@ async function main() {
       return {
         active: box(tile) ? box(tile).className.includes('border-[var(--accent)]') : null,
         other: box(other) ? box(other).className.includes('border-[var(--accent)]') : null,
-        activeHref: tile ? tile.getAttribute('title') : null,
+        activeHref: tile ? tile.getAttribute('data-tip') : null,
       }
     })()`)
     console.log('[高亮诊断]', JSON.stringify(hl))
@@ -393,7 +393,7 @@ async function main() {
         return 'sel:' + s.toString().length
       })()`)
       await sleep(900)
-      const pop = await evalJs(`!![...document.querySelectorAll('button')].find((b) => (b.getAttribute('title') || '').startsWith('存为摘录'))`)
+      const pop = await evalJs(`!![...document.querySelectorAll('button')].find((b) => (b.getAttribute('data-tip') || '').startsWith('存为摘录'))`)
       note('程序化选区结果（`sel:0` = 页内无文本可选中，这正是格式层面的原因）', String(selRes))
       ok('★ 打开 cbz 不冒摘录浮条（无文本层 ⇒ 选区拿不到 text，handler 直接收摊）', pop === false, String(pop))
       const marks = await pierceAttrs('g', 'fill')

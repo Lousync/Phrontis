@@ -185,9 +185,9 @@ export function PdfRailPanel({ readerDoc }: Props) {
       {/* 三区切换。文字按容器宽度退化（styles/index.css 的 .kb-fit 段）：左栏收到 <178px 时
           「缩略图」三个字（理想 56px）塞不进 flex-1 均分出的 53px，会换行成竖排 → 只留图标。 */}
       <div className="kb-fit kb-fit-pdfrail mx-1.5 mb-1 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] p-0.5">
-        <button onClick={() => setSection('outline')} className={tabCls(section === 'outline')} title="目录"><ListTree size={12} /><span className="kb-l1">目录</span></button>
-        <button onClick={() => setSection('thumbs')} className={tabCls(section === 'thumbs')} title="缩略图"><LayoutGrid size={12} /><span className="kb-l1">缩略图</span></button>
-        <button onClick={() => setSection('bookmarks')} className={tabCls(section === 'bookmarks')} title="书签"><BookMarked size={12} /><span className="kb-l1">书签</span></button>
+        <button onClick={() => setSection('outline')} className={tabCls(section === 'outline')} data-tip="目录" aria-label="目录"><ListTree size={12} /><span className="kb-l1">目录</span></button>
+        <button onClick={() => setSection('thumbs')} className={tabCls(section === 'thumbs')} data-tip="缩略图" aria-label="缩略图"><LayoutGrid size={12} /><span className="kb-l1">缩略图</span></button>
+        <button onClick={() => setSection('bookmarks')} className={tabCls(section === 'bookmarks')} data-tip="书签" aria-label="书签"><BookMarked size={12} /><span className="kb-l1">书签</span></button>
       </div>
       {section === 'outline' && (
         <div className="min-h-0 flex-1 overflow-auto py-1">

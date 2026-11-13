@@ -98,7 +98,7 @@ function TabButton({ id, active, onClick, icon, label }: {
 function IconBtn({ title, onClick, children }: { title: string; onClick: () => void; children: ReactNode }) {
   return (
     <button
-      title={title}
+      data-tip={title} aria-label={title}
       onClick={onClick}
       className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
     >
@@ -161,12 +161,12 @@ function Composer({ placeholder, onSend, disabled, compact, onStop }: {
         <div className="flex items-center gap-2 mt-0.5">
           <span
             className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
-            title="AI 生成内容可能存在错误，请自行核实"
+            data-tip="AI 生成内容可能存在错误，请自行核实" aria-label="AI 生成内容可能存在错误，请自行核实"
           >AI 生成内容，请注意甄别</span>
           {disabled && onStop ? (
             <button
               onClick={onStop}
-              title="停止生成（已完成的轮次保留）"
+              data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）"
               className="w-8 h-8 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity"
             >
               <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
@@ -175,7 +175,7 @@ function Composer({ placeholder, onSend, disabled, compact, onStop }: {
             <button
               onClick={push}
               disabled={disabled || !draft.trim()}
-              title="发送"
+              data-tip="发送" aria-label="发送"
               className="w-8 h-8 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity"
             >
               {disabled ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} />}
@@ -357,7 +357,7 @@ export function AiLearnShell({ tab, onTabChange, onCollapse, onClose, active, pr
       </div>
       <button
         onClick={progress.reset}
-        title="清空已完成标记并回到第 1 步"
+        data-tip="清空已完成标记并回到第 1 步" aria-label="清空已完成标记并回到第 1 步"
         className="flex shrink-0 items-center gap-1.5 border-t border-[var(--border-color)] px-3 py-2 text-[10.5px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
       >
         <BookOpen size={12} /> 重看首次启动引导
@@ -465,7 +465,7 @@ export function AiLearnShell({ tab, onTabChange, onCollapse, onClose, active, pr
             </span>
             <button
               onClick={e => { e.stopPropagation(); chat.deleteSession(sess.id) }}
-              title="删除会话"
+              data-tip="删除会话" aria-label="删除会话"
               className="shrink-0 text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
             >
               <Trash2 size={11} />

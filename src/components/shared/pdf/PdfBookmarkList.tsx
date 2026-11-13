@@ -60,7 +60,7 @@ export function PdfBookmarkList({ bookmarks, current, duo = false, onJump, onNot
               <button
                 onClick={() => onDelete(b.page)}
                 data-wb="pdfBookmarkDel"
-                title="删除书签"
+                data-tip="删除书签" aria-label="删除书签"
                 className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] group-hover/row:opacity-100"
               >
                 <X size={11} />
@@ -85,7 +85,7 @@ export function PdfBookmarkList({ bookmarks, current, duo = false, onJump, onNot
                 <button
                   onClick={() => setEditing(b.page)}
                   data-wb="pdfBookmarkEdit"
-                  title={b.note ? '点这里改备注' : '点这里加备注'}
+                  data-tip={b.note ? '点这里改备注' : '点这里加备注'} aria-label={b.note ? '点这里改备注' : '点这里加备注'}
                   className="flex min-w-0 flex-1 items-start gap-1 rounded px-1 py-0.5 text-left hover:bg-[var(--bg-tertiary)]"
                 >
                   <StickyNote size={11} className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" />

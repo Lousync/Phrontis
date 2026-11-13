@@ -71,7 +71,9 @@ export function SummaryStats({ start, end }: { start: string; end: string }) {
             {habits.map((h) => (
               <div
                 key={h.id}
-                title={h.ruleType === 'flexible'
+                data-tip={h.ruleType === 'flexible'
+                  ? `本周目标每周 ${h.weeklyTarget} 次，已完成 ${h.count} 次`
+                  : `计划 ${h.planned} 天，已完成 ${h.count} 天`} aria-label={h.ruleType === 'flexible'
                   ? `本周目标每周 ${h.weeklyTarget} 次，已完成 ${h.count} 次`
                   : `计划 ${h.planned} 天，已完成 ${h.count} 天`}
                 className="kb-item-in flex items-center gap-3 py-2.5 text-[15px] leading-7"
@@ -241,7 +243,7 @@ export function SummaryPanel({ date }: { date: string }) {
               <span className="text-[11.5px] tabular-nums text-[var(--text-muted)]">{w.start} ~ {w.end}</span>
               <button
                 onClick={() => openSummary(w)}
-                title={has ? '打开这一期的总结' : '生成并打开这一期的总结'}
+                data-tip={has ? '打开这一期的总结' : '生成并打开这一期的总结'} aria-label={has ? '打开这一期的总结' : '生成并打开这一期的总结'}
                 className={`ml-auto shrink-0 rounded border px-2.5 py-[3px] text-[12px] transition-colors ${
                   has
                     ? 'border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]'

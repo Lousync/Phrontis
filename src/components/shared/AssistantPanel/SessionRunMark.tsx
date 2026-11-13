@@ -5,17 +5,17 @@
  * ChatBody ↔ AiChatSidebar 循环导入（两处列表共用）。
  */
 export function SessionRunMark({ mark }: { mark: 'running' | 'failed' | 'unread' | null }) {
-  if (mark === 'running') return <span className="kb-spin" title="正在回复" />
+  if (mark === 'running') return <span className="kb-spin" data-tip="正在回复" aria-label="正在回复" />
   if (mark === 'failed') {
     return (
       <span
         className="kb-micro-pop flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold leading-none text-white"
-        title="上次回复被中断（可打开会话看原因）"
+        data-tip="上次回复被中断（可打开会话看原因）" aria-label="上次回复被中断（可打开会话看原因）"
       >!</span>
     )
   }
   if (mark === 'unread') {
-    return <span className="kb-micro-pop h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" title="有新回复" />
+    return <span className="kb-micro-pop h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]" data-tip="有新回复" aria-label="有新回复" />
   }
   return null
 }

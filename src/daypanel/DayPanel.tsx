@@ -139,12 +139,12 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
       className={`relative flex flex-1 flex-col items-center gap-px rounded-lg py-1 text-[10.5px] transition-colors ${
         tab === t.id ? 'bg-[var(--accent)]/10 font-semibold text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)]'
       }`}
-      title={t.label}
+      data-tip={t.label} aria-label={t.label}
     >
       <t.icon size={14} strokeWidth={1.8} />
       {t.label}
       {t.id === 'task' && overdueDdls.length > 0 && (
-        <span className="absolute right-[26%] top-1 h-1.5 w-1.5 rounded-full bg-[var(--danger)]" title={`${overdueDdls.length} 个逾期截止`} />
+        <span className="absolute right-[26%] top-1 h-1.5 w-1.5 rounded-full bg-[var(--danger)]" data-tip={`${overdueDdls.length} 个逾期截止`} aria-label={`${overdueDdls.length} 个逾期截止`} />
       )}
     </button>
   ))
@@ -184,7 +184,7 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
             <button
               onClick={onPopout}
               className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="脱离为独立窗口（拖到主窗口外任意位置摆放）"
+              data-tip="脱离为独立窗口（拖到主窗口外任意位置摆放）" aria-label="脱离为独立窗口（拖到主窗口外任意位置摆放）"
             >
               <PanelRightClose size={14} strokeWidth={1.5} />
             </button>
@@ -193,7 +193,7 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
             <button
               onClick={onDockBack}
               className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="回到主窗口内嵌"
+              data-tip="回到主窗口内嵌" aria-label="回到主窗口内嵌"
             >
               <PanelRightOpen size={14} strokeWidth={1.5} />
             </button>
@@ -201,7 +201,7 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
           <button
             onClick={mode === 'popout' ? onDockBack : onClose}
             className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            title={mode === 'popout' ? '回到主窗口内嵌' : '关闭面板（Ctrl+Alt+S 重新打开）'}
+            data-tip={mode === 'popout' ? '回到主窗口内嵌' : '关闭面板（Ctrl+Alt+S 重新打开）'} aria-label={mode === 'popout' ? '回到主窗口内嵌' : '关闭面板（Ctrl+Alt+S 重新打开）'}
           >
             <X size={14} strokeWidth={1.5} />
           </button>
@@ -236,7 +236,7 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
         <button
           onClick={() => setTab('pomo')}
           className="relative mx-2 mb-2 flex shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg border border-[var(--border-color)] py-1.5 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-          title="番茄钟运行中，点击查看"
+          data-tip="番茄钟运行中，点击查看" aria-label="番茄钟运行中，点击查看"
         >
           <div
             className="absolute inset-y-0 left-0 bg-[var(--accent)]/15 transition-[width] duration-700 ease-linear"
@@ -253,7 +253,7 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
         <button
           onClick={() => setTab('pomo')}
           className="relative mx-2 mb-2 flex shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg border border-[var(--border-color)] py-1.5 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-          title="番茄钟运行中，点击查看"
+          data-tip="番茄钟运行中，点击查看" aria-label="番茄钟运行中，点击查看"
         >
           <div
             className="absolute inset-y-0 left-0 bg-[var(--accent)]/15 transition-[width] duration-700 ease-linear"

@@ -151,7 +151,7 @@ export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = fal
           <button
             onClick={onBackToFile}
             className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shrink-0"
-            title="返回文件视图"
+            data-tip="返回文件视图" aria-label="返回文件视图"
           >
             <ArrowLeft size={16} />
           </button>
@@ -185,7 +185,7 @@ export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = fal
             <button
               onClick={() => setQuery('')}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-              title="清除"
+              data-tip="清除" aria-label="清除"
             >
               <X size={12} />
             </button>

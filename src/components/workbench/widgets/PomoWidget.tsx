@@ -215,7 +215,7 @@ export function PomoWidget({ frameless = false }: PomoWidgetProps) {
         )}
 
         {mode !== 'idle' && ps.topic && (
-          <div className="max-w-full truncate text-[10.5px] text-[var(--text-secondary)]" title={ps.topic}>{ps.topic}</div>
+          <div className="max-w-full truncate text-[10.5px] text-[var(--text-secondary)]" data-tip={ps.topic} aria-label={ps.topic}>{ps.topic}</div>
         )}
 
         {/* 预设分段器：换行网格（UI 打磨点2）——插件扩展预设后 chip 不再被压成竖排文字 */}
@@ -251,7 +251,7 @@ export function PomoWidget({ frameless = false }: PomoWidgetProps) {
               data-wb="pomoReset"
               onClick={secondaryAction}
               className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 text-[12.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              title={mode === 'running' || mode === 'paused' ? '结束本场并记录（再点一次确认）' : secondaryLabel}
+              data-tip={mode === 'running' || mode === 'paused' ? '结束本场并记录（再点一次确认）' : secondaryLabel} aria-label={mode === 'running' || mode === 'paused' ? '结束本场并记录（再点一次确认）' : secondaryLabel}
             >
               {secondaryLabel}
             </button>
@@ -302,7 +302,7 @@ export function PomodoroPopoutPanel({ status, onOpenInMain }: {
           <button
             onClick={onOpenInMain}
             className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            title="在主窗口控制番茄钟"
+            data-tip="在主窗口控制番茄钟" aria-label="在主窗口控制番茄钟"
           >
             在主窗口控制 ↗
           </button>

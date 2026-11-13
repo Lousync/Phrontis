@@ -318,7 +318,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
               onClick={doExport}
               disabled={exporting}
               data-wb="excerptExportBtn"
-              title={exportEntry ? `已导出到 ${exportEntry.pagePath}（再次点击同步更新）` : '把这本书的摘录导出成一篇知识库「读书笔记」页'}
+              data-tip={exportEntry ? `已导出到 ${exportEntry.pagePath}（再次点击同步更新）` : '把这本书的摘录导出成一篇知识库「读书笔记」页'} aria-label={exportEntry ? `已导出到 ${exportEntry.pagePath}（再次点击同步更新）` : '把这本书的摘录导出成一篇知识库「读书笔记」页'}
               className="kb-micro-pop mt-1.5 inline-flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-50"
             >
               <NotebookPen size={10.5} />
@@ -369,7 +369,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); m.go() } }}
                     data-wb="readingMark"
                     className="kb-item-in group/row flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                    title={m.title}
+                    data-tip={m.title} aria-label={m.title}
                   >
                     <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">{m.badge}</span>
                     <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover/row:text-[var(--text-primary)]">{m.label}</span>
@@ -379,7 +379,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
                     <button
                       onClick={(e) => { e.stopPropagation(); m.del() }}
                       data-wb="readingMarkDel"
-                      title="删除书签"
+                      data-tip="删除书签" aria-label="删除书签"
                       className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] group-hover/row:opacity-100"
                     >
                       <X size={11} />
@@ -468,15 +468,15 @@ function ExcCard({
             placeholder="一句话备注"
             className="min-w-0 flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           />
-          <button onClick={() => saveNote(e)} title="保存备注" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Check size={11} /></button>
-          <button onClick={() => setNoteEdit(null)} title="取消" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={11} /></button>
+          <button onClick={() => saveNote(e)} data-tip="保存备注" aria-label="保存备注" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Check size={11} /></button>
+          <button onClick={() => setNoteEdit(null)} data-tip="取消" aria-label="取消" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={11} /></button>
         </div>
       ) : (
         <div className={`mt-1 flex items-center gap-0.5 ${e.note ? '' : 'opacity-0 group-hover:opacity-100'}`}>
-          <button onClick={() => onLocate?.({ kind: e.kind, page: e.page, paraIndex: e.paraIndex, cfi: e.cfi })} title="定位原文" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Crosshair size={10.5} /></button>
-          <button onClick={() => onCopy(e)} title="复制" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Copy size={10.5} /></button>
-          <button onClick={() => setNoteEdit({ id: e.id, draft: e.note })} title="编辑备注" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pencil size={10.5} /></button>
-          <button onClick={() => onDelete(e)} title="删除摘录" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-warning)]"><Trash2 size={10.5} /></button>
+          <button onClick={() => onLocate?.({ kind: e.kind, page: e.page, paraIndex: e.paraIndex, cfi: e.cfi })} data-tip="定位原文" aria-label="定位原文" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Crosshair size={10.5} /></button>
+          <button onClick={() => onCopy(e)} data-tip="复制" aria-label="复制" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Copy size={10.5} /></button>
+          <button onClick={() => setNoteEdit({ id: e.id, draft: e.note })} data-tip="编辑备注" aria-label="编辑备注" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pencil size={10.5} /></button>
+          <button onClick={() => onDelete(e)} data-tip="删除摘录" aria-label="删除摘录" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-warning)]"><Trash2 size={10.5} /></button>
         </div>
       )}
     </div>

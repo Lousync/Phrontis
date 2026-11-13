@@ -273,7 +273,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
               <button
                 key={m.emoji}
                 onClick={() => handleToggleState(m.emoji)}
-                title={m.label}
+                data-tip={m.label} aria-label={m.label}
                 className={`text-[15px] px-0.5 rounded transition-opacity ${activeStates.includes(m.emoji) ? 'opacity-100' : 'opacity-30 hover:opacity-60'}`}
               >
                 {m.emoji}
@@ -291,7 +291,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
               <button
                 onClick={() => imageInputRef.current?.click()}
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                title="插入图片"
+                data-tip="插入图片" aria-label="插入图片"
               >
                 <ImagePlus size={13} />
                 图片
@@ -299,7 +299,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
               <button
                 onClick={() => setShowTplModal(true)}
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                title="套用博客模板"
+                data-tip="套用博客模板" aria-label="套用博客模板"
               >
                 <LayoutTemplate size={13} />
                 模板
@@ -308,14 +308,14 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
           )}
           <button onClick={() => setShowPreview(!showPreview)}
             className={'flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] transition-colors ' + (showPreview ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]')}
-            title="Ctrl+/">
+            data-tip="Ctrl+/" aria-label="Ctrl+/">
             {showPreview ? <Code size={13} /> : <Eye size={13} />}
             {showPreview ? '源码' : '预览'}
           </button>
           {onToggleOutline && (
             <button onClick={onToggleOutline}
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-              title="大纲 (Ctrl+Alt+O)">
+              data-tip="大纲 (Ctrl+Alt+O)" aria-label="大纲 (Ctrl+Alt+O)">
               <ListTree size={13} />
               大纲
             </button>
@@ -326,7 +326,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
           </button>
           <button onClick={handleDeleteEntry}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
-            title="删除">
+            data-tip="删除" aria-label="删除">
             <Trash2 size={14} />
           </button>
         </div>

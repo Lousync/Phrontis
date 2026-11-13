@@ -64,7 +64,7 @@ function DemoBox({ demo }: { demo: ReleaseHighlightDemo }) {
         <button
           onClick={() => setPlayId(p => p + 1)}
           className="text-[10.5px] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-          title="重播演示"
+          data-tip="重播演示" aria-label="重播演示"
         >
           ↻ 重播
         </button>
@@ -274,7 +274,7 @@ function VersionBody({ note, highlights, isCurrent, prev, totalVersions, onOpenA
         <button
           onClick={() => { void window.api?.openExternal?.('https://github.com/Lousync/Phrontis/releases') }}
           className="inline-flex items-center gap-1 text-[11.5px] text-[var(--accent)]/90 transition-colors hover:text-[var(--accent)]"
-          title="在 GitHub Releases 查看完整更新日志"
+          data-tip="在 GitHub Releases 查看完整更新日志" aria-label="在 GitHub Releases 查看完整更新日志"
         >
           在线查看完整更新日志
           <ArrowUpRight size={11} />
@@ -473,7 +473,7 @@ export function ReleaseNotesModule({ onDismiss }: { onDismiss?: () => void }) {
           <button
             onClick={() => setView({ kind: 'current' })}
             className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-            title="返回本版更新说明"
+            data-tip="返回本版更新说明" aria-label="返回本版更新说明"
           >
             <ArrowLeft size={13} />
             返回

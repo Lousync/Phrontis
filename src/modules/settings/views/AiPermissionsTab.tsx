@@ -30,7 +30,7 @@ function PermCtl({ cur, onChange, writeDead }: { cur: Perm; onChange: (p: Perm) 
             ? 'bg-zinc-500/20 text-[var(--text-secondary)]'
             : 'bg-[var(--accent)]/15 text-[var(--accent)]'
         return (
-          <button key={o} disabled={dead} title={dead ? '该模块暂无写操作' : undefined}
+          <button key={o} disabled={dead} data-tip={dead ? '该模块暂无写操作' : undefined} aria-label={dead ? '该模块暂无写操作' : undefined}
             onClick={() => onChange(o)}
             aria-pressed={on}
             className={`px-2.5 py-1 text-[11.5px] border-l border-[var(--border-color)] first:border-l-0 transition-colors ${

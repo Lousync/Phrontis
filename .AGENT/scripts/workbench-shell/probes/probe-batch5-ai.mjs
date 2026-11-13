@@ -101,7 +101,7 @@ async function main() {
   // A0 前置：右栏展开（布局键刚清空 → 默认收起；点右缘手柄）
   await evalJs(`(() => {
     if (document.querySelector('[data-wb="rightPanel"]')) return true
-    const hs = [...document.querySelectorAll('[data-wb="shell"] [title="拖拽或点击展开"]')]
+    const hs = [...document.querySelectorAll('[data-wb="shell"] [data-tip="拖拽或点击展开"]')]
     hs[hs.length - 1]?.click(); return true
   })()`)
   await sleep(800)
@@ -128,8 +128,8 @@ async function main() {
   const dockedHeader = await evalJs(`(() => {
     const el = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
     return {
-      menu: !!el?.querySelector('button[title="会话列表"]'),
-      expand: !!el?.querySelector('button[title="扩大为完整对话页"]'),
+      menu: !!el?.querySelector('button[data-tip="会话列表"]'),
+      expand: !!el?.querySelector('button[data-tip="扩大为完整对话页"]'),
     }
   })()`)
   ok(dockedHeader.menu && dockedHeader.expand, 'A2b docked 态轻头部控件齐全（会话列表 + ⤢；收窄条件未误伤窄版）', JSON.stringify(dockedHeader))
@@ -153,7 +153,7 @@ async function main() {
   await sleep(200)
 
   // A3 会话抽屉打开/关闭
-  await evalJs(`(() => { const b=[...document.querySelectorAll('[data-wb="rightPanel"] [data-assistant-variant="docked"] button[title="会话列表"]')]; b[0]?.click(); return true })()`)
+  await evalJs(`(() => { const b=[...document.querySelectorAll('[data-wb="rightPanel"] [data-assistant-variant="docked"] button[data-tip="会话列表"]')]; b[0]?.click(); return true })()`)
   await sleep(500)
   const drawerNew = await evalJs(`(() => {
     const el = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
@@ -164,9 +164,9 @@ async function main() {
   await sleep(300)
 
   // A4 ⤢ 打开 aiChat 中间标签
-  const expandThere = await evalJs(`!!document.querySelector('[data-wb="rightPanel"] button[title="扩大为完整对话页"]')`)
+  const expandThere = await evalJs(`!!document.querySelector('[data-wb="rightPanel"] button[data-tip="扩大为完整对话页"]')`)
   ok(expandThere, 'A4a 窄版带 ⤢ 扩大按钮')
-  await evalJs(`(() => { document.querySelector('[data-wb="rightPanel"] button[title="扩大为完整对话页"]')?.click(); return true })()`)
+  await evalJs(`(() => { document.querySelector('[data-wb="rightPanel"] button[data-tip="扩大为完整对话页"]')?.click(); return true })()`)
   await sleep(900)
   const afterExpand = await evalJs(`(() => {
     const tab = document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]')
@@ -206,7 +206,7 @@ async function main() {
   // A7 关闭 aiChat 标签 → 右栏自动回小对话
   await evalJs(`(() => {
     const t = document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]')
-    t?.querySelector('button[title="关闭标签页"]')?.click(); return true
+    t?.querySelector('button[data-tip="关闭标签页"]')?.click(); return true
   })()`)
   await sleep(800)
   const afterClose = await evalJs(`(() => ({
@@ -217,7 +217,7 @@ async function main() {
   ok(afterClose.tabGone && afterClose.panelGone && afterClose.chatBack, 'A7 关 aiChat 标签 → 右栏自动变回小对话', JSON.stringify(afterClose))
 
   // A8 重新 ⤢ → 再关（幂等，双 Tab 显隐管理后 AI Tab 仍在）
-  await evalJs(`(() => { document.querySelector('[data-wb="rightPanel"] button[title="扩大为完整对话页"]')?.click(); return true })()`)
+  await evalJs(`(() => { document.querySelector('[data-wb="rightPanel"] button[data-tip="扩大为完整对话页"]')?.click(); return true })()`)
   await sleep(800)
   const again = await evalJs(`!!document.querySelector('[data-wb="aiUsagePanel"]')`)
   ok(again, 'A8 再次 ⤢ 幂等（token 面板重现）')
@@ -269,7 +269,7 @@ async function main() {
   ok(side.there && side.tabs.join(',') === 'sessions,outline' && side.hasNew && side.changesGone,
     'B2 左栏 AI 侧栏挂载（双 tab + 新会话，文件改动卡已删）', JSON.stringify(side))
   // B3 page 态对话区无抽屉入口（会话导航已移交左栏）
-  const pageDrawer = await evalJs(`!!document.querySelector('[data-assistant-variant="page"] button[title="会话列表"]')`)
+  const pageDrawer = await evalJs(`!!document.querySelector('[data-assistant-variant="page"] button[data-tip="会话列表"]')`)
   ok(!pageDrawer, 'B3 page 态无抽屉按钮（导航交左栏）')
   // B4 新建会话 → 大纲 tab 空态
   await evalJs(`(() => { document.querySelector('[data-wb="aiSideNew"]')?.click(); return true })()`)
@@ -284,7 +284,7 @@ async function main() {
   // B5 关 aiChat 标签 → 左栏跟随落点（aiChat 态退场）
   await evalJs(`(() => {
     const t = document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]')
-    t?.querySelector('button[title="关闭标签页"]')?.click(); return true
+    t?.querySelector('button[data-tip="关闭标签页"]')?.click(); return true
   })()`)
   await sleep(800)
   const modAfter = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
@@ -318,7 +318,7 @@ async function main() {
   const searchOpen = await evalJs(`(() => ({
     there: !!document.querySelector('[data-wb="leftSearch"]'),
     hasInput: !!document.querySelector('[data-wb="leftSearch"] input'),
-    hasHome: !!document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]'),
+    hasHome: !!document.querySelector('[data-wb="leftSearch"] button[data-tip="返回总览"]'),
     hasLock: !!document.querySelector('[data-wb="leftSearch"] button[title^="锁定侧边栏"]'),
     focused: document.activeElement?.tagName === 'INPUT',
   }))()`)
@@ -340,7 +340,7 @@ async function main() {
   ok(searchOut.hasResult, 'C3 输入查询 → 结果列表或空态渲染')
   // C4 Ctrl+P 再次打开（快捷键指向左栏搜索态）
   await evalJs(`(() => {
-    document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]')?.click(); return true
+    document.querySelector('[data-wb="leftSearch"] button[data-tip="返回总览"]')?.click(); return true
   })()`)
   await sleep(400)
   const backToOverview = await evalJs(`!!document.querySelector('[data-wb="bookmarkMenuBtn"]') && !document.querySelector('[data-wb="leftSearch"]')`)
@@ -352,7 +352,7 @@ async function main() {
   await sleep(400)
   const viaHotkey = await evalJs(`!!document.querySelector('[data-wb="leftSearch"]')`)
   ok(viaHotkey, 'C5 Ctrl+P → 左栏搜索态')
-  await evalJs(`(() => { document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]')?.click(); return true })()`)
+  await evalJs(`(() => { document.querySelector('[data-wb="leftSearch"] button[data-tip="返回总览"]')?.click(); return true })()`)
   await sleep(300)
   // C6 点标签条**已激活**标签 → 左栏从总览态跟随切该模块态（2026-09-17 反馈拍板）
   // 目标动态取「条上 data-wb-active=1 的模块条目」而非写死 editor —— 页面条置顶后
@@ -423,7 +423,7 @@ async function main() {
     return {
       popGone,
       value: ta?.value ?? null,
-      chipCount: [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length,
+      chipCount: [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[data-tip="移除附件"]')).length,
     }
   })()`)
   ok(atAfter.popGone && atAfter.value === '' && atAfter.chipCount === 1,
@@ -455,7 +455,7 @@ async function main() {
   }
   const chipCap = await evalJs(`(() => {
     const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
-    return [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length
+    return [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[data-tip="移除附件"]')).length
   })()`)
   // 断言「=== 4」：fixture 种子保证候选池 ≥5（「引用测试」6 篇），加到第 5 篇必须被拒
   ok(chipCap === 4, 'E6 chip 上限 = 4（超限被拒，不无限追加）', `实际 ${chipCap} 篇`)
@@ -480,7 +480,7 @@ async function main() {
   })()`)
   await evalJs(`(() => {
     const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
-    for (const b of [...(root?.querySelectorAll('button[title="移除附件"]') ?? [])]) b.click()
+    for (const b of [...(root?.querySelectorAll('button[data-tip="移除附件"]') ?? [])]) b.click()
     return true
   })()`)
   await sleep(700)
@@ -501,7 +501,7 @@ async function main() {
   const preE7 = await evalJs(`(() => {
     const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
     return {
-      chips: [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length,
+      chips: [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[data-tip="移除附件"]')).length,
       taValue: root?.querySelector('textarea')?.value ?? null,
       pop: !!root?.querySelector('[data-wb="aiAttachPop"]'),
     }
@@ -523,7 +523,7 @@ async function main() {
   await sleep(900)
   const afterNormal = await evalJs(`(() => {
     const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
-    return [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length
+    return [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[data-tip="移除附件"]')).length
   })()`)
   ok(normalAttach.searchReadOnly === false && normalAttach.clicked && preE7.chips === 0 && afterNormal === 1,
     'E7 📎 路径无回归（浮层搜索框可编辑，点击候选可附加）',

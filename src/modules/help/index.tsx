@@ -108,7 +108,7 @@ export function HelpModule() {
           <button
             onClick={() => openExternal(ISSUES_URL).catch(() => {})}
             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-[12px] text-[var(--text-secondary)] border border-[var(--border-color)] rounded-md hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-            title="在 GitHub Issues 中反馈问题或建议"
+            data-tip="在 GitHub Issues 中反馈问题或建议" aria-label="在 GitHub Issues 中反馈问题或建议"
           >
             <LifeBuoy size={13} />
             反馈问题

@@ -1251,7 +1251,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
     <div className={`kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)] ${immersive ? 'hidden' : ''}`}>
       {onBack && (
         <>
-          <button onClick={onBack} title={backLabel ?? '返回书架'}
+          <button onClick={onBack} data-tip={backLabel ?? '返回书架'} aria-label={backLabel ?? '返回书架'}
             className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
             <ArrowLeft size={13} /><span className="kb-l1">{backLabel ?? '返回书架'}</span>
           </button>
@@ -1273,21 +1273,21 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
           文字按容器宽度退化（见 styles/index.css 的 .kb-fit 段）：容器 <770px 隐模式名、<668px 隐计数、
           <920px 先隐右侧功能按钮文字。title 保留 → 隐去后悬停仍可读。 */}
       <div className="flex items-center overflow-hidden rounded border border-[var(--border-color)]">
-        <button onClick={() => switchMode('scroll')} title="竖滚模式"
+        <button onClick={() => switchMode('scroll')} data-tip="竖滚模式" aria-label="竖滚模式"
           className={`flex items-center gap-1 px-1.5 py-0.5 ${viewMode === 'scroll' ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}>
           <GalleryVertical size={12} /><span className="kb-l2">竖滚</span>
         </button>
-        <button onClick={() => switchMode('single')} title="单页模式"
+        <button onClick={() => switchMode('single')} data-tip="单页模式" aria-label="单页模式"
           className={`flex items-center gap-1 border-x border-[var(--border-color)] px-1.5 py-0.5 ${viewMode === 'single' ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}>
           <Square size={12} /><span className="kb-l2">单页</span>
         </button>
-        <button onClick={() => switchMode('duo')} title="双页模式（需宽 ≥1240px）"
+        <button onClick={() => switchMode('duo')} data-tip="双页模式（需宽 ≥1240px）" aria-label="双页模式（需宽 ≥1240px）"
           className={`flex items-center gap-1 px-1.5 py-0.5 ${viewMode === 'duo' ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}>
           <Columns2 size={12} /><span className="kb-l2">双页</span>
         </button>
       </div>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
-      <button onClick={() => stepPage(-1)} disabled={pageNum <= 1} title="上一页 (PageUp / ←)"
+      <button onClick={() => stepPage(-1)} disabled={pageNum <= 1} data-tip="上一页" aria-label="上一页" data-keys="PageUp,←"
         className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40">
         <ChevronLeft size={15} />
       </button>
@@ -1297,42 +1297,43 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
         className="w-11 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-1 py-0.5 text-center text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
       />
       <span className="kb-l3 text-[var(--text-tertiary)]">/ {numPages}</span>
-      <button onClick={() => stepPage(1)} disabled={viewMode !== 'duo' && pageNum >= numPages} title="下一页 (PageDown / →)"
+      <button onClick={() => stepPage(1)} disabled={viewMode !== 'duo' && pageNum >= numPages} data-tip="下一页" aria-label="下一页" data-keys="PageDown,→"
         className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40">
         <ChevronRight size={15} />
       </button>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
       {/* 适配口径二选一（2026-09-18）：整页适配 = 整页完整可见；适合宽度 = 页面宽铺满容器、
           纵向滚动看完整页。放大/缩小会脱离自动适配（fitWidth=false）。 */}
-      <button onClick={resetFit} title="适合页面（整页完整可见，Ctrl+0）"
+      <button onClick={resetFit} data-tip="适合页面（整页完整可见）" aria-label="适合页面（整页完整可见）" data-keys="Ctrl,0"
         className={`rounded p-0.5 ${fitWidth && fitPage ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <MaximizeIcon size={14} />
       </button>
-      <button onClick={fitToWidth} title="适合宽度（页面宽铺满，纵向滚动）"
+      <button onClick={fitToWidth} data-tip="适合宽度（页面宽铺满，纵向滚动）" aria-label="适合宽度（页面宽铺满，纵向滚动）"
         className={`rounded p-0.5 ${fitWidth && !fitPage ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <MoveHorizontal size={14} />
       </button>
-      <button onClick={() => zoomBy(1.2)} title="放大 (Ctrl + 滚轮 / Ctrl + =)" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomIn size={14} /></button>
-      <button onClick={() => zoomBy(1 / 1.2)} title="缩小 (Ctrl + 滚轮 / Ctrl + -)" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomOut size={14} /></button>
+      <button onClick={() => zoomBy(1.2)} data-tip="放大 (Ctrl + 滚轮 / Ctrl + =)" aria-label="放大 (Ctrl + 滚轮 / Ctrl + =)" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomIn size={14} /></button>
+      <button onClick={() => zoomBy(1 / 1.2)} data-tip="缩小 (Ctrl + 滚轮 / Ctrl + -)" aria-label="缩小 (Ctrl + 滚轮 / Ctrl + -)" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomOut size={14} /></button>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
       {/* 大纲 = 左栏 bookshelf 模块态（批次 6：内嵌大纲侧栏已删）：解锁左栏并切过去（兜底入口） */}
-      <button onClick={() => window.dispatchEvent(new CustomEvent('kb-rail-show-bookshelf-outline'))} title="在左栏打开目录/缩略图/书签"
+      <button onClick={() => window.dispatchEvent(new CustomEvent('kb-rail-show-bookshelf-outline'))} data-tip="在左栏打开目录/缩略图/书签" aria-label="在左栏打开目录/缩略图/书签"
         className="flex items-center gap-1 rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
         <ListTree size={14} /><span className="kb-l1">大纲</span>
       </button>
-      <button onClick={() => setSideTab((v) => (v === 'search' ? null : 'search'))} title="搜索 (Ctrl+F)"
+      <button onClick={() => setSideTab((v) => (v === 'search' ? null : 'search'))} data-tip="搜索" aria-label="搜索" data-keys="Ctrl,F"
         className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'search' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <Search size={14} /><span className="kb-l1">搜索</span>
       </button>
-      <button onClick={toggleBookmark} title={bookmarks.some((b) => b.page === currentPageForBookmark()) ? '移除本页书签' : '收藏本页书签'}
+      <button onClick={toggleBookmark} data-tip={bookmarks.some((b) => b.page === currentPageForBookmark()) ? '移除本页书签' : '收藏本页书签'}
+        aria-label={bookmarks.some((b) => b.page === currentPageForBookmark()) ? '移除本页书签' : '收藏本页书签'}
         className={`flex items-center gap-1 rounded p-0.5 ${bookmarks.some((b) => b.page === currentPageForBookmark()) ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         {bookmarks.some((b) => b.page === currentPageForBookmark()) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}<span className="kb-l1">书签</span>
       </button>
-      <button onClick={toggleEyeCare} title="护眼模式（书级记忆）"
+      <button onClick={toggleEyeCare} data-tip="护眼模式（书级记忆）" aria-label="护眼模式（书级记忆）"
         className={`flex items-center gap-1 rounded p-0.5 ${eyeCare ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         {eyeCare ? <Eye size={14} /> : <EyeOff size={14} />}<span className="kb-l1">护眼</span>
       </button>
-      <button onClick={toggleImmersive} title="沉浸阅读（隐藏全部 UI，Esc 退出）"
+      <button onClick={toggleImmersive} data-tip="沉浸阅读（隐藏全部 UI，Esc 退出）" aria-label="沉浸阅读（隐藏全部 UI，Esc 退出）"
         className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 ${immersive ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <BookOpen size={14} /><span className="kb-l1">沉浸</span>
       </button>
@@ -1388,7 +1389,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
         <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
         <button onClick={() => zoomBy(1.2)} className="rounded p-0.5 hover:bg-[var(--bg-hover)]"><ZoomIn size={14} /></button>
         <button onClick={() => zoomBy(1 / 1.2)} className="rounded p-0.5 hover:bg-[var(--bg-hover)]"><ZoomOut size={14} /></button>
-        <button onClick={toggleImmersive} title="退出沉浸 (Esc)" className="rounded px-1.5 py-0.5 text-[var(--accent)] hover:bg-[var(--bg-hover)]">退出</button>
+        <button onClick={toggleImmersive} data-tip="退出沉浸" aria-label="退出沉浸" data-keys="Esc" className="rounded px-1.5 py-0.5 text-[var(--accent)] hover:bg-[var(--bg-hover)]">退出</button>
       </div>
     </div>
   )
@@ -1434,11 +1435,11 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
           {/* 页边悬浮箭头（翻页模式；沉浸时隐藏） */}
           {!immersive && viewMode !== 'scroll' && (
             <>
-              <button onClick={() => stepPage(-1)} disabled={pageNum <= 1} title="上一页"
+              <button onClick={() => stepPage(-1)} disabled={pageNum <= 1} data-tip="上一页" aria-label="上一页"
                 className="kb-pop absolute left-2 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 text-[var(--text-secondary)] opacity-60 shadow transition-opacity hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] hover:opacity-100 disabled:opacity-0">
                 <ChevronLeft size={17} />
               </button>
-              <button onClick={() => stepPage(1)} disabled={viewMode === 'single' && pageNum >= numPages} title="下一页"
+              <button onClick={() => stepPage(1)} disabled={viewMode === 'single' && pageNum >= numPages} data-tip="下一页" aria-label="下一页"
                 className="kb-pop absolute right-2 top-1/2 z-10 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 text-[var(--text-secondary)] opacity-60 shadow transition-opacity hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] hover:opacity-100 disabled:opacity-0">
                 <ChevronRight size={17} />
               </button>
@@ -1451,7 +1452,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
           )}
         </div>
       </div>
-      {immersive && <button onClick={toggleImmersive} title="退出沉浸 (Esc)"
+      {immersive && <button onClick={toggleImmersive} data-tip="退出沉浸" aria-label="退出沉浸" data-keys="Esc"
         className="fixed top-3 right-3 z-50 flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 text-[var(--text-secondary)] shadow hover:text-[var(--text-primary)]"><X size={14} /></button>}
       {floatingBar}
       <TextSelectionBar rect={selInfo?.rect ?? null} translate={translate} onCopy={doCopySel} onTranslate={() => void doTranslateSel()} onAsk={doAsk} onClose={closeSelBar} onCreateExcerpt={selInfo && rootId ? onCreateExcerpt : undefined} />

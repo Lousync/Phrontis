@@ -202,7 +202,7 @@ export function VaultPicker({ onDone, startup = false }: { onDone: (created?: bo
                           autoFocus={startup && i === 0}
                           onClick={() => void enterVault(v)}
                           disabled={busy}
-                          title={v.path}
+                          data-tip={v.path} aria-label={v.path}
                           className="flex min-w-0 flex-1 items-center gap-3 px-5 py-3 text-left hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
                         >
                           <span className={`w-4 shrink-0 text-[var(--accent)] ${startup && i === 0 ? '' : 'opacity-50'}`}>
@@ -221,7 +221,7 @@ export function VaultPicker({ onDone, startup = false }: { onDone: (created?: bo
                         </button>
                         <button
                           onClick={() => setManage({ v, confirm: 'none' })}
-                          title="管理此仓库"
+                          data-tip="管理此仓库" aria-label="管理此仓库"
                           className="mr-2 shrink-0 rounded p-1.5 text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
                         >
                           <MoreHorizontal size={15} />
@@ -241,7 +241,7 @@ export function VaultPicker({ onDone, startup = false }: { onDone: (created?: bo
                         <button
                           onClick={() => setManage(null)}
                           className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                          title="关闭"
+                          data-tip="关闭" aria-label="关闭"
                         >
                           <X size={13} />
                         </button>
@@ -361,7 +361,7 @@ export function VaultPicker({ onDone, startup = false }: { onDone: (created?: bo
               <div className="flex items-center justify-between gap-4 py-4">
                 <div className="min-w-0">
                   <div className="text-[13px] font-medium text-[var(--text-primary)]">仓库位置</div>
-                  <div className="text-[11.5px] text-[var(--text-muted)] mt-0.5 truncate" title={parentPath ?? undefined}>
+                  <div className="text-[11.5px] text-[var(--text-muted)] mt-0.5 truncate" data-tip={parentPath ?? undefined} aria-label={parentPath ?? undefined}>
                     {parentPath ?? '默认（文档目录）'}
                   </div>
                 </div>

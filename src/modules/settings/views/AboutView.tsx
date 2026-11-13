@@ -124,7 +124,7 @@ export function AboutView() {
             {IN_APP_UPDATE_SUPPORTED ? '镜像仅用于加速下载，失效自动回退直连。' : '（仅 Windows 版的应用内更新使用；本平台从发布页手动下载，镜像对它无作用。）'}常用:{' '}
             {MIRROR_PRESETS.map(([name, url], i) => (
               <span key={url}>
-                <button onClick={() => update('updateMirror', url)} className="text-[var(--accent)] hover:underline font-mono" title={`使用 ${url}`}>
+                <button onClick={() => update('updateMirror', url)} className="text-[var(--accent)] hover:underline font-mono" data-tip={`使用 ${url}`} aria-label={`使用 ${url}`}>
                   {name}
                 </button>
                 {i < MIRROR_PRESETS.length - 1 && ' / '}

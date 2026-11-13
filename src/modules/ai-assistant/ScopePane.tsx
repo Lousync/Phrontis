@@ -193,7 +193,7 @@ export function ScopePane({ rootId, scope, scopeAll = false, onChange, onScopeAl
             {coveredByAncestor && (
               <span
                 className="shrink-0 text-[10px] text-[var(--text-disabled)]"
-                title={`已由前缀「${cov}」整体覆盖，取消这一项要把「${cov}」拆成子项`}
+                data-tip={`已由前缀「${cov}」整体覆盖，取消这一项要把「${cov}」拆成子项`} aria-label={`已由前缀「${cov}」整体覆盖，取消这一项要把「${cov}」拆成子项`}
               >
                 来自 {cov!.split('/').pop()}
               </span>
@@ -240,7 +240,7 @@ export function ScopePane({ rootId, scope, scopeAll = false, onChange, onScopeAl
               type="button"
               onClick={() => setFilter('')}
               className="kb-micro-pop shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-              title="清除"
+              data-tip="清除" aria-label="清除"
             >
               <X size={12} />
             </button>
@@ -263,7 +263,7 @@ export function ScopePane({ rootId, scope, scopeAll = false, onChange, onScopeAl
       </label>
       {/* 摘要行（F-5 = 只报数 / F-3 = 同位单按钮）：高度恒定，选择态不在这里逐条铺开 */}
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 pb-1.5">
-        <span className="min-w-0 truncate text-[11px] text-[var(--text-muted)]" title={disabled ? '运行中已锁定，跑完可改' : undefined}>
+        <span className="min-w-0 truncate text-[11px] text-[var(--text-muted)]" data-tip={disabled ? '运行中已锁定，跑完可改' : undefined} aria-label={disabled ? '运行中已锁定，跑完可改' : undefined}>
           {scopeAll
             ? '整个仓库'
             : scope.length === 0
@@ -275,7 +275,10 @@ export function ScopePane({ rootId, scope, scopeAll = false, onChange, onScopeAl
           type="button"
           onClick={runBatch}
           disabled={disabled}
-          title={batchMode === 'visible'
+          data-tip={batchMode === 'visible'
+            ? '把当前过滤命中的已加载节点全部加入作用域（清空搜索框可回到「全部取消」）'
+            : batchMode === 'files' ? '改为按文件/目录选择（空选 = 不读取仓库文件）'
+              : batchMode === 'top' ? '选中仓库最上层的每一项' : '清空本任务的作用域（不读取仓库文件）'} aria-label={batchMode === 'visible'
             ? '把当前过滤命中的已加载节点全部加入作用域（清空搜索框可回到「全部取消」）'
             : batchMode === 'files' ? '改为按文件/目录选择（空选 = 不读取仓库文件）'
               : batchMode === 'top' ? '选中仓库最上层的每一项' : '清空本任务的作用域（不读取仓库文件）'}

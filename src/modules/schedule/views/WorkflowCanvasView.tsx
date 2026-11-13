@@ -173,7 +173,7 @@ export function WorkflowCanvasView({ workflow, onBack, onOpenPanel, onChanged }:
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--border-color)] px-4 py-2">
-        <button onClick={onBack} title="返回工作流列表" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+        <button onClick={onBack} data-tip="返回工作流列表" aria-label="返回工作流列表" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <ArrowLeft size={15} />
         </button>
         <div className="flex min-w-0 items-center gap-1.5">
@@ -186,10 +186,10 @@ export function WorkflowCanvasView({ workflow, onBack, onOpenPanel, onChanged }:
           <button onClick={addStage} className="inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]">
             <Plus size={12} /> 添加阶段
           </button>
-          <button onClick={fit} title="适应画布" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Crosshair size={14} /></button>
-          <button onClick={() => zoom(-0.1)} title="缩小" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Minus size={14} /></button>
+          <button onClick={fit} data-tip="适应画布" aria-label="适应画布" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Crosshair size={14} /></button>
+          <button onClick={() => zoom(-0.1)} data-tip="缩小" aria-label="缩小" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Minus size={14} /></button>
           <span className="w-10 text-center text-[10.5px] tabular-nums text-[var(--text-muted)]">{Math.round(scale * 100)}%</span>
-          <button onClick={() => zoom(0.1)} title="放大" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus size={14} /></button>
+          <button onClick={() => zoom(0.1)} data-tip="放大" aria-label="放大" className="rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus size={14} /></button>
         </div>
       </div>
 
@@ -269,7 +269,7 @@ export function WorkflowCanvasView({ workflow, onBack, onOpenPanel, onChanged }:
                     borderColor: dragging ? 'var(--accent)' : 'var(--border-color)',
                     borderLeft: `4px solid ${statusColor(stage.status)}`,
                   }}
-                  title="拖动调整顺序，点击打开右栏"
+                  data-tip="拖动调整顺序，点击打开右栏" aria-label="拖动调整顺序，点击打开右栏"
                 >
                   <div className="flex items-start gap-1.5">
                     <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: statusColor(stage.status) }} />

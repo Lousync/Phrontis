@@ -174,9 +174,9 @@ const snapFor = (mode) => `(() => {
     img: cs(imgEl),
     imgLoaded: imgEl ? (imgEl.complete && imgEl.naturalWidth > 0) : null,
     // 脚注：两侧的「词」span 都带 title="点击查看脚注"（同一份语义锚点），上标都是它的子节点
-    fnWord: cs(q('[title="点击查看脚注"]')),
-    fnSup: cs(q('[title="点击查看脚注"] sup')),
-    fnCount: (live ? q('.cm-content') : prose)?.querySelectorAll('[title="点击查看脚注"]').length ?? 0,
+    fnWord: cs(q('[data-tip="点击查看脚注"]')),
+    fnSup: cs(q('[data-tip="点击查看脚注"] sup')),
+    fnCount: (live ? q('.cm-content') : prose)?.querySelectorAll('[data-tip="点击查看脚注"]').length ?? 0,
     relIndent0: relIndent(liEl0),
     relIndent1: relIndent(liEl1),
     langTag: (live ? q('.kb-code-lang-chip') : null)?.textContent ?? null,

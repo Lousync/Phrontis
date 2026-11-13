@@ -60,6 +60,7 @@
 | `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
 | `.kb-sweep` | `::after` 短条 `transform: translateX(0→194%)` 1.15s ease-in-out alternate infinite；轨道 2px | AI 回复生成态的等待指示（下滑条）。见 §J 与 `docs/ai-reply-loading-plan.md` |
+| `.kb-tip` / `.kb-tip-anim` | `opacity 0→1 + translateY(±3px→0) + scale(0.96→1)`，160ms；方向随 `data-place` 翻转 | 悬停提示气泡进场（全局 TooltipHost 与 HelpHint 共用）。只动 transform/opacity；量化后（data-ready）才播，避免落位前闪一下 |
 
 > 所有类统一包一段 `@media (prefers-reduced-motion: reduce)` 关闭。
 
@@ -299,6 +300,10 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
 - **L 段（2026-10-14）**：`.kb-hoveronly` / `.kb-hoveronly-host` / `.is-peek`（行内次要动作悬停显形），
   首个使用方是设置 → AI 的连通性测试按钮（`Zap`）；配套 `src/components/shared/HelpHint.tsx`
   的 ⓘ 浮层复用既有 `.kb-pop` ⇒ **本轮只新增这一个类**
+- **M 段（2026-11-13）**：`.kb-tip` / `.kb-tip-anim`（悬停提示）。把原生 `title` 换成
+  `data-tip` / `data-keys` 的事件委托宿主（`TooltipHost`），气泡皮肤走 `--tip-*` 令牌，
+  `HelpHint` 的 ⓘ 浮层改用同一套 `.kb-tip-surface` + `.kb-tip-anim` ⇒ **本轮只新增这两个类**。
+  形状定稿 = 浮起一档 + 9px 微箭头（原型 `tmp/tooltip-proto`，用户拍板）
 
 
 **共享组件（B 类，一处改全局受益）**

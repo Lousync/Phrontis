@@ -172,9 +172,9 @@ try {
       const back = [...document.querySelectorAll('button')].find(b => /返回书架/.test(b.title || b.textContent || ''));
       if (back) { back.click(); await sleep(1500); }
       const card = [...document.querySelectorAll('main button')]
-        .find(b => (b.getAttribute('title') || '') === ${JSON.stringify(rel)});
+        .find(b => (b.getAttribute('data-tip') || '') === ${JSON.stringify(rel)});
       if (!card) return '未找到卡片 ' + ${JSON.stringify(rel)} + ' · 现有：' +
-        [...document.querySelectorAll('main button')].map(b => b.getAttribute('title') || '')
+        [...document.querySelectorAll('main button')].map(b => b.getAttribute('data-tip') || '')
           .filter(Boolean).slice(0, 10).join(' / ');
       window.__roRecs.length = 0; window.__roErrors = 0;
       card.click(); await sleep(${waitIn});

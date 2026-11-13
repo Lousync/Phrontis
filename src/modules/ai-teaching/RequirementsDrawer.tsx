@@ -99,13 +99,13 @@ export function RequirementsDrawer(props: Props) {
       <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)]">
         {LAYERS.map((l) => (
           <button key={l.key} onClick={() => onLayer(l.key)} disabled={!canUse(l.key)}
-            title={l.key === 'unit' ? '可选层：不会自动创建；保存后才落盘，存在时自动注入' : l.key === 'segment' ? '本段要求：只在保存后落盘，存在时自动注入' : undefined}
+            data-tip={l.key === 'unit' ? '可选层：不会自动创建；保存后才落盘，存在时自动注入' : l.key === 'segment' ? '本段要求：只在保存后落盘，存在时自动注入' : undefined} aria-label={l.key === 'unit' ? '可选层：不会自动创建；保存后才落盘，存在时自动注入' : l.key === 'segment' ? '本段要求：只在保存后落盘，存在时自动注入' : undefined}
             className={`px-2 py-0.5 rounded text-[10.5px] transition-colors ${layer === l.key ? 'bg-[var(--bg-selected)] text-[var(--accent)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'} disabled:opacity-30`}>
             {l.label}
           </button>
         ))}
       </div>
-      {relPath && <div className="shrink-0 px-3 pt-1.5 text-[9.5px] text-[var(--text-muted)] truncate" title={relPath}>{relPath}</div>}
+      {relPath && <div className="shrink-0 px-3 pt-1.5 text-[9.5px] text-[var(--text-muted)] truncate" data-tip={relPath} aria-label={relPath}>{relPath}</div>}
       {loading ? (
         <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]"><Loader2 size={16} className="animate-spin" /></div>
       ) : (
@@ -119,7 +119,7 @@ export function RequirementsDrawer(props: Props) {
       )}
       {overInjectLimit && (
         <div
-          title={`每层注入上限 ${CONSTRAINT_INJECT_MAX_ITEMS} 条 / ${CONSTRAINT_INJECT_MAX_CHARS} 字符；超出部分不会进入 AI 上下文`}
+          data-tip={`每层注入上限 ${CONSTRAINT_INJECT_MAX_ITEMS} 条 / ${CONSTRAINT_INJECT_MAX_CHARS} 字符；超出部分不会进入 AI 上下文`} aria-label={`每层注入上限 ${CONSTRAINT_INJECT_MAX_ITEMS} 条 / ${CONSTRAINT_INJECT_MAX_CHARS} 字符；超出部分不会进入 AI 上下文`}
           className="shrink-0 px-3 pb-1 text-[9.5px] leading-snug text-[var(--text-muted)] truncate"
         >
           超出注入上限（{CONSTRAINT_INJECT_MAX_ITEMS} 条 / {CONSTRAINT_INJECT_MAX_CHARS} 字符），超出部分不会注入

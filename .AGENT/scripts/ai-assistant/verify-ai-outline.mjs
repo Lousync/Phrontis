@@ -48,7 +48,7 @@ const app = read('src/App.tsx')
 ok(/<AiAssistantModule[^>]*modActionsEl=\{on && railModule === 'aiAssistant' \? wbModActionsEl : null\}/.test(app),
   'C1 App 只在 AI 助手模块态传头部动作槽')
 ok(/modActionsEl\?: HTMLElement \| null/.test(mod), 'C2 模块 props 接收 modActionsEl')
-ok(/modActionsEl && createPortal\([\s\S]{0,600}?ListTree[\s\S]{0,400}?modActionsEl/.test(mod),
+ok(/modActionsEl && createPortal\([\s\S]{0,900}?ListTree[\s\S]{0,500}?modActionsEl/.test(mod),
   'C3 大纲按钮 portal 进头部动作槽（与 🏠/🔒 同排）')
 ok(/SIDEBAR_HEADER_ICON/.test(mod), 'C4 头部按钮使用统一图标口径')
 ok(/setSidebarView\(\(v\) => \(v === 'outline' \? 'sessions' : 'outline'\)\)/.test(mod),

@@ -168,7 +168,7 @@ export function ShareCardEditor({ open, onClose, data, texts, style, theme, prom
             {!promptEditing && (
               <button
                 onMouseDown={(e) => { e.preventDefault(); setPromptEditing(true) }}
-                title="编辑分享内容"
+                data-tip="编辑分享内容" aria-label="编辑分享内容"
                 className="absolute cursor-text rounded-[6px] border border-transparent transition-[border-color,background-color] hover:border-[var(--accent)] hover:bg-[rgba(83,74,183,.06)]"
                 style={{
                   left: pr.x * k,
@@ -216,7 +216,7 @@ export function ShareCardEditor({ open, onClose, data, texts, style, theme, prom
                   <button
                     onClick={() => onChangePrompt('')}
                     disabled={!prompt}
-                    title="清空"
+                    data-tip="清空" aria-label="清空"
                     className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] disabled:opacity-30 disabled:hover:text-[var(--text-muted)]"
                   >
                     <RotateCcw size={11} /> 清空
@@ -243,7 +243,7 @@ export function ShareCardEditor({ open, onClose, data, texts, style, theme, prom
                   <button
                     onClick={() => onResetText(key)}
                     disabled={texts[key] === DEFAULT_TEXTS[key]}
-                    title="还原默认"
+                    data-tip="还原默认" aria-label="还原默认"
                     className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] disabled:opacity-30 disabled:hover:text-[var(--text-muted)]"
                   >
                     <RotateCcw size={11} /> 还原

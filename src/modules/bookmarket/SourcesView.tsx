@@ -20,7 +20,7 @@ function Switch({ on, onToggle, title }: { on: boolean; onToggle: () => void; ti
       type="button"
       role="switch"
       aria-checked={on}
-      title={title}
+      data-tip={title} aria-label={title}
       onClick={onToggle}
       className={`relative h-[19px] w-[34px] flex-none rounded-full transition-colors ${on ? 'bg-[var(--accent)]' : 'bg-[var(--border-color)]'}`}
     >
@@ -85,7 +85,7 @@ export function SourcesView({ sources, conn, testing, onTest, onToggle, onCreden
                   <span className={tagCls}>无需登录</span>
                 )}
               </div>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-muted)]" title={s.url}>{s.url}</div>
+              <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--text-muted)]" data-tip={s.url} aria-label={s.url}>{s.url}</div>
             </div>
 
             <span className="h-[7px] w-[7px] flex-none rounded-full" style={{ background: meta.dot }} />
@@ -105,7 +105,7 @@ export function SourcesView({ sources, conn, testing, onTest, onToggle, onCreden
               <button type="button" onClick={() => onEdit(s)} className={btnGhost}>编辑</button>
             )}
             {s.builtin ? (
-              <button type="button" disabled title="预置源不可删除，可停用" className="h-[26px] cursor-not-allowed rounded-[7px] border border-[var(--border-color)] px-2.5 text-[12px] text-[var(--text-disabled)]">删除</button>
+              <button type="button" disabled data-tip="预置源不可删除，可停用" aria-label="预置源不可删除，可停用" className="h-[26px] cursor-not-allowed rounded-[7px] border border-[var(--border-color)] px-2.5 text-[12px] text-[var(--text-disabled)]">删除</button>
             ) : (
               <button type="button" onClick={() => onDelete(s)} className={btnGhost}>删除</button>
             )}

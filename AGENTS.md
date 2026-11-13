@@ -154,6 +154,7 @@ npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本�
 | 动效方案与落地进度 | `docs/ui-animation-plan.md` |
 | 帮助披露规范 | `docs/help-disclosure-pattern.md` |
 | 交互确认与弹窗限制（行内化模式清单） | `docs/ui-interaction-patterns.md` |
+| 悬停提示（Tooltip）令牌 / 迁移口径 / 插件图案 | `docs/tooltip-design.md` |
 | 更新说明机制（触发规则 / 数据三层） | `docs/release-notes-design.md` |
 | 主题氛围特效（四季粒子 / 丁达尔，等看板） | `docs/theme-fx-design.md` |
 | 昼夜动态主题（daycycle：纯函数 / 引擎 / 契约） | `docs/daycycle-theme-plan.md` |

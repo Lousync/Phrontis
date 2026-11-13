@@ -95,7 +95,7 @@ async function main() {
   // ===== 2) 点第一本书 → txtReader 出现 + 阅读 Tab 出现 =====
   // 封面网格的卡片 = 书架主区 button（title = relPath，含 .txt）
   const clicked = await evalJs(`(() => {
-    const main = document.querySelector('[data-wb="txtReader"]') ? null : [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('title') || '').includes('.txt'))
+    const main = document.querySelector('[data-wb="txtReader"]') ? null : [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('data-tip') || '').includes('.txt'))
     main?.click(); return !!main
   })()`)
   ok('找到并点击 TXT 书卡片', clicked)
@@ -156,7 +156,7 @@ async function main() {
   assertNotFailed()
 
   // ===== 4) 关书架标签 → 阅读 Tab 消失 + 回落 widgets/ai =====
-  await evalJs(`(() => { document.querySelector('[data-wb="tab"][data-wb-tab="bookshelf"] button[title="关闭标签页"]')?.click(); return true })()`)
+  await evalJs(`(() => { document.querySelector('[data-wb="tab"][data-wb-tab="bookshelf"] button[data-tip="关闭标签页"]')?.click(); return true })()`)
   await sleep(900)
   const step4 = await evalJs(`(() => ({
     readingTab: !!document.querySelector('[data-wb-rp-tab="reading"]'),
@@ -172,7 +172,7 @@ async function main() {
   await evalJs(`(() => { document.querySelector('[data-wb-bookmark="bookshelf"]')?.click(); return true })()`)
   await sleep(1000)
   await evalJs(`(() => {
-    const main = [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('title') || '').includes('.txt'))
+    const main = [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('data-tip') || '').includes('.txt'))
     main?.click(); return true
   })()`)
   for (let i = 0; i < 20; i++) {
@@ -184,7 +184,7 @@ async function main() {
   const reopen = await evalJs(`(() => ({
     reader: !!document.querySelector('[data-wb="txtReader"]'),
     scrollBox: !!document.querySelector('[data-wb="txtReader"] .overflow-y-auto'),
-    bookBtns: [...document.querySelectorAll('main button')].filter((b) => (b.getAttribute('title') || '').includes('.txt')).length,
+    bookBtns: [...document.querySelectorAll('main button')].filter((b) => (b.getAttribute('data-tip') || '').includes('.txt')).length,
     head: (() => { const h = document.querySelector('[data-wb="txtReader"]'); return { len: h?.innerHTML.length ?? 0, text: (h?.textContent ?? '').slice(0, 200) } })(),
   }))()`)
   console.log('[step5 重开诊断]', JSON.stringify(reopen))
@@ -234,7 +234,7 @@ async function main() {
   ok('程序化选区 + mouseup 派发', selOk)
   await sleep(300)
   const barOn = await evalJs(`(() => {
-    const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('title') || '').includes('存为摘录'))
+    const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('data-tip') || '').includes('存为摘录'))
     if (!btn) return false
     btn.click()
     return true
@@ -275,7 +275,7 @@ async function main() {
     const pill = [...panel.querySelectorAll('span')].some((s) => ['摘录','想法','高亮'].includes((s.textContent || '').trim()))
     const srcDate = /段 \\d+ · \\d{4}-\\d{2}-\\d{2}/.test(panel.textContent)
     const quote = !!panel.querySelector('.kb-exc-bd')
-    const acts = !!panel.querySelector('button[title="复制"]')
+    const acts = !!panel.querySelector('button[data-tip="复制"]')
     return { ok: card && pill && srcDate && quote && acts, card, pill, srcDate, quote, acts }
   })()`)
   ok('右栏卡片渲染五要素（色点/类型胶囊/来源日期/引文边框/复制操作）', card5.ok, JSON.stringify(card5))
@@ -305,7 +305,7 @@ async function main() {
   await mouse('mouseReleased', dragBox.x1, dragBox.y)
   await sleep(400)
   const dragBarOn = await evalJs(`(() => {
-    const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('title') || '').includes('存为摘录'))
+    const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('data-tip') || '').includes('存为摘录'))
     return !!btn
   })()`)
   ok('真实鼠标拖选 → 划选浮条出现（user-select 白名单生效）', dragBarOn)
@@ -318,7 +318,7 @@ async function main() {
   ok('点「返回书架」退出 TXT 阅读', backClicked)
   await sleep(900)
   const pdfClicked = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('main button')].find((x) => (x.getAttribute('title') || '').includes('.pdf'))
+    const b = [...document.querySelectorAll('main button')].find((x) => (x.getAttribute('data-tip') || '').includes('.pdf'))
     b?.click(); return !!b
   })()`)
   ok('找到并点击 PDF 书卡片', pdfClicked)

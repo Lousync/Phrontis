@@ -15,7 +15,7 @@ export function FolderFocusButton({ on, onToggle, className = '', size = SIDEBAR
   return (
     <button
       onClick={onToggle}
-      title={on ? '目录聚焦：已开启（点击关闭）' : '目录聚焦：只显示当前打开项所在目录链'}
+      data-tip={on ? '目录聚焦：已开启（点击关闭）' : '目录聚焦：只显示当前打开项所在目录链'} aria-label={on ? '目录聚焦：已开启（点击关闭）' : '目录聚焦：只显示当前打开项所在目录链'}
       aria-pressed={on}
       className={`p-1 rounded-md transition-colors shrink-0 ${className} ${
         on

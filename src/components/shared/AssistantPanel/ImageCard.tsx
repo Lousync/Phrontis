@@ -154,14 +154,14 @@ function PendingBody({ aspect, prompt, onStop }: { aspect?: string; prompt?: str
         <button
           type="button"
           onClick={onStop}
-          title="停止生成（已生成的部分不落盘；服务端可能已计费）"
+          data-tip="停止生成（已生成的部分不落盘；服务端可能已计费）" aria-label="停止生成（已生成的部分不落盘；服务端可能已计费）"
           className="absolute right-2 top-2 z-10 h-6 w-6 rounded-full bg-black/45 text-white flex items-center justify-center hover:bg-black/65 transition-colors"
         >
           <Square size={9} className="fill-current" />
         </button>
       )}
       <div className="absolute inset-x-0 bottom-0 px-2 pb-1.5">
-        {prompt && <div className="mb-1 truncate text-[10.5px] text-[var(--text-muted)]" title={prompt}>{prompt}</div>}
+        {prompt && <div className="mb-1 truncate text-[10.5px] text-[var(--text-muted)]" data-tip={prompt} aria-label={prompt}>{prompt}</div>}
         <span key={stage} className="kb-view-fade block text-[10.5px] text-[var(--text-secondary)]">
           {STAGES[stage]}…
         </span>
@@ -306,14 +306,14 @@ export function ImageCard({ artifact, versions, pending, error, errorPrompt, onS
             {/* 动作行：悬停才出（C1）。没有「插入知识页」—— 插图入口是对话（决策 D3） */}
             {!failed && (
               <div className="absolute left-2 top-2 flex items-center gap-1 opacity-0 group-hover/img:opacity-100 transition-opacity">
-                <button type="button" title="对这张图说改图要求（入口是对话）"
+                <button type="button" data-tip="对这张图说改图要求（入口是对话）" aria-label="对这张图说改图要求（入口是对话）"
                   onClick={() => onPrefill?.(`/生图 把这张图（${cur.rel}）改成：`)}
                   className="rounded bg-black/45 px-1.5 py-[2px] text-[10.5px] text-white hover:bg-black/65 transition-colors">
                   改图
                 </button>
               </div>
             )}
-            <button type="button" title="更多" onClick={() => setMenu((m) => !m)}
+            <button type="button" data-tip="更多" aria-label="更多" onClick={() => setMenu((m) => !m)}
               className="absolute right-2 top-2 h-6 w-6 rounded-full bg-black/45 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 hover:bg-black/65 transition-opacity">
               <MoreHorizontal size={13} />
             </button>
@@ -343,7 +343,7 @@ export function ImageCard({ artifact, versions, pending, error, errorPrompt, onS
                         return (
                           <button key={v.rel} type="button"
                             onClick={() => { setPickedRel(v.rel); setMenu(false) }}
-                            title={v.rel}
+                            data-tip={v.rel} aria-label={v.rel}
                             className={'rounded px-1.5 py-[1px] text-[10.5px] transition-colors ' +
                               (on ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]')}>
                             v{n}
@@ -364,7 +364,7 @@ export function ImageCard({ artifact, versions, pending, error, errorPrompt, onS
             <span className="peer ml-auto shrink-0 cursor-help">路径</span>
             {/* 完整路径 hover 浮层：只动 opacity（不用 max-width 过渡 —— 那会每帧触发布局） */}
             <span className="pointer-events-none absolute right-0 bottom-full z-10 mb-1 max-w-[420px] truncate rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-[10.5px] text-[var(--text-secondary)] opacity-0 shadow-lg transition-opacity peer-hover:opacity-100"
-              title={cur.rel}>{cur.rel}</span>
+              data-tip={cur.rel} aria-label={cur.rel}>{cur.rel}</span>
           </div>
         </>
       )}

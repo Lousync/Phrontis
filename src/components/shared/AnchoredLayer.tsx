@@ -41,6 +41,8 @@ interface Props {
   className?: string
   /** 无障碍角色（提示浮层传 `tooltip`） */
   role?: string
+  /** 进场动画类。默认 `kb-pop`（菜单 / 下拉）；提示浮层传 `kb-tip-anim` 与全局 Tooltip 保持一致 */
+  animClassName?: string
   /** 固定 id，供锚点的 `aria-describedby` 指向 */
   layerId?: string
   children: ReactNode
@@ -54,7 +56,8 @@ interface Pos {
 
 export function AnchoredLayer({
   anchorRef, open, onClose, prefer = 'bottom', align = 'start', gap = 6,
-  matchWidth = false, maxWidth, interactive = true, zIndex = 76, className, role, layerId, children,
+  matchWidth = false, maxWidth, interactive = true, zIndex = 76, className, role,
+  animClassName = 'kb-pop', layerId, children,
 }: Props) {
   const layerRef = useRef<HTMLDivElement | null>(null)
   const rectRef = useRef<DOMRect | null>(null)
@@ -153,7 +156,14 @@ export function AnchoredLayer({
   }
 
   return createPortal(
-    <div ref={layerRef} id={layerId} role={role} className={`kb-pop fixed ${className ?? ''}`} style={style}>{children}</div>,
+    <div
+      ref={layerRef}
+      id={layerId}
+      role={role}
+      data-place={pos.placement}
+      className={`${animClassName} fixed ${className ?? ''}`}
+      style={style}
+    >{children}</div>,
     document.body
   )
 }

@@ -68,7 +68,7 @@ export function UsageHeatmap({ heat }: { heat: UsageHeatCell[] }) {
                       key={di}
                       className="h-[11px] w-[11px] rounded-[2px]"
                       style={{ background: LEVEL_BG[levelOf(c.tokens, max)] }}
-                      title={`${c.date} · ${exactTokens(c.tokens)} tokens`}
+                      data-tip={`${c.date} · ${exactTokens(c.tokens)} tokens`} aria-label={`${c.date} · ${exactTokens(c.tokens)} tokens`}
                     />
                   ),
               )}

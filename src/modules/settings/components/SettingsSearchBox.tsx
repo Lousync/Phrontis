@@ -118,7 +118,7 @@ export function SettingsSearchBox({
           <button
             onMouseDown={e => e.preventDefault()}
             onClick={() => { onQueryChange(''); onOpenChange(true); inputRef.current?.focus() }}
-            title="清除"
+            data-tip="清除" aria-label="清除"
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <X size={13} />

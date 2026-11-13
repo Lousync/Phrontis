@@ -181,7 +181,7 @@ function ExistingWorkflow({ workflow, tags, onChanged, onDeleted }: { workflow: 
                 <div className="flex items-start gap-1.5">
                   <button
                     onClick={() => updateStage(stage.id, { status: nextStatus(stage.status) }, '阶段状态已更新')}
-                    title={statusLabel(stage.status)}
+                    data-tip={statusLabel(stage.status)} aria-label={statusLabel(stage.status)}
                     className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${stage.status === 'done' ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : stage.status === 'doing' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-[var(--text-disabled)] text-transparent'}`}
                   >
                     <Check size={10} strokeWidth={3} />

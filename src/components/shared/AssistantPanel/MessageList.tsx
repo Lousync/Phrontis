@@ -65,7 +65,7 @@ function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
   const costText = hasCost ? ` · ${fmtCostUsd(cost)} 估算` : ''
   if (hasSplit && (p > 0 || c > 0)) {
     return (
-      <span className="kb-l1 text-[var(--text-muted)]" title="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）与估算费用（按内置价目表，非账单）">
+      <span className="kb-l1 text-[var(--text-muted)]" data-tip="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）与估算费用（按内置价目表，非账单）" aria-label="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）与估算费用（按内置价目表，非账单）">
         ↑{fmtTok(p)} ↓{fmtTok(c)} · {fmtTok(p + c)} tokens{costText}
       </span>
     )
@@ -377,14 +377,14 @@ export function MessageList({
                   } else showToast({ type: 'error', message: '复制失败' })
                 }}
                 className={`flex items-center gap-0.5 transition-opacity hover:text-[var(--text-primary)] ${copiedIdx === i ? 'opacity-100' : 'opacity-0 group-hover/msg:opacity-100'}`}
-                title="复制">
+                data-tip="复制" aria-label="复制">
                 {copiedIdx === i ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                 <span className="kb-l2">{copiedIdx === i ? '已复制' : '复制'}</span>
               </button>
               {m.role === 'user' && m.id && !pending && (
                 <button onClick={() => setEditing({ id: m.id!, draft: m.content })}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
-                  title="编辑并重新生成">
+                  data-tip="编辑并重新生成" aria-label="编辑并重新生成">
                   <Pencil size={10} /> <span className="kb-l2">编辑</span>
                 </button>
               )}
@@ -392,21 +392,22 @@ export function MessageList({
               {m.role === 'assistant' && m.id && !pending && onResume && resumeInfo && resumeInfo.messageId === m.id && (
                 <button onClick={onResume}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
-                  title={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'}>
+                  data-tip={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'}
+                  aria-label={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'}>
                   <Play size={9} /> <span className="kb-l2">继续</span>
                 </button>
               )}
               {m.role === 'assistant' && i === messages.length - 1 && !pending && m.id && (
                 <button onClick={onRegenerate}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
-                  title="重新生成">
+                  data-tip="重新生成" aria-label="重新生成">
                   <RefreshCw size={10} /> <span className="kb-l2">重新生成</span>
                 </button>
               )}
               {m.role === 'assistant' && m.id && !pending && (
                 <button onClick={() => onDeleteMessage(m.id!)}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-red-400"
-                  title="删除该回复">
+                  data-tip="删除该回复" aria-label="删除该回复">
                   <Trash2 size={10} /> <span className="kb-l2">删除</span>
                 </button>
               )}
@@ -461,7 +462,7 @@ export function MessageList({
     <div className="relative h-full">
       {list}
       {offBottom && (
-        <button type="button" onClick={jumpToBottom} title="回到底部" aria-label="回到底部"
+        <button type="button" onClick={jumpToBottom} data-tip="回到底部" aria-label="回到底部"
           className="kb-pop absolute right-3 bottom-3 z-20 w-9 h-9 rounded-full flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-secondary)] shadow-lg hover:text-[var(--text-primary)] transition-colors">
           <ArrowDown size={16} strokeWidth={1.75} />
         </button>

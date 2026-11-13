@@ -107,7 +107,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1519 @ if (e.ctrlKey && !e.altKey && e.key ==='],
+    sources: ['src/App.tsx:1607 @ if (e.ctrlKey && !e.altKey && e.key ==='],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -119,24 +119,24 @@ export const COMMANDS: CommandDef[] = [
     id: 'palette', label: '命令面板', desc: '命令面板',
     keys: [['Ctrl', 'Shift', 'P']], group: 'global', scope: 'global', palette: false,
     note: '刻意不进命令面板自身（自指）——buildEmptyHints / buildCommandItems 都遵守这条',
-    sources: ['src/App.tsx:321 @ if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e'],
+    sources: ['src/App.tsx:330 @ if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e'],
   },
   {
     id: 'quick-open', label: '快速打开文件', desc: '快速打开文件（按标题 / 路径搜仓库页面）',
     keys: [['Ctrl', 'O']], group: 'global', scope: 'global', palette: true,
     note: '2026-10-13 博客大纲改键 Ctrl+Alt+O 让位给本键（原先两条 window 监听都会跑）',
-    sources: ['src/App.tsx:337 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !'],
+    sources: ['src/App.tsx:346 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !'],
   },
   {
     id: 'global-search', label: '全局搜索', desc: '全局搜索（左栏搜索态：标题、正文、目录、标签）',
     keys: [['Ctrl', 'P'], ['Ctrl', '`'], ['Ctrl', 'Shift', 'F']], group: 'global', scope: 'global', palette: true,
     note: '三个键同效、都指向左栏搜索态（App.tsx:304 与 :309 同一去向）。原表把这仨拆散且 Ctrl+P 错挂在「知识库 — 阅读」下',
-    sources: ['src/App.tsx:327 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !', 'src/App.tsx:332 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
+    sources: ['src/App.tsx:336 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !', 'src/App.tsx:341 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
   },
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1613 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
+    sources: ['src/App.tsx:1701 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -151,7 +151,7 @@ export const COMMANDS: CommandDef[] = [
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
     note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1586）',
-    sources: ['src/App.tsx:1585 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
+    sources: ['src/App.tsx:1673 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -168,18 +168,18 @@ export const COMMANDS: CommandDef[] = [
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
     conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1497）',
-    sources: ['src/App.tsx:1498 @ NumpadAdd'],
+    sources: ['src/App.tsx:1586 @ NumpadAdd'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
     conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1497）',
-    sources: ['src/App.tsx:1503 @ NumpadSubtract'],
+    sources: ['src/App.tsx:1591 @ NumpadSubtract'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',
     keys: [['Ctrl', 'Alt', 'S']], group: 'global', scope: 'global', palette: false,
-    sources: ["electron/main/dayPanelWindow.ts:230 @ bind('Control+Alt+S'"],
+    sources: ["electron/main/dayPanelWindow.ts:231 @ bind('Control+Alt+S'"],
   },
 
   // ---------------------------------------------------------------- 知识库 — 编辑器（页面级）
@@ -187,13 +187,13 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-save', label: '立即保存', desc: '立即保存当前页面',
     keys: [['Ctrl', 'S']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发：handler 首行 getGlobalActiveTab() !== 本模块就 return（src/lib/activeTab.ts）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1112 @ if (e.ctrlKey && e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1199 @ if (e.ctrlKey && e.key ==='],
   },
   {
     id: 'kb-preview', label: '阅读 ⇄ 编辑切换', desc: '阅读 ⇄ 编辑切换（仅 md / txt 文件）',
     keys: [['Ctrl', '/'], ['Ctrl', 'E']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与博客的 Ctrl+/ 各管各的',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1122 @ ) || (e.ctrlKey && (e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1209 @ ) || (e.ctrlKey && (e.key ==='],
   },
   {
     id: 'kb-editor-esc', label: '返回页面列表', desc: '关闭弹窗后返回页面列表',
@@ -205,28 +205,28 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-back', label: '页面历史：后退', desc: '页面历史：后退（笔记区顶栏最左那颗箭头）',
     keys: [['Alt', '←']], group: 'kbEditor', scope: 'note', palette: false,
     note: '对账原型曾把本键锚到 PageEditor 里 Alt+A 那一行（不再写行号 —— 它随代码漂），真实判据在 knowledge/index.tsx',
-    sources: ['src/modules/knowledge/index.tsx:1779 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1822 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-fwd', label: '页面历史：前进', desc: '页面历史：前进',
     keys: [['Alt', '→']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1779 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1822 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即请求一条（Tab 采纳 / Esc 拒绝；停顿后自动给出）',
     keys: [['Alt', 'A']], group: 'kbEditor', scope: 'note', palette: false,
     note: '原表把它挂在已退役的「编辑器模块」组下；实际判定在 PageEditor.tsx:779（笔记编辑态）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:883 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:950 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-image', label: '插入图片', desc: '插入图片（顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Shift', 'I']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1262 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1362 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
   },
   {
     id: 'kb-footnote', label: '插入脚注', desc: '插入脚注（先选中词语；顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Alt', 'F']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1267 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1367 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 写作面
@@ -237,37 +237,37 @@ export const COMMANDS: CommandDef[] = [
     id: 'ed-bold', label: '加粗', desc: '加粗（编辑器内是加粗，不是折叠侧栏）',
     keys: [['Ctrl', 'B']], group: 'kbWriting', scope: 'note', palette: false,
     conflictNote: '与全局「折叠 / 展开侧栏」同键：写作面内由 Monaco / CodeMirror 接管，窗口级监听靠 isEditingInput 跳过',
-    sources: ['src/components/shared/MonacoPane.tsx:447 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1023 @ fmt-bold'],
+    sources: ['src/components/shared/MonacoPane.tsx:447 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1026 @ fmt-bold'],
   },
   {
     id: 'ed-italic', label: '斜体', desc: '斜体',
     keys: [['Ctrl', 'I']], group: 'kbWriting', scope: 'note', palette: false,
-    sources: ['src/components/shared/MonacoPane.tsx:448 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1024 @ fmt-italic'],
+    sources: ['src/components/shared/MonacoPane.tsx:448 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1027 @ fmt-italic'],
   },
   {
     id: 'ed-link', label: '新增外部链接', desc: '新增外部链接',
     keys: [['Ctrl', 'K']], group: 'kbWriting', scope: 'note', palette: false,
-    sources: ['src/components/shared/MonacoPane.tsx:449 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1025 @ link-external'],
+    sources: ['src/components/shared/MonacoPane.tsx:449 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1028 @ link-external'],
   },
   {
     id: 'ed-h1', label: '标题 1', desc: '标题 1',
     keys: [['Ctrl', 'Alt', '1']], group: 'kbWriting', scope: 'note', palette: false,
-    sources: ['src/components/shared/MonacoPane.tsx:450 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1026 @ Mod-Alt-1'],
+    sources: ['src/components/shared/MonacoPane.tsx:450 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1029 @ Mod-Alt-1'],
   },
   {
     id: 'ed-h2', label: '标题 2', desc: '标题 2',
     keys: [['Ctrl', 'Alt', '2']], group: 'kbWriting', scope: 'note', palette: false,
-    sources: ['src/components/shared/MonacoPane.tsx:451 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1027 @ Mod-Alt-2'],
+    sources: ['src/components/shared/MonacoPane.tsx:451 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1030 @ Mod-Alt-2'],
   },
   {
     id: 'ed-h3', label: '标题 3', desc: '标题 3',
     keys: [['Ctrl', 'Alt', '3']], group: 'kbWriting', scope: 'note', palette: false,
-    sources: ['src/components/shared/MonacoPane.tsx:452 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1028 @ Mod-Alt-3'],
+    sources: ['src/components/shared/MonacoPane.tsx:452 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1031 @ Mod-Alt-3'],
   },
   {
     id: 'ed-p', label: '正文（取消标题）', desc: '正文（取消标题）',
     keys: [['Ctrl', 'Alt', '0']], group: 'kbWriting', scope: 'note', palette: false,
-    sources: ['src/components/shared/MonacoPane.tsx:453 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1029 @ para-text'],
+    sources: ['src/components/shared/MonacoPane.tsx:453 @ editor.addCommand(monaco.KeyMod.CtrlCmd | monaco', 'src/components/shared/LiveMarkdownPane.tsx:1032 @ para-text'],
   },
   {
     id: 'ed-find', label: '查找', desc: '查找（源码档是 Monaco 查找框，即时渲染档是内置查找面板；Ctrl+G / F3 下一个、Esc 关闭）',
@@ -291,17 +291,17 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'sb-copy', label: '复制选中项', desc: '复制选中的页面 / 目录到内部剪贴板（非输入框时）',
     keys: [['Ctrl', 'C']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1827 @ // Ctrl+C — copy selected item to internal clipb'],
+    sources: ['src/modules/knowledge/index.tsx:1870 @ // Ctrl+C — copy selected item to internal clipb'],
   },
   {
     id: 'sb-cut', label: '剪切选中项', desc: '剪切选中的页面 / 目录（非输入框时）',
     keys: [['Ctrl', 'X']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1840 @ // Ctrl+X — cut selected item'],
+    sources: ['src/modules/knowledge/index.tsx:1883 @ // Ctrl+X — cut selected item'],
   },
   {
     id: 'sb-paste', label: '粘贴到选中目标', desc: '粘贴内部剪贴板到选中目标（非输入框时）',
     keys: [['Ctrl', 'V']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1863 @ pasteExternalFromClipboard(resolvePasteDir(), false)'],
+    sources: ['src/modules/knowledge/index.tsx:1906 @ pasteExternalFromClipboard(resolvePasteDir(), false)'],
   },
 
   // ---------------------------------------------------------------- 知识库 — Tab 管理
@@ -311,24 +311,24 @@ export const COMMANDS: CommandDef[] = [
     // 只在笔记模块激活时出现：Ctrl+N 在笔记 / 博客 / 日程都有，靠 tabs 区分（A1 的门控）
     requires: { tabs: ['knowledge'] },
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门）：笔记 / 博客 / 日程都占 Ctrl+N，各管各的',
-    sources: ['src/modules/knowledge/index.tsx:1790 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1833 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.'],
   },
   {
     id: 'kb-close-tab', label: '关闭当前 Tab', desc: '关闭当前打开的 Tab 页',
     keys: [['Ctrl', 'W']], group: 'kbTabs', scope: 'note', palette: true,
     // 模块内命令进面板（L2 第三批）：只在笔记模块激活时出现
     requires: { tabs: ['knowledge'] },
-    sources: ['src/modules/knowledge/index.tsx:1802 @ // Ctrl+W — close current tab'],
+    sources: ['src/modules/knowledge/index.tsx:1845 @ // Ctrl+W — close current tab'],
   },
   {
     id: 'kb-next-tab', label: '下一个 Tab', desc: '切换到下一个 Tab',
     keys: [['Ctrl', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1810 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
+    sources: ['src/modules/knowledge/index.tsx:1853 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
   },
   {
     id: 'kb-prev-tab', label: '上一个 Tab', desc: '切换到上一个 Tab',
     keys: [['Ctrl', 'Shift', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1810 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
+    sources: ['src/modules/knowledge/index.tsx:1853 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 阅读
@@ -337,13 +337,13 @@ export const COMMANDS: CommandDef[] = [
     keys: [['Ctrl', 'Shift', 'R']], group: 'kbReading', scope: 'note', palette: true,
     // 模块内命令进面板（L2 第三批）：只在笔记模块激活时出现
     requires: { tabs: ['knowledge'] },
-    sources: ['src/modules/knowledge/index.tsx:1796 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
+    sources: ['src/modules/knowledge/index.tsx:1839 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
   },
   {
     id: 'kb-immersive-esc', label: '沉浸阅读退出', desc: '沉浸阅读退出',
     keys: [['Escape']], group: 'kbReading', scope: 'note', palette: false,
     conflictNote: '仅沉浸阅读态接管 Escape；非沉浸态归「返回页面列表」',
-    sources: ['src/modules/knowledge/index.tsx:1796 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
+    sources: ['src/modules/knowledge/index.tsx:1839 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
   },
 
   // ---------------------------------------------------------------- 电子书阅读器（PDF + EPUB）
@@ -429,13 +429,13 @@ export const COMMANDS: CommandDef[] = [
     id: 'blog-save', label: '保存并关闭', desc: '保存并关闭编辑器',
     keys: [['Ctrl', 'S']], group: 'blogKeys', scope: 'blog', palette: false,
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与笔记的 Ctrl+S 各管各的',
-    sources: ['src/modules/blog/components/MarkdownEditor.tsx:218 @ ) { e.preventDefault(); handleSaveAndClose() }'],
+    sources: ['src/modules/blog/components/MarkdownEditor.tsx:220 @ ) { e.preventDefault(); handleSaveAndClose() }'],
   },
   {
     id: 'blog-preview', label: '切换预览', desc: '切换 Markdown 预览',
     keys: [['Ctrl', '/']], group: 'blogKeys', scope: 'blog', palette: false,
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与笔记的 Ctrl+/ 各管各的',
-    sources: ['src/modules/blog/components/MarkdownEditor.tsx:217 @ ) { e.preventDefault(); setShowPreview(v => !v) '],
+    sources: ['src/modules/blog/components/MarkdownEditor.tsx:219 @ ) { e.preventDefault(); setShowPreview(v => !v) '],
   },
   {
     id: 'blog-outline', label: '切换大纲', desc: '切换大纲（编辑器 / 详情态）',
@@ -480,7 +480,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sys-pwdfill', label: '密码填充弹窗开关', desc: '密码填充弹窗开关（系统级）',
     keys: [['Ctrl', 'Alt', 'P']], group: 'passwordKeys', scope: 'global', palette: false,
     note: '原表写「可在设置改键」—— src/lib/settings.ts 里没有这个设置项，passwordFiller.ts:143 是直接读 settings.json 的裸键 fillPopupShortcut。改成真可改键属新功能，未做',
-    sources: ['electron/main/passwordFiller.ts:163 @ const shortcutKey = (settings.fillPopupShortcut '],
+    sources: ['electron/main/passwordFiller.ts:164 @ const shortcutKey = (settings.fillPopupShortcut '],
   },
 ]
 

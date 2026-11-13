@@ -15,7 +15,7 @@ import { collectThemeVars } from './htmlShell'
  *
  * 布局（2026-09-09 三修后的四修）：wrap = relative h-full 直接子用 absolute inset-0，
  * iframe 始终填满分栏高度，不再依赖 iframe-container 自适应；沙箱内 body{min-height:100% !important}
- * + flex 垂直居中让图矮于画布时居中、高于画布时正常滚动；警告条 absolute 叠在顶部，不挤压 iframe 高度。
+ * + flex 垂直居中让图矮于画布时居中、高于画布时正常滚动；错误提示与源码视图用 absolute 覆盖层，不挤压 iframe 高度。
  */
 export function ArtHtmlView({ relPath, reloadSeq, fit = false, manualZoom = null, onManualZoom, onEffectiveZoom }: {
   relPath: string
@@ -152,8 +152,6 @@ export function ArtHtmlView({ relPath, reloadSeq, fit = false, manualZoom = null
     return () => window.removeEventListener('message', onMsg)
   }, [onMsg])
 
-  const lines = useMemo(() => (doc ? doc.content.split('\n').length : 0), [doc])
-
   if (readErr) {
     return (
       <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
@@ -169,11 +167,6 @@ export function ArtHtmlView({ relPath, reloadSeq, fit = false, manualZoom = null
   }
   return (
     <div ref={wrapRef} className="relative h-full" onKeyDown={onWrapKeyDown} onWheel={onWrapWheel}>
-      {lines > 150 && !fit && (
-        <div className="absolute top-0 left-0 right-0 z-10 px-3 py-1.5 bg-[var(--warning-bg)] border-b border-[var(--warning)]/30 text-[11px] text-[var(--warning)]">
-          ⚠ 共 {lines} 行，超出产物约束（≤150 行），渲染可能不佳
-        </div>
-      )}
       {frameErr && !showSrc ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
           <div className="text-[12.5px] text-[var(--text-primary)]">示意图脚本运行出错</div>

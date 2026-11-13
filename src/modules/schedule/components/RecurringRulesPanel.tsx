@@ -96,13 +96,13 @@ export function RecurringRulesPanel({ rules, onReload }: Props) {
   return (
     <div className="shrink-0 border-b border-[var(--border-color)]">
       <div className="flex items-center gap-1.5 px-2 py-1.5 text-[11.5px] text-[var(--text-muted)] select-none">
-        <button onClick={() => setOpen((v) => !v)} title={open ? '收起' : '展开'}
+        <button onClick={() => setOpen((v) => !v)} data-tip={open ? '收起' : '展开'} aria-label={open ? '收起' : '展开'}
           className="flex items-center gap-1.5 transition-colors hover:text-[var(--text-primary)]">
           <Repeat size={12} className="shrink-0" />
           <span className="font-medium text-[var(--text-secondary)]">固定日程</span>
           <span className="rounded-full bg-[var(--bg-tertiary)] px-1.5 leading-[15px] text-[10.5px] font-semibold text-[var(--text-secondary)]">{rules.length}</span>
         </button>
-        <button onClick={() => { setOpen(true); setForm(emptyForm()) }} title="新增固定日程"
+        <button onClick={() => { setOpen(true); setForm(emptyForm()) }} data-tip="新增固定日程" aria-label="新增固定日程"
           className="ml-auto flex items-center gap-0.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
           <Plus size={11} /> 新增
         </button>
@@ -172,13 +172,13 @@ export function RecurringRulesPanel({ rules, onReload }: Props) {
                 style={{ borderLeftColor: r.enabled ? 'var(--accent)' : 'var(--text-muted)' }}>
                 <div className="flex items-center gap-1">
                   <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--text-primary)]">{r.title}</span>
-                  <button onClick={() => void toggle(r)} title={r.enabled ? '暂停' : '启用'}
+                  <button onClick={() => void toggle(r)} data-tip={r.enabled ? '暂停' : '启用'} aria-label={r.enabled ? '暂停' : '启用'}
                     className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
                     {r.enabled ? <Pause size={11} /> : <Play size={11} />}
                   </button>
-                  <button onClick={() => setForm(formOf(r))} title="编辑"
+                  <button onClick={() => setForm(formOf(r))} data-tip="编辑" aria-label="编辑"
                     className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pencil size={11} /></button>
-                  <button onClick={() => void remove(r)} title="删除"
+                  <button onClick={() => void remove(r)} data-tip="删除" aria-label="删除"
                     className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"><Trash2 size={11} /></button>
                 </div>
                 <div className="mt-0.5 text-[10.5px] text-[var(--text-muted)]">

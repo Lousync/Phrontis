@@ -161,11 +161,11 @@ export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
         {mode === 'word' ? <BookOpen size={12} className="text-[var(--accent)]" /> : <Languages size={12} className="text-[var(--accent)]" />}
         <span className="text-[11px] font-medium text-[var(--text-secondary)]">{mode === 'word' ? '词典' : '翻译'}</span>
         {cached && <span className="text-[10px] text-[var(--text-disabled)]">已缓存</span>}
-        <button onClick={handleCopy} title="复制结果"
+        <button onClick={handleCopy} data-tip="复制结果" aria-label="复制结果"
           className="ml-auto p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           {copied ? <Check size={11} className="text-emerald-400" /> : <Copy size={11} />}
         </button>
-        <button onClick={onClose} title="关闭 (Esc)"
+        <button onClick={onClose} data-tip="关闭 (Esc)" aria-label="关闭 (Esc)"
           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
           <X size={12} />
         </button>
@@ -184,11 +184,11 @@ export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
         {mode === 'word' && (
           <div>
             <div className="flex items-baseline gap-2 flex-wrap">
-              <button onClick={() => speak(entry?.word ?? text)} title="点击发音"
+              <button onClick={() => speak(entry?.word ?? text)} data-tip="点击发音" aria-label="点击发音"
                 className="text-[17px] font-semibold text-[var(--text-primary)] break-all hover:text-[var(--accent)] transition-colors">
                 {entry?.word ?? text}
               </button>
-              <button onClick={() => speak(entry?.word ?? text)} title="发音"
+              <button onClick={() => speak(entry?.word ?? text)} data-tip="发音" aria-label="发音"
                 className="text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors self-center">
                 <Volume2 size={13} />
               </button>
@@ -210,7 +210,7 @@ export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
                       <span key={t} className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-hover)] text-[var(--text-muted)]">{TAG_LABELS[t] ?? t}</span>
                     ))}
                     {entry.collins > 0 && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-hover)] text-amber-500" title="柯林斯星级">{'★'.repeat(entry.collins)}</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-hover)] text-amber-500" data-tip="柯林斯星级" aria-label="柯林斯星级">{'★'.repeat(entry.collins)}</span>
                     )}
                     {entry.oxford > 0 && <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-hover)] text-[var(--text-muted)]">牛津核心</span>}
                     {(entry.frq > 0 && entry.frq <= 20000) && <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-hover)] text-[var(--text-muted)]">高频词</span>}

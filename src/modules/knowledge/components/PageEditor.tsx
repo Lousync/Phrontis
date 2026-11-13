@@ -2101,7 +2101,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                       onChange={e => setPropAt(i, { value: e.target.value })}
                       className={`min-w-0 flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] ${r.readonly ? 'opacity-55' : ''}`} />
                     <button disabled={r.readonly}
-                      title={r.readonly ? '这一条只读（id 是身份，或值跨行）' : '删除这一条'}
+                      data-tip={r.readonly ? '这一条只读（id 是身份，或值跨行）' : '删除这一条'} aria-label={r.readonly ? '这一条只读（id 是身份，或值跨行）' : '删除这一条'}
                       onClick={() => setPropRows(rows => rows.filter((_, idx) => idx !== i))}
                       className={`shrink-0 rounded p-0.5 transition-colors ${r.readonly ? 'cursor-default text-[var(--text-disabled)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]'}`}>
                       <X size={12} />
@@ -2279,7 +2279,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                 <button
                   onClick={openPdfExternal}
                   className="px-2 py-1 text-[11px] rounded transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  title="使用本地工具打开"
+                  data-tip="使用本地工具打开" aria-label="使用本地工具打开"
                 >
                   本地打开
                 </button>
@@ -2624,7 +2624,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
             <button
               onClick={() => setShowBacklinks(false)}
               className="p-0.5 rounded hover:bg-[var(--input-bg)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-              title="收起（从右缘拖出可再展开）"
+              data-tip="收起（从右缘拖出可再展开）" aria-label="收起（从右缘拖出可再展开）"
             >
               <ChevronRight size={13} />
             </button>
@@ -2638,7 +2638,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                   <span className="flex-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">手动关联 · {manualLinks.length}</span>
                   <button onClick={() => setLinkPickerOpen(true)}
                     className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
-                    title="添加关联">
+                    data-tip="添加关联" aria-label="添加关联">
                     <Plus size={12} />
                   </button>
                 </div>
@@ -2649,7 +2649,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                     <button
                       onClick={e => { e.stopPropagation(); void handleRemoveManualLink(ml.id) }}
                       className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden group-hover:block p-0.5 rounded text-[var(--text-muted)] hover:text-red-400 transition-colors"
-                      title="解除关联"
+                      data-tip="解除关联" aria-label="解除关联"
                     >
                       <X size={11} />
                     </button>

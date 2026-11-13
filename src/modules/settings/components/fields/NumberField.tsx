@@ -66,7 +66,7 @@ export function NumberField({
             type="button"
             onClick={() => bounce(-1)}
             className="px-1.5 py-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            title="减小"
+            data-tip="减小" aria-label="减小"
           >
             <Minus size={12} />
           </button>
@@ -92,7 +92,7 @@ export function NumberField({
             type="button"
             onClick={() => bounce(1)}
             className="px-1.5 py-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            title="增大"
+            data-tip="增大" aria-label="增大"
           >
             <Plus size={12} />
           </button>
@@ -103,7 +103,7 @@ export function NumberField({
             type="button"
             onClick={() => onCommit(defaultValue)}
             className="px-1.5 py-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            title={`还原默认 ${defaultValue}${unit ?? ''}`}
+            data-tip={`还原默认 ${defaultValue}${unit ?? ''}`} aria-label={`还原默认 ${defaultValue}${unit ?? ''}`}
           >
             <RotateCcw size={11} />
           </button>

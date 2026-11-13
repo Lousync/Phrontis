@@ -202,7 +202,7 @@ export function ChapterPanel({
         <div className="flex items-center gap-1 min-w-0 flex-1">
           <button onClick={onCollapse}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-            title="返回">
+            data-tip="返回" aria-label="返回">
             <ArrowLeft size={16} />
           </button>
           {focusChapter && editingId === focusChapter.id ? (
@@ -226,7 +226,7 @@ export function ChapterPanel({
             <button
               onClick={() => handleStartRename(focusChapter.id, focusChapter.name)}
               className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-              title="重命名章节 (F2)">
+              data-tip="重命名章节 (F2)" aria-label="重命名章节 (F2)">
               <Pencil size={13} />
             </button>
           )}
@@ -267,7 +267,7 @@ export function ChapterPanel({
         <button
           onClick={() => setChaptersOpen(o => !o)}
           className="w-full flex items-center justify-between px-1 mb-1 group/toggle"
-          title={chaptersOpen ? '收起章节列表' : '展开章节列表'}
+          data-tip={chaptersOpen ? '收起章节列表' : '展开章节列表'} aria-label={chaptersOpen ? '收起章节列表' : '展开章节列表'}
         >
           <span className="flex items-center gap-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">
             {/* Tailwind v4 的 rotate-* 写的是 rotate 属性，transition-transform 收不到 → 用单图标 + .kb-chevron */}
@@ -306,19 +306,19 @@ export function ChapterPanel({
                 <span className="flex-1 truncate">{ch.name}</span>
                 <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
                   <button onClick={e => { e.stopPropagation(); onSortChapter(ch.id, 'up') }}
-                    className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="上移">
+                    className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="上移" aria-label="上移">
                     <ChevronUp size={13} />
                   </button>
                   <button onClick={e => { e.stopPropagation(); onSortChapter(ch.id, 'down') }}
-                    className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="下移">
+                    className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="下移" aria-label="下移">
                     <ChevronDown size={13} />
                   </button>
                   <button onClick={e => { e.stopPropagation(); handleStartRename(ch.id, ch.name) }}
-                    className="p-0.5 hover:text-white text-[var(--text-secondary)]" title="重命名">
+                    className="p-0.5 hover:text-white text-[var(--text-secondary)]" data-tip="重命名" aria-label="重命名">
                     <Pencil size={13} />
                   </button>
                   <button onClick={e => { e.stopPropagation(); if (skipDeleteConfirm) onDeleteChapter(ch.id); else setDeleteTarget({ id: ch.id, name: ch.name }) }}
-                    className="p-0.5 hover:text-[var(--danger)] text-[var(--text-secondary)]" title="删除">
+                    className="p-0.5 hover:text-[var(--danger)] text-[var(--text-secondary)]" data-tip="删除" aria-label="删除">
                     <Trash2 size={13} />
                   </button>
                 </div>
@@ -421,7 +421,7 @@ export function ChapterPanel({
         <button
           onClick={() => setPgOpen(o => !o)}
           className="w-full flex items-center justify-between px-1 mb-1"
-          title={pgOpen ? '收起页面列表' : '展开页面列表'}
+          data-tip={pgOpen ? '收起页面列表' : '展开页面列表'} aria-label={pgOpen ? '收起页面列表' : '展开页面列表'}
         >
           <span className="flex items-center gap-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">
             <ChevronRight size={11} className={`kb-chevron ${pgOpen ? 'rotate-90' : ''}`} />
@@ -489,11 +489,11 @@ export function ChapterPanel({
                   {(() => { const fi = getFileTypeInfo(p.fileType || ''); return fi.badge ? <span className="hidden group-hover:inline-block shrink-0 text-[8px] px-1 rounded font-medium ml-0.5" style={{ backgroundColor: fi.color + '20', color: fi.color }}>{fi.badge}</span> : null })()}
                   <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
                     <button onClick={e => { e.stopPropagation(); onSortPage(p.id, 'up') }}
-                      className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="上移">
+                      className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="上移" aria-label="上移">
                       <ChevronUp size={11} />
                     </button>
                     <button onClick={e => { e.stopPropagation(); onSortPage(p.id, 'down') }}
-                      className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" title="下移">
+                      className="p-0.5 hover:text-[var(--accent)] text-[var(--text-muted)]" data-tip="下移" aria-label="下移">
                       <ChevronDown size={11} />
                     </button>
                   </div>

@@ -16,7 +16,7 @@ export function TreeExpandButton({ expanded, onClick, title, dataWb }: {
   return (
     <button
       onClick={onClick}
-      title={title}
+      data-tip={title} aria-label={title}
       data-wb={dataWb}
       className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
     >

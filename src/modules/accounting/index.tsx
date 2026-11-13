@@ -180,7 +180,7 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
         <div className="flex items-center gap-1.5 px-2 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
           <Repeat size={12} /> 定期收支
           <span className="ml-auto tabular-nums">{recurring.length}</span>
-          <button onClick={() => requestNewRecurring()} title="新增定期收支"
+          <button onClick={() => requestNewRecurring()} data-tip="新增定期收支" aria-label="新增定期收支"
             className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"><Plus size={13} /></button>
         </div>
         {recurring.length > 0 && (
@@ -200,11 +200,11 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
             return (
               <div key={r.id} className={'rounded-md border border-transparent bg-[var(--bg-tertiary)] px-2 py-1.5 ' + (r.enabled ? '' : 'opacity-55')}>
                 <div className="flex items-center gap-1.5">
-                  <button onClick={() => void handleToggleRecurring(r)} title={r.enabled ? '暂停' : '启用'}
+                  <button onClick={() => void handleToggleRecurring(r)} data-tip={r.enabled ? '暂停' : '启用'} aria-label={r.enabled ? '暂停' : '启用'}
                     className={'relative h-4 w-7 shrink-0 rounded-full transition-colors ' + (r.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--border-color)]')}>
                     <span className="absolute top-0.5 h-3 w-3 rounded-full bg-white transition-[left] duration-150" style={{ left: r.enabled ? 14 : 2 }} />
                   </button>
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--text-primary)]" title={r.name}>{r.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--text-primary)]" data-tip={r.name} aria-label={r.name}>{r.name}</span>
                   <span className={'shrink-0 text-[12px] font-semibold tabular-nums ' + (r.type === 'income' ? 'text-[var(--money-in,#2b9e8f)]' : 'text-[var(--money-out,#e06c4f)]')}>{r.type === 'expense' ? '-' : '+'}{money(r.amount).replace('¥', '')}</span>
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px]">
@@ -216,8 +216,8 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
                     <button onClick={() => void handlePostRecurring(r.id)} className="rounded border border-[var(--accent)]/50 px-1.5 py-px text-[10.5px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10">记入</button>
                   )}
                   <span className="ml-auto" />
-                  <button onClick={() => requestEditRecurring(r.id)} title="编辑" className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pencil size={11} /></button>
-                  <button onClick={() => void handleDeleteRecurring(r.id)} title="删除" className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"><Trash2 size={11} /></button>
+                  <button onClick={() => requestEditRecurring(r.id)} data-tip="编辑" aria-label="编辑" className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pencil size={11} /></button>
+                  <button onClick={() => void handleDeleteRecurring(r.id)} data-tip="删除" aria-label="删除" className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"><Trash2 size={11} /></button>
                 </div>
               </div>
             )
@@ -253,7 +253,7 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
                 </span>
                 <button
                   onClick={() => setBalanceVisible((v) => !v)}
-                  title={balanceVisible ? '隐藏余额' : '显示余额'}
+                  data-tip={balanceVisible ? '隐藏余额' : '显示余额'} aria-label={balanceVisible ? '隐藏余额' : '显示余额'}
                   className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
                 >
                   {balanceVisible ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -265,7 +265,7 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
                 <button
                   key={id}
                   onClick={() => setView(id)}
-                  title={label}
+                  data-tip={label} aria-label={label}
                   className={'flex h-7 shrink-0 items-center gap-1.5 text-[12px] transition-colors ' + (narrow ? 'px-2' : 'px-3') + ' ' + (view === id ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]')}
                 >
                   <Icon size={14} />{!narrow && <span>{label}</span>}
@@ -274,7 +274,7 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
             </div>
             <button
               onClick={() => requestNewTransaction()}
-              title="记一笔"
+              data-tip="记一笔" aria-label="记一笔"
               className="flex h-7 shrink-0 items-center gap-1 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 text-[12px] text-white transition-colors hover:bg-[var(--accent-hover)]"
             >
               <Plus size={14} />{!narrow && <span>记一笔</span>}

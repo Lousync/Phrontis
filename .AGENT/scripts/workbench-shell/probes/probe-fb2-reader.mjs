@@ -73,7 +73,7 @@ async function createExcerpt(label) {
   ok(`${label}：内容帧内程序化划选 + mouseup`, String(sel).startsWith('ok:'), String(sel))
   await sleep(500)
   const clicked = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('title') || '').startsWith('存为摘录'))
+    const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('data-tip') || '').startsWith('存为摘录'))
     if (!b) return false
     b.click(); return true
   })()`)
@@ -162,7 +162,7 @@ async function main() {
       pdfRail: !!document.querySelector('[data-wb="pdfRailPanel"]'),
       list: !!document.querySelector('[data-wb="bookshelfSideList"]'),
       labels: p ? [...p.querySelectorAll('button')].map((b) => (b.textContent || '').trim()).filter(Boolean) : [],
-      hrefs: p ? [...p.querySelectorAll('button')].map((b) => b.getAttribute('title') || '') : [],
+      hrefs: p ? [...p.querySelectorAll('button')].map((b) => b.getAttribute('data-tip') || '') : [],
     }
   })()`)
   console.log('[左栏诊断]', JSON.stringify(rail))

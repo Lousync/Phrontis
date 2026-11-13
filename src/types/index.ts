@@ -1330,6 +1330,13 @@ export interface AgentSideLaneInfo extends AgentSessionInfo {
   anchorTitle?: string
 }
 
+/** 选择页预览用：最近 2 条对话（只读摘要） */
+export interface AiTeachRecentSession {
+  id: string
+  title: string
+  updatedAt: string
+}
+
 /** P5 工作区（AI教学两层结构；主进程 aiTeachingWorkspaces.ts 同构） */
 export interface AiTeachWorkspaceInfo {
   id: string
@@ -1339,6 +1346,8 @@ export interface AiTeachWorkspaceInfo {
   docCount: number
   folderRel: string
   lastActive: string | null
+  /** 最近活跃的 2 条对话（按 updated_at 倒序；无对话为空数组） */
+  recentSessions: AiTeachRecentSession[]
 }
 
 /** AI教学·课程模式（主进程 aiTeachingCourse.ts 同构；3.14 段模型） */

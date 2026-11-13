@@ -82,16 +82,16 @@ function Row({ task, onControl, onOpenShelf }: {
           <button type="button" onClick={onOpenShelf} className={GHOST_BTN}>去书架</button>
         )}
         {st === 'down' && (
-          <button type="button" title="暂停" className={ICON_BTN} onClick={() => onControl(task.id, 'pause')}><Pause size={11} strokeWidth={2.4} /></button>
+          <button type="button" data-tip="暂停" aria-label="暂停" className={ICON_BTN} onClick={() => onControl(task.id, 'pause')}><Pause size={11} strokeWidth={2.4} /></button>
         )}
         {st === 'paused' && (
-          <button type="button" title="继续" className={ICON_BTN} onClick={() => onControl(task.id, 'resume')}><Play size={11} /></button>
+          <button type="button" data-tip="继续" aria-label="继续" className={ICON_BTN} onClick={() => onControl(task.id, 'resume')}><Play size={11} /></button>
         )}
         {st === 'fail' && (
-          <button type="button" title="重试" className={ICON_BTN} onClick={() => onControl(task.id, 'retry')}><RotateCw size={11} strokeWidth={2.2} /></button>
+          <button type="button" data-tip="重试" aria-label="重试" className={ICON_BTN} onClick={() => onControl(task.id, 'retry')}><RotateCw size={11} strokeWidth={2.2} /></button>
         )}
         {st !== 'done' && (
-          <button type="button" title={st === 'fail' ? '从列表移除' : '取消下载'} className={ICON_BTN} onClick={() => onControl(task.id, 'cancel')}>
+          <button type="button" data-tip={st === 'fail' ? '从列表移除' : '取消下载'} aria-label={st === 'fail' ? '从列表移除' : '取消下载'} className={ICON_BTN} onClick={() => onControl(task.id, 'cancel')}>
             <X size={11} strokeWidth={2.2} />
           </button>
         )}
@@ -135,7 +135,7 @@ export function DownloadQueue({ open, tasks, onClose, onControl, onOpenShelf }: 
           {active.length > 0 && (
             <button
               type="button"
-              title={canPause ? '全部暂停' : '全部开始'}
+              data-tip={canPause ? '全部暂停' : '全部开始'} aria-label={canPause ? '全部暂停' : '全部开始'}
               className={ICON_BTN}
               onClick={() => onControl('', canPause ? 'pause-all' : 'resume-all')}
             >
@@ -143,11 +143,11 @@ export function DownloadQueue({ open, tasks, onClose, onControl, onOpenShelf }: 
             </button>
           )}
           {count('done') > 0 && (
-            <button type="button" title="清除已完成" className={ICON_BTN} onClick={() => onControl('', 'clear-done')}>
+            <button type="button" data-tip="清除已完成" aria-label="清除已完成" className={ICON_BTN} onClick={() => onControl('', 'clear-done')}>
               <Check size={12} strokeWidth={2.4} />
             </button>
           )}
-          <button type="button" title="收起" className={ICON_BTN} onClick={onClose}>
+          <button type="button" data-tip="收起" aria-label="收起" className={ICON_BTN} onClick={onClose}>
             <X size={12} strokeWidth={2} />
           </button>
         </span>

@@ -186,7 +186,7 @@ export function CategoryEditModal({ mode, category, onClose, onSaved }: Category
                 <button key={c} onClick={() => setColor(c)}
                   className={`w-6 h-6 rounded-full transition-transform ${color === c ? 'ring-2 ring-offset-2 scale-110 ring-[var(--accent)]' : 'hover:scale-105'}`}
                   style={{ backgroundColor: c, ['--tw-ring-offset-color' as never]: 'var(--bg-secondary)' }}
-                  title={c}
+                  data-tip={c} aria-label={c}
                 />
               ))}
             </div>

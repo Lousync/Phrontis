@@ -85,13 +85,13 @@ async function main() {
 
   // 3. 单击手柄收起左栏
   await evalJs(`(() => {
-    const h = document.querySelector('div[role="separator"][title="拖拽调整宽度，双击复位"]')
+    const h = document.querySelector('div[role="separator"][data-tip="拖拽调整宽度，双击复位"]')
     ;(h || window).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, button: 0 }))
     return 'DOWN'
   })()`)
   await sleep(150)
   await evalJs(`(() => {
-    const h = document.querySelector('div[role="separator"][title="拖拽调整宽度，双击复位"]')
+    const h = document.querySelector('div[role="separator"][data-tip="拖拽调整宽度，双击复位"]')
     ;(h || window).dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, button: 0 }))
     return 'UP'
   })()`)
@@ -104,7 +104,7 @@ async function main() {
   ok(cnt === 0, 'M4 收起后模块侧栏不回落中间（图谱入口 0 处）', `count=${cnt}`)
 
   // 5. 展开恢复：边缘条点击 → slot 重挂 → portal 回来
-  await evalJs(`(() => { const e=document.querySelector('div[title="拖拽或点击展开"]'); e?.click(); return !!e })()`)
+  await evalJs(`(() => { const e=document.querySelector('div[data-tip="拖拽或点击展开"]'); e?.click(); return !!e })()`)
   await sleep(700)
   const cnt2 = await evalJs(GRAPH_BTN)
   const st2 = await evalJs(JS_STATE)

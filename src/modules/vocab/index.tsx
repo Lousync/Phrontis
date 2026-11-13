@@ -51,7 +51,7 @@ function VocabSidebar({ day, onRefresh }: { day: VocabDayRecord | null; onRefres
         <button
           onClick={onRefresh}
           className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          title="刷新今日词表"
+          data-tip="刷新今日词表" aria-label="刷新今日词表"
         >
           <RefreshCw size={12} />
         </button>
@@ -218,7 +218,7 @@ export function VocabModule({ isActive = true, sidebarEl = null }: {
         <button
           onClick={() => { setReady(false); setTimedOut(false); setReloadSeq((n) => n + 1); void refresh() }}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          title="重新加载"
+          data-tip="重新加载" aria-label="重新加载"
         >
           <RefreshCw size={12} />
           刷新

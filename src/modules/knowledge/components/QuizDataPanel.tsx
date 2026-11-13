@@ -104,7 +104,7 @@ export function QuizDataPanel({ spaceName, onClose, onDataChanged }: {
           <span className="text-[13px] font-medium text-[var(--text-primary)]">错题本数据</span>
           <span className="px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[10.5px] text-[var(--text-secondary)]">{spaceName || '全部知识空间'}</span>
           <div className="flex-1" />
-          <button onClick={() => void refresh()} title="刷新" className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+          <button onClick={() => void refresh()} data-tip="刷新" aria-label="刷新" className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
             <RefreshCw size={13} className={busy ? 'animate-spin' : ''} />
           </button>
           <button onClick={onClose} className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
@@ -185,7 +185,7 @@ export function QuizDataPanel({ spaceName, onClose, onDataChanged }: {
                       {stats.byBook.map((b, i) => (
                         <div key={b.name} className="kb-item-in" style={{ animationDelay: `${i * 40}ms` }}>
                           <div className="flex items-center justify-between text-[11.5px]">
-                            <span className="truncate text-[var(--text-secondary)]" title={b.name}>{b.name}</span>
+                            <span className="truncate text-[var(--text-secondary)]" data-tip={b.name} aria-label={b.name}>{b.name}</span>
                             <span className="shrink-0 tabular-nums text-[var(--text-muted)]">
                               <b className="text-[var(--text-primary)]">{b.total}</b> 题 · 错 <b className="text-[var(--danger)]">{b.wrong}</b>
                               {b.mastered > 0 && <> · 掌握 <b className="text-[var(--success)]">{b.mastered}</b></>}
@@ -236,7 +236,7 @@ export function QuizDataPanel({ spaceName, onClose, onDataChanged }: {
                   <button
                     onClick={() => setConfirming(confirming === 'mastered' ? null : 'mastered')}
                     disabled={busy !== null || stats.mastered === 0}
-                    title={stats.mastered === 0 ? '暂无已掌握记录' : '删除连续答对 ≥ 2 次的记录'}
+                    data-tip={stats.mastered === 0 ? '暂无已掌握记录' : '删除连续答对 ≥ 2 次的记录'} aria-label={stats.mastered === 0 ? '暂无已掌握记录' : '删除连续答对 ≥ 2 次的记录'}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors"
                   >
                     <CheckCircle2 size={13} /> 清空已掌握

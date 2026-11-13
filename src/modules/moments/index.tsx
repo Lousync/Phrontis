@@ -668,7 +668,7 @@ export function MomentsModule() {
         <button
           onClick={() => toggleAlbumPost(post.id)}
           className="flex-1 min-w-0 flex items-center gap-3 px-3 py-3 text-left hover:bg-[var(--bg-hover)]/50 transition-colors"
-          title={expanded ? '收起' : '展开'}
+          data-tip={expanded ? '收起' : '展开'} aria-label={expanded ? '收起' : '展开'}
         >
           {cover ? (
             <img src={cover} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0 border border-[var(--border-color)]" loading="lazy" />
@@ -702,7 +702,7 @@ export function MomentsModule() {
           className={'mr-2 p-1 rounded-md transition-colors shrink-0 ' + (hiddenInTimeline
             ? 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
             : 'text-[var(--accent)] hover:bg-[var(--bg-hover)]')}
-          title={hiddenInTimeline ? '显示在时间线' : '从时间线隐藏（仅保留在相册）'}
+          data-tip={hiddenInTimeline ? '显示在时间线' : '从时间线隐藏（仅保留在相册）'} aria-label={hiddenInTimeline ? '显示在时间线' : '从时间线隐藏（仅保留在相册）'}
         >
           {hiddenInTimeline ? <EyeOff size={14} /> : <Eye size={14} />}
         </button>
@@ -728,7 +728,7 @@ export function MomentsModule() {
           <button
             onClick={e => { e.stopPropagation(); handleDeleteAlbumPhoto({ postId: post.id, indexInPost: i }).catch(console.error) }}
             className="absolute right-1.5 top-1.5 w-6 h-6 rounded-full bg-black/55 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-black/80 backdrop-blur transition-opacity"
-            title="删除这张照片"
+            data-tip="删除这张照片" aria-label="删除这张照片"
           >
             <Trash2 size={12} />
           </button>
@@ -736,7 +736,7 @@ export function MomentsModule() {
             <button
               onClick={e => { e.stopPropagation(); handleSetAlbumCover(selectedAlbum!.id, post.id, i).catch(console.error) }}
               className="absolute inset-x-1.5 bottom-1.5 py-1 rounded-lg bg-black/55 text-white text-[10px] backdrop-blur opacity-0 group-hover:opacity-100 transition-opacity"
-              title="设为封面"
+              data-tip="设为封面" aria-label="设为封面"
             >
               <Camera size={11} className="inline mr-1 -mt-0.5" />
               设为封面
@@ -786,7 +786,7 @@ export function MomentsModule() {
         <div
           onClick={e => { e.stopPropagation(); setLightbox({ images: urls, index: 0 }) }}
           className="relative w-[38%] max-w-[250px] shrink-0 min-h-[176px] bg-[var(--bg-primary)] cursor-zoom-in"
-          title="点击放大查看"
+          data-tip="点击放大查看" aria-label="点击放大查看"
         >
           <img src={thumbs[0] || urls[0]} alt="说说图片" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
         </div>
@@ -804,7 +804,7 @@ export function MomentsModule() {
               key={i}
               onClick={e => { e.stopPropagation(); setLightbox({ images: urls, index: i }) }}
               className="relative aspect-square overflow-hidden rounded-[9px] bg-[var(--bg-primary)] cursor-zoom-in"
-              title="点击放大查看"
+              data-tip="点击放大查看" aria-label="点击放大查看"
             >
               <img src={thumbs[i] || img} alt={`说说图片 ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
             </div>
@@ -813,7 +813,7 @@ export function MomentsModule() {
             <button
               onClick={e => { e.stopPropagation(); toggleFeedExpanded(post.id) }}
               className="relative aspect-square overflow-hidden rounded-[9px] bg-[var(--bg-primary)]"
-              title={`展开剩余 ${overflow} 张图片`}
+              data-tip={`展开剩余 ${overflow} 张图片`} aria-label={`展开剩余 ${overflow} 张图片`}
             >
               <img src={thumbs[GRID_VISIBLE] || urls[GRID_VISIBLE]} alt="" className="w-full h-full object-cover" loading="lazy" />
               <span className="absolute inset-0 bg-black/55 flex items-center justify-center text-white text-[16px] font-semibold">
@@ -842,7 +842,7 @@ export function MomentsModule() {
         key={post.id}
         onClick={() => setDetailPostId(post.id)}
         className="kb-cv flex rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden cursor-pointer hover:border-[var(--text-muted)]/40 transition-colors"
-        title="查看完整文案"
+        data-tip="查看完整文案" aria-label="查看完整文案"
       >
         {renderCoverGrid(post)}
 
@@ -855,21 +855,21 @@ export function MomentsModule() {
             </div>
 
             <div className="flex items-center gap-0.5 shrink-0">
-              <button onClick={e => { e.stopPropagation(); handleTogglePin(post.id) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title={post.isPinned ? '取消置顶' : '置顶'}>
+              <button onClick={e => { e.stopPropagation(); handleTogglePin(post.id) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" data-tip={post.isPinned ? '取消置顶' : '置顶'} aria-label={post.isPinned ? '取消置顶' : '置顶'}>
                 {post.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
               </button>
-              <button onClick={e => { e.stopPropagation(); openAlbumModal({ mode: 'pick', postId: post.id }) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title={post.albumId ? '更换相册' : '加入相册'}>
+              <button onClick={e => { e.stopPropagation(); openAlbumModal({ mode: 'pick', postId: post.id }) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" data-tip={post.albumId ? '更换相册' : '加入相册'} aria-label={post.albumId ? '更换相册' : '加入相册'}>
                 <Images size={14} />
               </button>
               {post.albumId && (
-                <button onClick={e => { e.stopPropagation(); void togglePostTimeline(post) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="仅在相册中显示（从时间线隐藏）">
+                <button onClick={e => { e.stopPropagation(); void togglePostTimeline(post) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" data-tip="仅在相册中显示（从时间线隐藏）" aria-label="仅在相册中显示（从时间线隐藏）">
                   <EyeOff size={14} />
                 </button>
               )}
-              <button onClick={e => { e.stopPropagation(); openEdit(post) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="编辑">
+              <button onClick={e => { e.stopPropagation(); openEdit(post) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" data-tip="编辑" aria-label="编辑">
                 <PencilLine size={14} />
               </button>
-              <button onClick={e => { e.stopPropagation(); setConfirmDeleteId(post.id) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] transition-colors" title="删除">
+              <button onClick={e => { e.stopPropagation(); setConfirmDeleteId(post.id) }} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] transition-colors" data-tip="删除" aria-label="删除">
                 <Trash2 size={14} />
               </button>
             </div>
@@ -933,14 +933,14 @@ export function MomentsModule() {
                   <button
                     onClick={() => { saveSignature().catch(console.error) }}
                     className="p-1 rounded-md text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
-                    title="保存签名"
+                    data-tip="保存签名" aria-label="保存签名"
                   >
                     <Check size={15} />
                   </button>
                   <button
                     onClick={() => setEditingSignature(false)}
                     className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                    title="取消"
+                    data-tip="取消" aria-label="取消"
                   >
                     <X size={15} />
                   </button>
@@ -951,7 +951,7 @@ export function MomentsModule() {
                   <button
                     onClick={startEditSignature}
                     className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                    title="修改签名"
+                    data-tip="修改签名" aria-label="修改签名"
                   >
                     <PencilLine size={13} />
                   </button>
@@ -976,7 +976,7 @@ export function MomentsModule() {
               <button
                 onClick={() => setTagQuery('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                title="清除搜索"
+                data-tip="清除搜索" aria-label="清除搜索"
               >
                 <X size={13} />
               </button>
@@ -1030,14 +1030,14 @@ export function MomentsModule() {
                     <button
                       onClick={() => setAlbumLayout('list')}
                       className={'p-1 rounded-md transition-colors ' + (albumLayout === 'list' ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]')}
-                      title="列表排列"
+                      data-tip="列表排列" aria-label="列表排列"
                     >
                       <List size={14} />
                     </button>
                     <button
                       onClick={() => setAlbumLayout('grid')}
                       className={'p-1 rounded-md transition-colors ' + (albumLayout === 'grid' ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]')}
-                      title="网格排列"
+                      data-tip="网格排列" aria-label="网格排列"
                     >
                       <LayoutGrid size={14} />
                     </button>
@@ -1045,7 +1045,7 @@ export function MomentsModule() {
                   <button
                     onClick={() => albumPhotoInputRef.current?.click()}
                     className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors"
-                    title="直接添加照片到相册"
+                    data-tip="直接添加照片到相册" aria-label="直接添加照片到相册"
                   >
                     <ImagePlus size={12} />
                     添加照片
@@ -1053,7 +1053,7 @@ export function MomentsModule() {
                   <button
                     onClick={() => openAlbumModal({ mode: 'rename', albumId: selectedAlbum.id })}
                     className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                    title="重命名相册"
+                    data-tip="重命名相册" aria-label="重命名相册"
                   >
                     <PencilLine size={14} />
                   </button>
@@ -1061,7 +1061,7 @@ export function MomentsModule() {
                     <button
                       onClick={() => { handleSetAlbumCover(selectedAlbum.id, '', 0).catch(console.error) }}
                       className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                      title="取消自定义封面（恢复为第一张照片）"
+                      data-tip="取消自定义封面（恢复为第一张照片）" aria-label="取消自定义封面（恢复为第一张照片）"
                     >
                       <X size={14} />
                     </button>
@@ -1069,7 +1069,7 @@ export function MomentsModule() {
                   <button
                     onClick={() => setAlbumDeleteConfirm(selectedAlbum)}
                     className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] transition-colors"
-                    title="删除相册"
+                    data-tip="删除相册" aria-label="删除相册"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -1102,7 +1102,7 @@ export function MomentsModule() {
                       <button
                         onClick={() => albumPhotoInputRef.current?.click()}
                         className="w-full py-3 rounded-xl border border-dashed border-[var(--border-color)] bg-[var(--bg-hover)]/30 flex items-center justify-center gap-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                        title="添加照片"
+                        data-tip="添加照片" aria-label="添加照片"
                       >
                         <ImagePlus size={16} />
                         <span className="text-[12px]">添加照片</span>
@@ -1124,7 +1124,7 @@ export function MomentsModule() {
                           )
                         }
                         return (
-                          <button key={post.id} onClick={() => toggleAlbumPost(post.id)} className="relative aspect-square rounded-xl overflow-hidden border border-[var(--border-color)] bg-[var(--bg-primary)] group" title="展开">
+                          <button key={post.id} onClick={() => toggleAlbumPost(post.id)} className="relative aspect-square rounded-xl overflow-hidden border border-[var(--border-color)] bg-[var(--bg-primary)] group" data-tip="展开" aria-label="展开">
                             {cover ? (
                               <img src={cover} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
                             ) : (
@@ -1144,7 +1144,7 @@ export function MomentsModule() {
                       <button
                         onClick={() => albumPhotoInputRef.current?.click()}
                         className="aspect-square rounded-xl border border-dashed border-[var(--border-color)] bg-[var(--bg-hover)]/30 flex flex-col items-center justify-center gap-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                        title="添加照片"
+                        data-tip="添加照片" aria-label="添加照片"
                       >
                         <ImagePlus size={22} />
                         <span className="text-[11px]">添加照片</span>
@@ -1225,7 +1225,7 @@ export function MomentsModule() {
           // absolute 相对模块根（= 主体卡片内）：任务栏展开/收起不影响相对位置；
           // bottom-24 避开右下角 AI 助手按钮
           className="absolute right-6 bottom-24 z-40 w-10 h-10 rounded-full bg-[var(--accent)] text-white shadow-[0_2px_12px_rgba(0,0,0,0.12)] hover:bg-[var(--accent-hover)] transition-colors flex items-center justify-center"
-          title="新建说说"
+          data-tip="新建说说" aria-label="新建说说"
         >
           <Plus size={18} />
         </button>
@@ -1288,7 +1288,7 @@ export function MomentsModule() {
                       style={{ backgroundColor: tagColor(tag) + '20', color: tagColor(tag), border: `1px solid ${tagColor(tag)}40` }}
                     >
                       {tag}
-                      <button onClick={() => removeTag(i)} className="hover:text-[var(--danger)] transition-colors" title="移除标签">
+                      <button onClick={() => removeTag(i)} className="hover:text-[var(--danger)] transition-colors" data-tip="移除标签" aria-label="移除标签">
                         <X size={10} />
                       </button>
                     </span>
@@ -1329,7 +1329,7 @@ export function MomentsModule() {
                         <button
                           onClick={() => removeImage(i)}
                           className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-black/65 text-white flex items-center justify-center hover:bg-black/85 transition-colors opacity-0 group-hover:opacity-100"
-                          title="移除图片"
+                          data-tip="移除图片" aria-label="移除图片"
                         >
                           <X size={12} />
                         </button>
@@ -1340,7 +1340,7 @@ export function MomentsModule() {
                       <button
                         onClick={() => setEditorImagesExpanded(true)}
                         className="relative aspect-square rounded-xl overflow-hidden border border-[var(--border-color)] bg-[var(--bg-primary)]"
-                        title="展开全部图片"
+                        data-tip="展开全部图片" aria-label="展开全部图片"
                       >
                         <img src={draft.attachments[GRID_VISIBLE]?.thumbUrl} alt="" className="w-full h-full object-cover" />
                         <span className="absolute inset-0 bg-black/55 flex items-center justify-center text-white text-[18px] font-semibold">
@@ -1353,7 +1353,7 @@ export function MomentsModule() {
                       <button
                         onClick={() => postImageInputRef.current?.click()}
                         className="aspect-square rounded-xl border border-dashed border-[var(--border-color)] bg-[var(--bg-hover)]/40 flex flex-col items-center justify-center gap-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                        title="添加图片"
+                        data-tip="添加图片" aria-label="添加图片"
                       >
                         <ImagePlus size={22} />
                         <span className="text-[11px]">添加图片</span>
@@ -1412,7 +1412,7 @@ export function MomentsModule() {
               <button
                 onClick={() => setDetailPostId(null)}
                 className="p-1 shrink-0 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors flex items-center justify-center"
-                title="关闭"
+                data-tip="关闭" aria-label="关闭"
               >
                 <X size={15} />
               </button>
@@ -1436,7 +1436,7 @@ export function MomentsModule() {
                         onClick={() => setLightbox({ images: imgs.urls, index: 0 })}
                         className="max-w-[200px] max-h-[320px] w-auto h-auto object-contain rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] cursor-zoom-in"
                         loading="lazy"
-                        title="点击放大查看"
+                        data-tip="点击放大查看" aria-label="点击放大查看"
                       />
                     ) : (
                       <div className="grid grid-cols-3 max-w-[360px] gap-1">
@@ -1445,7 +1445,7 @@ export function MomentsModule() {
                             key={i}
                             onClick={() => setLightbox({ images: imgs.urls, index: i })}
                             className="relative aspect-square overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] cursor-zoom-in"
-                            title="点击放大查看"
+                            data-tip="点击放大查看" aria-label="点击放大查看"
                           >
                             <img src={imgs.thumbs[i] || img} alt={`说说图片 ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
                           </div>
@@ -1471,7 +1471,7 @@ export function MomentsModule() {
               <span className="text-[13px] font-medium text-[var(--text-primary)]">
                 {albumModal.mode === 'rename' ? '重命名相册' : albumModal.mode === 'pick' ? '加入相册' : '新建相册'}
               </span>
-              <button onClick={() => setAlbumModal(null)} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="关闭">
+              <button onClick={() => setAlbumModal(null)} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" data-tip="关闭" aria-label="关闭">
                 <X size={15} />
               </button>
             </div>
@@ -1581,7 +1581,7 @@ export function MomentsModule() {
           <div className="kb-modal-in w-full max-w-sm rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-[0_2px_12px_rgba(0,0,0,0.12)] overflow-hidden">
             <div className="px-4 h-11 flex items-center justify-between border-b border-[var(--border-color)]">
               <span className="text-[13px] font-medium text-[var(--text-primary)]">添加照片到相册</span>
-              <button onClick={() => void cancelAlbumPhotoConfirm()} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="关闭">
+              <button onClick={() => void cancelAlbumPhotoConfirm()} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" data-tip="关闭" aria-label="关闭">
                 <X size={15} />
               </button>
             </div>
@@ -1640,7 +1640,7 @@ export function MomentsModule() {
             <button
               onClick={() => setLightbox(l => l ? { ...l, index: (l.index - 1 + l.images.length) % l.images.length } : l)}
               className="absolute left-5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/25 flex items-center justify-center transition-colors"
-              title="上一张"
+              data-tip="上一张" aria-label="上一张"
             >
               <ChevronLeft size={22} />
             </button>
@@ -1656,7 +1656,7 @@ export function MomentsModule() {
             <button
               onClick={() => setLightbox(l => l ? { ...l, index: (l.index + 1) % l.images.length } : l)}
               className="absolute right-5 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/25 flex items-center justify-center transition-colors"
-              title="下一张"
+              data-tip="下一张" aria-label="下一张"
             >
               <ChevronRight size={22} />
             </button>
@@ -1669,7 +1669,7 @@ export function MomentsModule() {
               })
             }}
             className="absolute right-16 top-5 px-3 h-10 rounded-full bg-white/10 text-white hover:bg-white/25 flex items-center gap-1.5 transition-colors"
-            title="复制图片"
+            data-tip="复制图片" aria-label="复制图片"
           >
             <Copy size={16} />
             复制
@@ -1678,7 +1678,7 @@ export function MomentsModule() {
           <button
             onClick={() => setLightbox(null)}
             className="absolute right-5 top-5 w-10 h-10 rounded-full bg-white/10 text-white hover:bg-white/25 flex items-center justify-center transition-colors"
-            title="关闭"
+            data-tip="关闭" aria-label="关闭"
           >
             <X size={18} />
           </button>

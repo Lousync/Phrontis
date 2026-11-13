@@ -138,7 +138,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
     <div
       key={`skel-${relPath}`}
       onClick={() => onFocusLocate?.(relPath, isDir)}
-      title={`${name}（点击退出聚焦并定位）`}
+      data-tip={`${name}（点击退出聚焦并定位）`} aria-label={`${name}（点击退出聚焦并定位）`}
       className="group flex items-center gap-1 rounded-md px-1.5 min-h-[28px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
       style={{ paddingLeft: 6 + depth * 12 }}
     >
@@ -256,7 +256,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
         style={{ paddingLeft: 6 + depth * 12 }}
         onClick={() => { onSelectDir?.(parentDirOf(e.relPath)); onOpenFile(e) }}
         onContextMenu={(ev) => onContextMenu(ev, e)}
-        title={e.relPath}
+        data-tip={e.relPath} aria-label={e.relPath}
       >
         <span className="w-[13px] shrink-0" />
         {/* 拖拽源收窄到行首图标（F-4 定位；B-49 起 pointer 实现，见组件内说明）：
@@ -265,7 +265,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
             防止松手顺手打开文件。touch-none 让指针手势不被浏览器手势接管。 */}
         <span
           className="inline-flex shrink-0 cursor-grab touch-none"
-          title="拖动移动"
+          data-tip="拖动移动" aria-label="拖动移动"
           onPointerDown={(ev) => handlePointerDown(ev, e.relPath)}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -328,7 +328,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
             style={{ paddingLeft: 6 + depth * 12 }}
             onClick={() => { onSelectDir?.(relPath); onToggleDir(relPath) }}
             onContextMenu={(e) => onContextMenu(e, dirNode)}
-            title={relPath}
+            data-tip={relPath} aria-label={relPath}
           >
             {/* 选中目录（B-7）：左缘 2px 强调色竖条、不铺底色——文件「正在看」已占用蓝底，
                 同底色会让人以为目录被打开了。与 activePath 是两层语义（落点 vs 正在看）。 */}
@@ -347,7 +347,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
                 点行仍是展开 / 收起，只有从图标拖动才移动 */}
             <span
               className="inline-flex shrink-0 cursor-grab touch-none"
-              title="拖动移动"
+              data-tip="拖动移动" aria-label="拖动移动"
               onPointerDown={(e) => handlePointerDown(e, relPath)}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
@@ -395,7 +395,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
                     data-wb="treeSoftHead"
                     className="flex items-center gap-1 rounded-md px-1.5 min-h-[28px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
                     style={{ paddingLeft: 6 }}
-                    title="软件生成的目录与文件（AI教学 产物、.ignore 过滤规则等）"
+                    data-tip="软件生成的目录与文件（AI教学 产物、.ignore 过滤规则等）" aria-label="软件生成的目录与文件（AI教学 产物、.ignore 过滤规则等）"
                   >
                     <ChevronRight
                       size={13}

@@ -197,8 +197,8 @@ async function waitReady(engine, tries = 40) {
   return false
 }
 
-/** 书架卡片数（用 `.books/` 前缀判，避开阅读器自身那堆 `button[title]`：目录/缩略图/书签…） */
-const shelfCards = () => evalJs(`[...document.querySelectorAll('main button[title]')].filter((b) => (b.getAttribute('title') || '').includes('.books/')).length`)
+/** 书架卡片数（用 `.books/` 前缀判，避开阅读器自身那堆 `button[data-tip]`：目录/缩略图/书签…） */
+const shelfCards = () => evalJs(`[...document.querySelectorAll('main button[data-tip]')].filter((b) => (b.getAttribute('data-tip') || '').includes('.books/')).length`)
 
 /**
  * 退到书架并**确认卡片真的在**。连开同一本书时，单次「返回书架」可能没生效
@@ -226,7 +226,7 @@ async function cycle(name, engine) {
   for (let i = 0; i < 4; i++) {
     clicked = await evalJs(`(() => {
       const re = new RegExp(${JSON.stringify(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))} + '$')
-      const b = [...document.querySelectorAll('main button[title]')].find((x) => re.test(x.getAttribute('title') || ''))
+      const b = [...document.querySelectorAll('main button[data-tip]')].find((x) => re.test(x.getAttribute('data-tip') || ''))
       if (!b) return 'no-card'
       b.scrollIntoView({ block: 'center' }); b.click(); return 'ok'
     })()`)

@@ -69,7 +69,7 @@ export function PdfThumbGrid({ pdf, numPages, current, duo = false, onJump }: Pr
           const active = activeSet.has(n)
           return (
             <button key={n} data-p={n} onClick={() => onJump(n)}
-              title={`第 ${n} 页`}
+              data-tip={`第 ${n} 页`} aria-label={`第 ${n} 页`}
               className={`group relative rounded-md border p-0.5 transition-colors ${active ? 'border-[var(--accent)]' : 'border-transparent hover:border-[var(--border-color)]'}`}>
               <div className="relative w-full overflow-hidden rounded bg-[var(--bg-primary)]" style={{ aspectRatio: '3 / 4' }}>
                 {url

@@ -362,7 +362,7 @@ export function AiAssistantModule({
           <button
             type="button"
             onClick={() => api.setActiveId(s.id)}
-            title={s.title || '未命名会话'}
+            data-tip={s.title || '未命名会话'} aria-label={s.title || '未命名会话'}
             className={`kb-item-in flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12.5px] ${
               api.activeId === s.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
             }`}
@@ -381,7 +381,7 @@ export function AiAssistantModule({
         type="button"
         onClick={() => void api.deleteSession(s.id)}
         className="hidden h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:flex"
-        title="删除会话"
+        data-tip="删除会话" aria-label="删除会话"
       >
         <Trash2 size={13} />
       </button>
@@ -417,7 +417,7 @@ export function AiAssistantModule({
                   key={n.id}
                   type="button"
                   onClick={() => jumpToOutline(n.id)}
-                  title={n.text}
+                  data-tip={n.text} aria-label={n.text}
                   className={`flex w-full items-start gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${
                     n.role === 'assistant' ? 'pl-5' : ''
                   }`}
@@ -460,7 +460,7 @@ export function AiAssistantModule({
               type="button"
               onClick={toggleScopeCollapsed}
               className="flex min-w-0 items-center gap-1 text-[11px] uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              title={scopeCollapsed ? '展开作用域' : '折叠作用域'}
+              data-tip={scopeCollapsed ? '展开作用域' : '折叠作用域'} aria-label={scopeCollapsed ? '展开作用域' : '折叠作用域'}
             >
               <ChevronRight size={11} className={`kb-chevron shrink-0 ${scopeCollapsed ? '' : 'is-open'}`} />
               作用域
@@ -470,7 +470,7 @@ export function AiAssistantModule({
             </button>
             {/* 计数与空态在 ScopePane 的摘要行（选择态只有一处表达），段头只报锁定状态 */}
             {api.pending && (
-              <span className="text-[11px] text-[var(--text-muted)]" title="本轮已在运行：作用域已锁定，改动要等这一轮跑完">运行中 · 已锁定</span>
+              <span className="text-[11px] text-[var(--text-muted)]" data-tip="本轮已在运行：作用域已锁定，改动要等这一轮跑完" aria-label="本轮已在运行：作用域已锁定，改动要等这一轮跑完">运行中 · 已锁定</span>
             )}
           </div>
           {!scopeCollapsed && (
@@ -497,7 +497,7 @@ export function AiAssistantModule({
                 type="button"
                 onClick={() => void api.newSession()}
                 className="kb-micro-pop flex h-5 w-5 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                title="新建会话"
+                data-tip="新建会话" aria-label="新建会话"
               >
                 <Plus size={13} />
               </button>
@@ -539,7 +539,7 @@ export function AiAssistantModule({
         <button
           type="button"
           onClick={() => setSidebarView((v) => (v === 'outline' ? 'sessions' : 'outline'))}
-          title={sidebarView === 'outline' ? '返回会话（当前：会话大纲）' : '会话大纲'}
+          data-tip={sidebarView === 'outline' ? '返回会话（当前：会话大纲）' : '会话大纲'} aria-label={sidebarView === 'outline' ? '返回会话（当前：会话大纲）' : '会话大纲'}
           aria-pressed={sidebarView === 'outline'}
           className={`rounded p-1 transition-colors ${
             sidebarView === 'outline'
@@ -563,7 +563,7 @@ export function AiAssistantModule({
             {(api.usage.in + api.usage.out) > 0 && (
               <span
                 className="kb-micro-pop rounded-md bg-[var(--bg-secondary)] px-2 py-1 text-[11px] text-[var(--text-muted)]"
-                title={`本任务消耗：输入 ${api.usage.in.toLocaleString()} · 输出 ${api.usage.out.toLocaleString()} tokens`}
+                data-tip={`本任务消耗：输入 ${api.usage.in.toLocaleString()} · 输出 ${api.usage.out.toLocaleString()} tokens`} aria-label={`本任务消耗：输入 ${api.usage.in.toLocaleString()} · 输出 ${api.usage.out.toLocaleString()} tokens`}
               >
                 {fmtTokens(api.usage.in + api.usage.out)} tok
               </span>
@@ -575,7 +575,7 @@ export function AiAssistantModule({
               className={`kb-micro-pop flex items-center gap-1 rounded-md px-2 py-1 text-[12px] disabled:opacity-40 ${
                 reviewOpen && hasPlan ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
               }`}
-              title="查看变更方案"
+              data-tip="查看变更方案" aria-label="查看变更方案"
             >
               <GitCompareArrows size={13} />
               变更
@@ -697,7 +697,7 @@ export function AiAssistantModule({
               <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                 <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
                 <span className="truncate">Skill：{api.pickedSkill.title} · 本轮显式生效</span>
-                <button onClick={() => api.setPickedSkill(null)} title="移除该 Skill"
+                <button onClick={() => api.setPickedSkill(null)} data-tip="移除该 Skill" aria-label="移除该 Skill"
                   className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">×</button>
               </span>
             )}
@@ -726,7 +726,7 @@ export function AiAssistantModule({
             </div>
             {/* 工具条：合规提示（左空白）→ 模型/思考强度菜单 → 发送/停止（与 AI教学同一口径） */}
             <div className="relative flex items-center gap-2 mt-0.5">
-              <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+              <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" data-tip="AI 生成内容可能存在错误，请自行核实" aria-label="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
               <>
                 <button
                   type="button"
@@ -737,7 +737,9 @@ export function AiAssistantModule({
                       ? 'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   }`}
-                  title={api.writeMode === 'confirm'
+                  data-tip={api.writeMode === 'confirm'
+                    ? '先预览：写操作等确认后应用（点击切直接执行）'
+                    : '直接执行：写操作立即落盘（点击切先预览）'} aria-label={api.writeMode === 'confirm'
                     ? '先预览：写操作等确认后应用（点击切直接执行）'
                     : '直接执行：写操作立即落盘（点击切先预览）'}
                 >
@@ -752,7 +754,7 @@ export function AiAssistantModule({
                   className={`flex items-center gap-1 h-7 px-2 rounded-md text-[11px] transition-colors ${
                     modelMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   }`}
-                  title="本任务模型与思考强度（仅本任务生效，默认跟随设置→AI 默认模型）"
+                  data-tip="本任务模型与思考强度（仅本任务生效，默认跟随设置→AI 默认模型）" aria-label="本任务模型与思考强度（仅本任务生效，默认跟随设置→AI 默认模型）"
                 >
                   <Bot size={11} />
                   <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
@@ -812,7 +814,7 @@ export function AiAssistantModule({
                   type="button"
                   onClick={() => void api.stop()}
                   className="kb-micro-pop h-7 w-7 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity"
-                  title="停止生成（已完成的轮次保留）"
+                  data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）"
                 >
                   <Square size={12} />
                 </button>
@@ -822,7 +824,7 @@ export function AiAssistantModule({
                   onClick={handleSend}
                   disabled={api.compressing || !api.input.trim()}
                   className="kb-micro-pop h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity"
-                  title={api.compressing ? '正在压缩对话历史，请稍候' : '发送'}
+                  data-tip={api.compressing ? '正在压缩对话历史，请稍候' : '发送'} aria-label={api.compressing ? '正在压缩对话历史，请稍候' : '发送'}
                 >
                   <ArrowUp size={14} />
                 </button>
@@ -838,7 +840,7 @@ export function AiAssistantModule({
             <div
               onPointerDown={startResize}
               className="kb-draggable w-1 shrink-0 cursor-col-resize bg-[var(--border-color)] hover:bg-[var(--accent)]"
-              title="拖动调整宽度"
+              data-tip="拖动调整宽度" aria-label="拖动调整宽度"
             />
             <div style={{ width: reviewWidth, maxWidth: '100%' }} className="h-full min-w-0 max-w-full shrink-0 border-l border-[var(--border-color)]">
               <Suspense fallback={<div className="flex h-full items-center justify-center text-[12px] text-[var(--text-muted)]">正在载入差异预览…</div>}>

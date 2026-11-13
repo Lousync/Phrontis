@@ -32,7 +32,7 @@ export function FileInfoRows({ path, sizeBytes, updatedAt, className = '' }: {
       {path && (
         <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)] min-w-0">
           <Archive size={12} className="shrink-0 text-[var(--text-muted)]" />
-          <span className="truncate" title={path}>{path}</span>
+          <span className="truncate" data-tip={path} aria-label={path}>{path}</span>
         </div>
       )}
       <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)]">

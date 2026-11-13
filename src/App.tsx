@@ -20,6 +20,7 @@ import { CommandPalette, type PaletteItem } from './components/shared/CommandPal
 import { WorkbenchEmptyState, type WorkbenchHint } from './components/workbench/WorkbenchEmptyState'
 import { CodePluginHosts } from './components/shared/CodePluginHosts'
 import { Toast } from './components/shared/Toast'
+import { TooltipHost } from './components/shared/TooltipHost'
 import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
 import { setDaycycleTimeOverride, startDaycycleEngine, stopDaycycleEngine } from './lib/daycycleEngine'
 import { useSettings } from './lib/SettingsContext'
@@ -1905,7 +1906,7 @@ export default function App() {
       lead={activeTab === 'knowledge' && noteJumpFrom ? (
         <button
           onClick={() => handleTabChange(noteJumpFrom)}
-          title={`回到 ${tabLabel(noteJumpFrom)}`}
+          data-tip={`回到 ${tabLabel(noteJumpFrom)}`} aria-label={`回到 ${tabLabel(noteJumpFrom)}`}
           data-wb="noteReturnChip"
           data-wb-return-to={noteJumpFrom}
           className="kb-item-in flex items-center gap-0.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
@@ -2105,7 +2106,7 @@ export default function App() {
                     <div ref={wbSecondaryPageRef} data-pb-slot="secondary" className="flex min-w-0 flex-1 items-end gap-1" />
                     <button
                       onClick={mergePagePanes}
-                      title="关闭分屏（页面合并回主栏）"
+                      data-tip="关闭分屏（页面合并回主栏）" aria-label="关闭分屏（页面合并回主栏）"
                       className="shrink-0 self-center px-2 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                     >
                       合并回主栏
@@ -2256,6 +2257,7 @@ export default function App() {
       {/* UI 优化条目1.7：最大化态边缘/顶栏拖拽恢复热区（Edge 式 v2，随 winMax 挂载/卸载） */}
       {winMax && <WindowResizeHandles />}
       <Toast />
+      <TooltipHost />
       <GlobalConfirm />
       {vaultPickOpen && <VaultPicker onDone={(created) => { setVaultPickOpen(false); if (!s.onboardingDone) setOnboardingOpen(true); if (created) setActiveTab('knowledge') }} />}
       {startupPickerOpen && <VaultPicker startup onDone={() => setStartupPickerOpen(false)} />}

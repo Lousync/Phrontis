@@ -316,12 +316,12 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             带 startEdit = 一律进编辑态）。data-wb="treeMode" 锚点保留（既有探针依赖）。 */
         <>
           <div className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
-            <button onClick={onToggleTreeMode} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+            <button onClick={onToggleTreeMode} data-tip="返回总览" aria-label="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <House {...SIDEBAR_HEADER_ICON} />
             </button>
             <button
               onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenuPos({ x: r.left, y: r.bottom + 6 }) }}
-              title="排序方式"
+              data-tip="排序方式" aria-label="排序方式"
               data-wb="treeSortBtn"
               className={`rounded p-1 transition-colors ${sortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
@@ -373,12 +373,12 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
         <>
           <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
             {/* 返回顶层统一 🏠（2026-09-17 反馈轮：‹ 换 House，钮组与搜索态头部同一居中语言） */}
-            <button onClick={onBack} title="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+            <button onClick={onBack} data-tip="返回总览（自动解锁）" aria-label="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <House {...SIDEBAR_HEADER_ICON} />
             </button>
             <button
               onClick={onToggleLock}
-              title={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'}
+              data-tip={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'} aria-label={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'}
               className={`rounded p-1 transition-colors ${locked ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
               {locked ? <Lock {...SIDEBAR_HEADER_ICON} /> : <LockOpen {...SIDEBAR_HEADER_ICON} />}
@@ -397,7 +397,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             <button
               ref={bmBtnRef}
               onClick={toggleBookmarkMenu}
-              title="书签显示管理"
+              data-tip="书签显示管理" aria-label="书签显示管理"
               data-wb="bookmarkMenuBtn"
               className={`rounded p-1 transition-colors ${bookmarkMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
@@ -405,7 +405,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             </button>
             <button
               onClick={onEnterSearch}
-              title="全局搜索（Ctrl+P）"
+              data-tip="全局搜索（Ctrl+P）" aria-label="全局搜索（Ctrl+P）"
               data-wb="leftSearchBtn"
               className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
@@ -413,7 +413,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             </button>
             <button
               onClick={onToggleTreeMode}
-              title="切换为文件树模式（仓库顶层目录）"
+              data-tip="切换为文件树模式（仓库顶层目录）" aria-label="切换为文件树模式（仓库顶层目录）"
               data-wb="treeModeBtn"
               className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
@@ -509,7 +509,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 <span className="text-[10.5px] text-[var(--text-muted)]">零散文件</span>
                 <button
                   onClick={() => { void handleCreateDraft() }}
-                  title="在仓库顶层新建草稿并打开（重名自动加后缀）"
+                  data-tip="在仓库顶层新建草稿并打开（重名自动加后缀）" aria-label="在仓库顶层新建草稿并打开（重名自动加后缀）"
                   data-wb="loosePlus"
                   className="ml-auto rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
@@ -535,7 +535,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 <div
                   onClick={toggleSoftOpen}
                   className="flex items-center gap-1 rounded-md px-1 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
-                  title="软件生成的目录与文件（AI教学 产物、.assistant、.ignore 等）"
+                  data-tip="软件生成的目录与文件（AI教学 产物、.assistant、.ignore 等）" aria-label="软件生成的目录与文件（AI教学 产物、.assistant、.ignore 等）"
                 >
                   <ChevronRight size={12} className={`kb-chevron shrink-0 text-[var(--text-muted)] ${softOpen ? 'rotate-90' : ''}`} />
                   <span className="truncate text-[12px] text-[var(--text-muted)]">软件文件</span>
@@ -553,7 +553,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                           onClick={() => { if (e.type === 'file') onOpenLooseFile(e.name) }}
                           onContextMenu={(ev) => openLooseMenu(ev, e.name, e.type)}
                           className="flex w-full min-h-[28px] items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-                          title={e.type === 'dir' ? '目录 — 到文件树模式查看内容' : undefined}
+                          data-tip={e.type === 'dir' ? '目录 — 到文件树模式查看内容' : undefined} aria-label={e.type === 'dir' ? '目录 — 到文件树模式查看内容' : undefined}
                         >
                           {isDir
                             ? <Folder size={15} className="shrink-0 text-[var(--text-muted)]" />

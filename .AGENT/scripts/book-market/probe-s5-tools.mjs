@@ -148,11 +148,11 @@ const modVisible = async () => (await evalJs(`(() => {
 })()`)) === true
 /** 左栏「书市」图标是否高亮（高亮标记 = 按钮内那个 `left-` 定位的小条，照 S4） */
 const railMarked = async () => (await evalJs(`(() => {
-  const b = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '书市' && x.closest('div[class*="w-11"]'))
+  const b = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '书市' && x.closest('div[class*="w-11"]'))
   return !!b && !!b.querySelector('div[class*="left-"]')
 })()`)) === true
 const clickRailBookMarket = () => evalJs(`(() => {
-  const b = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '书市' && x.closest('div[class*="w-11"]'))
+  const b = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '书市' && x.closest('div[class*="w-11"]'))
   if (!b) return 'no-rail'
   b.click()
   return 'ok'
@@ -163,13 +163,13 @@ const clickRailBookMarket = () => evalJs(`(() => {
  * 「草案到达才切过去」这条就验不出来了（本来就在）。所以开场先主动挪开，把前置条件做成确定的。
  */
 const leaveBookMarket = () => evalJs(`(() => {
-  const self = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '书市' && x.closest('div[class*="w-11"]'))
+  const self = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '书市' && x.closest('div[class*="w-11"]'))
   const strip = self && self.closest('div[class*="w-11"]')
   if (!strip) return 'no-rail'
-  const b = [...strip.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') !== '书市')
+  const b = [...strip.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') !== '书市')
   if (!b) return 'no-other'
   b.click()
-  return b.getAttribute('title')
+  return b.getAttribute('data-tip')
 })()`)
 
 /**

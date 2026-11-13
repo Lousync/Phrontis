@@ -107,7 +107,7 @@ async function main() {
 
   // 点图标条「用量」按钮
   const clicked = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '用量')
+    const b = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '用量')
     if (!b) return 'no-btn'
     b.click(); return 'ok'
   })()`)

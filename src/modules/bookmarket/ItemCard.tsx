@@ -83,7 +83,7 @@ export function ItemCard({ item, selected, installed, task, onOpen }: {
     <button
       type="button"
       onClick={onOpen}
-      title={item.title}
+      data-tip={item.title} aria-label={item.title}
       className={`kb-item-in group rounded-[10px] p-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${selected ? 'bg-[var(--bg-selected)]' : ''}`}
     >
       <MarketCover item={item} />

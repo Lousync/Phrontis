@@ -173,7 +173,7 @@ if (railIds === null) {
   ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket,usage',
     'C1 ActivityBar RAIL_BUTTONS 覆盖 6 项（AI 教学入口 + 回收站/插件市场/动态 + 书市 + 用量）', `实际 ${railIds.join(',')}`)
 }
-ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
+ok(/data-tip="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
 checkCover('C3 tiles.tsx TILE_META 覆盖全部可作磁贴模块', keysOfRecord(srcTiles, 'TILE_META'), TILE_MODULE_IDS)
 
 /* ================= D. normalizeModuleId ================= */

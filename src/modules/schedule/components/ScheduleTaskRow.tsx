@@ -38,7 +38,7 @@ export function ScheduleTaskRow({ task, tag, hasWorkflow = false, showDate = fal
           原 16px 命中 + 行体整行可点 = 高频误触修改态。 */}
       <button
         onClick={(e) => { e.stopPropagation(); onToggle(task) }}
-        title={done ? '标记未完成' : '标记完成'}
+        data-tip={done ? '标记未完成' : '标记完成'} aria-label={done ? '标记未完成' : '标记完成'}
         className="-my-1 -ml-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
       >
         <span className={`flex h-4 w-4 items-center justify-center rounded-full border transition-colors ${done ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--text-disabled)] text-transparent hover:border-[var(--accent)]'}`}>
@@ -63,7 +63,7 @@ export function ScheduleTaskRow({ task, tag, hasWorkflow = false, showDate = fal
       {onDelete && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(task) }}
-          title="删除任务"
+          data-tip="删除任务" aria-label="删除任务"
           className="mt-0.5 rounded p-1 text-[var(--text-disabled)] opacity-0 transition-opacity hover:bg-[var(--danger)]/10 hover:text-[var(--danger)] group-hover:opacity-100"
         >
           <Trash2 size={12} />

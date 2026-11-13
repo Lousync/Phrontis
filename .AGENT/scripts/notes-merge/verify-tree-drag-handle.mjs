@@ -54,7 +54,7 @@ ok((tree.match(/onPointerMove=\{handlePointerMove\}/g) ?? []).length === 2, 'B3 
 ok((tree.match(/onPointerUp=\{handlePointerUp\}/g) ?? []).length === 2, 'B4 两枚把手都接 up')
 ok((tree.match(/touch-none/g) ?? []).length === 2, 'B5 把手带 touch-none（指针手势不被浏览器接管）')
 ok((tree.match(/cursor-grab/g) ?? []).length === 2, 'B6 把手 cursor-grab')
-ok((tree.match(/title="拖动移动"/g) ?? []).length === 2, 'B7 把手有「拖动移动」提示')
+ok((tree.match(/data-tip="拖动移动"/g) ?? []).length === 2, 'B7 把手有「拖动移动」提示')
 ok(/onClick=\{\(e[vv]?\) => \{ if \(Date\.now\(\) - dragEndAtRef\.current < 250\) e[vv]?\.stopPropagation\(\) \}\}/.test(tree),
   'B8 把手 click 守卫：拖拽后 250ms 内拦掉补发 click')
 

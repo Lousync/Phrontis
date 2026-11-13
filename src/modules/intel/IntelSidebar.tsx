@@ -55,11 +55,11 @@ export function IntelSidebar({ active, counts, aiRec, customSources, onSelect, o
                 active === sec ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
               }`}
               onClick={() => onSelect(sec)}
-              title={`筛选「${SECTION_META[sec].label}」版面（共 ${groupCount} 条）`}
+              data-tip={`筛选「${SECTION_META[sec].label}」版面（共 ${groupCount} 条）`} aria-label={`筛选「${SECTION_META[sec].label}」版面（共 ${groupCount} 条）`}
             >
               <button
                 onClick={(e) => { e.stopPropagation(); toggle(sec) }}
-                title={open ? '折叠该版面源列表' : '展开该版面源列表'}
+                data-tip={open ? '折叠该版面源列表' : '展开该版面源列表'} aria-label={open ? '折叠该版面源列表' : '展开该版面源列表'}
                 className="flex size-4 shrink-0 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               >
                 <ChevronDown size={12} className={`kb-chevron ${open ? '' : '-rotate-90'}`} />
@@ -135,7 +135,7 @@ function SideRow({ active, label, count, dot, onClick, onClear, title, clearTitl
     <div
       data-intel-filter={label}
       onClick={onClick}
-      title={title}
+      data-tip={title} aria-label={title}
       className={`group flex min-h-[30px] cursor-pointer select-none items-center gap-2 rounded-md px-2.5 py-0.5 text-[12.5px] transition-colors ${
         active
           ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]'
@@ -148,7 +148,7 @@ function SideRow({ active, label, count, dot, onClick, onClear, title, clearTitl
       {onClear && (
         <button
           onClick={(e) => { e.stopPropagation(); onClear() }}
-          title={clearTitle}
+          data-tip={clearTitle} aria-label={clearTitle}
           className="hidden size-[15px] shrink-0 items-center justify-center rounded-[3px] text-[10px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] group-hover:flex"
         >
           ✕

@@ -37,7 +37,7 @@ export function BlogTemplateModal({ open, onClose, onApply }: Props) {
       <div className={`${closing ? 'kb-modal-out' : 'kb-modal-in'} w-full max-w-md max-h-[80%] flex flex-col rounded-2xl border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-[0_28px_90px_rgba(0,0,0,0.5)] overflow-hidden`}>
         <div className="px-5 h-[52px] shrink-0 flex items-center justify-between border-b border-[var(--border-color)]">
           <span className="text-[14px] font-semibold text-[var(--text-primary)]">套用博客模板</span>
-          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)]" title="关闭">
+          <button onClick={onClose} className="p-1.5 rounded-full hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)]" data-tip="关闭" aria-label="关闭">
             <X size={16} />
           </button>
         </div>
@@ -55,7 +55,7 @@ export function BlogTemplateModal({ open, onClose, onApply }: Props) {
                   <button
                     onClick={() => { onApply(tpl.contentMd, tpl.name); onClose() }}
                     className="flex-1 min-w-0 flex items-center gap-2.5 text-left"
-                    title="插入到文末"
+                    data-tip="插入到文末" aria-label="插入到文末"
                   >
                     <FileText size={15} className="text-[var(--accent)] shrink-0" />
                     <span className="min-w-0">
@@ -74,7 +74,7 @@ export function BlogTemplateModal({ open, onClose, onApply }: Props) {
                     <button
                       onClick={() => setConfirmDeleteId(tpl.id)}
                       className="p-1 rounded opacity-0 group-hover:opacity-100 hover:text-[var(--danger)] text-[var(--text-muted)] transition-all shrink-0"
-                      title="删除模板"
+                      data-tip="删除模板" aria-label="删除模板"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -88,7 +88,7 @@ export function BlogTemplateModal({ open, onClose, onApply }: Props) {
                   <button
                     onClick={() => { onApply(tpl.contentMd, tpl.name); onClose() }}
                     className="flex-1 min-w-0 flex items-center gap-2.5 text-left"
-                    title="插入到文末"
+                    data-tip="插入到文末" aria-label="插入到文末"
                   >
                     <PluginIcon size={15} className="text-[var(--accent)] shrink-0" />
                     <span className="min-w-0">

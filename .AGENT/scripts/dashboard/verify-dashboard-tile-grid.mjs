@@ -96,7 +96,7 @@ eq('D8 改尺寸 + 夹取', withSize(L, 'b', 99, 0), [{ id: 'a', w: 2, h: 2 }, {
   ok('E8 栅格：dense 流 + 固定行高 76px + 6 列', /gridAutoFlow: 'row dense'/.test(index) && /gridAutoRows: `\$\{ROW_H\}px`/.test(index) && /const ROW_H = 76/.test(index))
   ok('E9 拖拽元素无入场动画（fill 压 transform 教训）：wrapper 不挂 item-in 类', !/data-id=\{it\.id\}[^}]*kb-item-in/.test(index))
   ok('E10 拉角改尺寸吸附（2-6 × 1-4 走 withSize 落库）', /Math\.max\(2, Math\.min\(GRID_COLS,/.test(index) && /applyLayout\(withSize\(layoutRef\.current, rd\.id, rd\.w, rd\.h\)\)/.test(index))
-  ok('E11 编辑态全卡遮罩（卡内交互停用防误触；iframe 同理；×/⌟ 在 z-20 更高层不受影响）', /\{editing && <div className="absolute inset-0 z-10" \/>\}/.test(index) && /data-no-drag[\s\S]{0,120}title=\{`隐藏/.test(index))
+  ok('E11 编辑态全卡遮罩（卡内交互停用防误触；iframe 同理；×/⌟ 在 z-20 更高层不受影响）', /\{editing && <div className="absolute inset-0 z-10" \/>\}/.test(index) && /data-no-drag[\s\S]{0,160}data-tip=\{`隐藏/.test(index))
   ok('E12 显隐与布局分键存储（dashboardCards 语义不变 + 新增 dashboardTileLayout）',
     /dashboardTileLayout: \{ default: '\[\]'/.test(settings) && /update\('dashboardTileLayout', JSON\.stringify\(next\)\)/.test(index) && /update\('dashboardCards', JSON\.stringify\(ordered\)\)/.test(index))
   ok('E13 布局归一化保留存量未知 id（停用插件槽位不丢）', /for \(const p of parseLayout\(s\.dashboardTileLayout\)\)/.test(index))

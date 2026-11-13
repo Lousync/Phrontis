@@ -122,7 +122,7 @@ async function main() {
   await evalJs(`(() => { document.querySelector('[data-wb-bookmark="bookshelf"]')?.click(); return true })()`)
   await sleep(1200)
   const clicked = await evalJs(`(() => {
-    const card = [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('title') || '').includes('.pdf'))
+    const card = [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('data-tip') || '').includes('.pdf'))
     card?.click(); return !!card
   })()`)
   ok('找到并点击 PDF 样书卡片', clicked)
@@ -204,8 +204,8 @@ async function main() {
   })()`)
   console.log('[命中点]', JSON.stringify(hit), 'drag@', x0, y, '→', x1, y)
   const bar = await evalJs(`(() => {
-    const copy = [...document.querySelectorAll('button')].some((b) => (b.getAttribute('title') || '') === '复制选中文本')
-    const excerpt = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('title') || '').includes('存为摘录'))
+    const copy = [...document.querySelectorAll('button')].some((b) => (b.getAttribute('data-tip') || '') === '复制选中文本')
+    const excerpt = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('data-tip') || '').includes('存为摘录'))
     const selText = window.getSelection()?.toString().slice(0, 60) ?? ''
     const globalFloat = !!document.querySelector('[data-sel-float]')
     return { copy, hasExcerpt: !!excerpt, selText, globalFloat }
@@ -217,7 +217,7 @@ async function main() {
   assertFailed()
 
   // 5) 点「摘录」→ 落盘 + 高亮
-  await evalJs(`(() => { [...document.querySelectorAll('button')].find((b) => (b.getAttribute('title') || '').includes('存为摘录'))?.click(); return true })()`)
+  await evalJs(`(() => { [...document.querySelectorAll('button')].find((b) => (b.getAttribute('data-tip') || '').includes('存为摘录'))?.click(); return true })()`)
   await sleep(900)
   let pdfEntries = []
   try {

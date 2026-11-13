@@ -142,13 +142,13 @@ export function GraphSidebar({ data, activeKey, onSelect, onOpenPage }: Props) {
             <span>标签</span>
             <span className="flex-1" />
             {!showPack && packHidden > 0 && (
-              <button onClick={() => setShowPack(true)} title="显示知识包短码标签"
+              <button onClick={() => setShowPack(true)} data-tip="显示知识包短码标签" aria-label="显示知识包短码标签"
                 className="px-1 rounded text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
                 知识包
               </button>
             )}
             {showPack && (
-              <button onClick={() => setShowPack(false)} title="隐藏知识包短码标签"
+              <button onClick={() => setShowPack(false)} data-tip="隐藏知识包短码标签" aria-label="隐藏知识包短码标签"
                 className="px-1 rounded text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
                 隐藏短码
               </button>
@@ -185,7 +185,7 @@ export function GraphSidebar({ data, activeKey, onSelect, onOpenPage }: Props) {
             <div
               key={p.id}
               onClick={() => onOpenPage(p)}
-              title={p.path || p.title}
+              data-tip={p.path || p.title} aria-label={p.path || p.title}
               className="px-2 py-[3px] rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] cursor-pointer truncate"
             >
               {p.title}

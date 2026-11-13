@@ -346,7 +346,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, sideba
         <>
           <button
             onClick={handleTodayEntry}
-            title={entries.some(e => e.date === localToday()) ? '继续编写今日文章' : '新建今日文章'}
+            data-tip={entries.some(e => e.date === localToday()) ? '继续编写今日文章' : '新建今日文章'} aria-label={entries.some(e => e.date === localToday()) ? '继续编写今日文章' : '新建今日文章'}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
           >
             <Edit3 {...SIDEBAR_HEADER_ICON} />
@@ -380,7 +380,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, sideba
             <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] px-2 py-1.5">
               <button
                 onClick={handleToggleOutline}
-                title="返回文章列表"
+                data-tip="返回文章列表" aria-label="返回文章列表"
                 className="rounded p-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 <ChevronLeft size={14} />
@@ -431,7 +431,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, sideba
                   onClick={() => navigateMonth(-1)}
                   disabled={!effectiveMonth}
                   className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  title="上个月"
+                  data-tip="上个月" aria-label="上个月"
                 >
                   <ChevronLeft size={16} />
                 </button>
@@ -440,7 +440,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, sideba
                   onClick={() => navigateMonth(1)}
                   disabled={!effectiveMonth}
                   className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  title="下个月"
+                  data-tip="下个月" aria-label="下个月"
                 >
                   <ChevronRight size={16} />
                 </button>
@@ -576,11 +576,11 @@ function EntryDetail({ entryId, onEdit, onDelete, onBack, onToggleOutline }: {
             <button onClick={onBack} className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">← 返回列表</button>
             <div className="flex gap-2">
               {onToggleOutline && (
-                <button onClick={onToggleOutline} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]" title="大纲 (Ctrl+Alt+O)">
+                <button onClick={onToggleOutline} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]" data-tip="大纲 (Ctrl+Alt+O)" aria-label="大纲 (Ctrl+Alt+O)">
                   <ListTree size={16} />
                 </button>
               )}
-              <button onClick={handleToggleStar} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors" title={entry.isStarred ? '取消收藏' : '收藏'}>
+              <button onClick={handleToggleStar} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors" data-tip={entry.isStarred ? '取消收藏' : '收藏'} aria-label={entry.isStarred ? '取消收藏' : '收藏'}>
                 <Star key={entry.isStarred ? 'on' : 'off'} size={16} className={`kb-micro-pop ${entry.isStarred ? 'text-[var(--warning)] fill-[var(--warning)]' : 'text-[var(--text-muted)]'}`} />
               </button>
               <button onClick={onEdit} className="px-3 py-1.5 text-sm bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)]">编辑</button>

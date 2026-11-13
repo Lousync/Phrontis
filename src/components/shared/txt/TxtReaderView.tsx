@@ -574,7 +574,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       const isActive = !!srch && !!active && active.paraIndex === i && s >= active.start && e <= active.end
       if (exc) {
         nodes.push(
-          <mark key={`${i}-${k}`} data-eid={exc.id} data-ehc={exc.color} title={exc.note || undefined}
+          <mark key={`${i}-${k}`} data-eid={exc.id} data-ehc={exc.color} data-tip={exc.note || undefined} aria-label={exc.note || undefined}
             className={`kb-exc-${exc.color} rounded-sm px-0.5 text-[var(--text-primary)] ${srch ? 'kb-search-hl' : ''} ${isActive ? 'kb-search-active' : ''}`}>
             {segText}
           </mark>,
@@ -602,7 +602,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     <div className="kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)]">
       {onBack && (
         <>
-          <button onClick={onBack} title={backLabel ?? '返回书架'}
+          <button onClick={onBack} data-tip={backLabel ?? '返回书架'} aria-label={backLabel ?? '返回书架'}
             className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
             <ArrowLeft size={13} /><span className="kb-l1">{backLabel ?? '返回书架'}</span>
           </button>
@@ -613,19 +613,21 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       <span className="max-w-[220px] truncate text-[var(--text-primary)]">{name}</span>
       <span className="kb-l3 text-[var(--text-tertiary)]">TXT</span>
       <div className="min-w-0 flex-1" />
-      <button onClick={() => setSearchOpen((v) => !v)} title="搜索（已加载内容）" data-wb="txtSearch"
+      <button onClick={() => setSearchOpen((v) => !v)} data-tip="搜索（已加载内容）" aria-label="搜索（已加载内容）" data-wb="txtSearch"
         className={`flex items-center gap-1 rounded p-0.5 ${searchOpen ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <Search size={14} /><span className="kb-l1">搜索</span>
       </button>
-      <button onClick={toggleBookmark} title={bookmarks.some((b) => b.paraIndex === topPara) ? '移除本段书签' : '收藏本段书签'} data-wb="txtBookmark"
+      <button onClick={toggleBookmark} data-tip={bookmarks.some((b) => b.paraIndex === topPara) ? '移除本段书签' : '收藏本段书签'}
+        aria-label={bookmarks.some((b) => b.paraIndex === topPara) ? '移除本段书签' : '收藏本段书签'} data-wb="txtBookmark"
         className={`flex items-center gap-1 rounded p-0.5 ${bookmarks.some((b) => b.paraIndex === topPara) ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         {bookmarks.some((b) => b.paraIndex === topPara) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}<span className="kb-l1">书签</span>
       </button>
-      <button onClick={() => changeFont(-0.1)} title="缩小字号" data-wb="txtFontDec"
+      <button onClick={() => changeFont(-0.1)} data-tip="缩小字号" aria-label="缩小字号" data-wb="txtFontDec"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">−</span></button>
-      <button onClick={() => changeFont(0.1)} title="放大字号" data-wb="txtFontInc"
+      <button onClick={() => changeFont(0.1)} data-tip="放大字号" aria-label="放大字号" data-wb="txtFontInc"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">＋</span></button>
-      <button onClick={cyclePaper} title={`纸色：${paper === 'sepia' ? '护眼' : paper === 'green' ? '绿纸' : paper === 'dark' ? '暗色' : '默认'}`} data-wb="txtPaper"
+      <button onClick={cyclePaper} data-tip={`纸色：${paper === 'sepia' ? '护眼' : paper === 'green' ? '绿纸' : paper === 'dark' ? '暗色' : '默认'}`}
+        aria-label={`纸色：${paper === 'sepia' ? '护眼' : paper === 'green' ? '绿纸' : paper === 'dark' ? '暗色' : '默认'}`} data-wb="txtPaper"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Contrast size={14} /></button>
       <span className="shrink-0 text-[var(--text-tertiary)]" data-wb="txtPct">{pct}%</span>
     </div>
@@ -646,13 +648,13 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
           />
           <button onClick={() => runSearch(searchQuery)} disabled={!searchQuery.trim()}
             className="rounded border border-[var(--border-color)] px-2 py-1 text-[11px] hover:bg-[var(--bg-hover)] disabled:opacity-40">搜索</button>
-          <button onClick={() => gotoHit(-1)} disabled={searchHits.length === 0} title="上一条"
+          <button onClick={() => gotoHit(-1)} disabled={searchHits.length === 0} data-tip="上一条" aria-label="上一条"
             className="rounded p-1 hover:bg-[var(--bg-hover)] disabled:opacity-40"><ChevronUp size={13} /></button>
-          <button onClick={() => gotoHit(1)} disabled={searchHits.length === 0} title="下一条"
+          <button onClick={() => gotoHit(1)} disabled={searchHits.length === 0} data-tip="下一条" aria-label="下一条"
             className="rounded p-1 hover:bg-[var(--bg-hover)] disabled:opacity-40"><ChevronDown size={13} /></button>
           <span className="shrink-0 text-[var(--text-tertiary)]">{searchHits.length > 0 ? `${searchActive + 1}/${searchHits.length}` : '0'}</span>
           {searchPartial && <span className="shrink-0 text-[var(--text-tertiary)]">（已搜索已加载部分）</span>}
-          <button onClick={() => { setSearchOpen(false); setSearchHits([]); searchHitsRef.current = []; setSearchQuery('') }} title="关闭"
+          <button onClick={() => { setSearchOpen(false); setSearchHits([]); searchHitsRef.current = []; setSearchQuery('') }} data-tip="关闭" aria-label="关闭"
             className="rounded p-1 hover:bg-[var(--bg-hover)]"><X size={13} /></button>
         </div>
       )}

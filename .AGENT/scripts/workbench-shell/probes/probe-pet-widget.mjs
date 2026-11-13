@@ -75,7 +75,7 @@ async function main() {
   // 2. 展开右栏小工具区（中/下段可见），再切到桌宠控件
   await evalJs(`(() => {
     if (document.querySelector('[data-wb="toolsZone"]')) return true
-    const hs = [...document.querySelectorAll('[data-wb="shell"] [title="拖拽或点击展开"]')]
+    const hs = [...document.querySelectorAll('[data-wb="shell"] [data-tip="拖拽或点击展开"]')]
     hs[hs.length - 1]?.click(); return true
   })()`)
   await sleep(700)

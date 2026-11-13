@@ -213,7 +213,7 @@ async function main() {
   const afterEdit = await evalJs(`(() => ({
     monaco: document.querySelectorAll('.monaco-editor').length,
     cm: document.querySelectorAll('.cm-editor').length,
-    toolbarPreviewBtn: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('title') ?? null,
+    toolbarPreviewBtn: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('data-tip') ?? null,
     pagebar: !!document.querySelector('[data-wb="pagebar"]'),
   }))()`)
   console.log('[diag] 点编辑后:', JSON.stringify(afterEdit), 'errors=', JSON.stringify(consoleErrors.slice(0, 3)))
@@ -271,7 +271,7 @@ async function main() {
     monaco: document.querySelectorAll('.monaco-editor').length,
     fallback: document.body.innerText.includes('即时渲染档加载中'),
     liveHost: document.querySelectorAll('.kb-live-pane').length,
-    previewBtn: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('title') ?? null,
+    previewBtn: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('data-tip') ?? null,
   }))()`)
   const pageErrors = await evalJs(`window.__probeErrors ?? []`)
   console.log('[diag] 切 live 后重开笔记:', JSON.stringify(liveDiag), 'reopened=', reopened, 'errors=', JSON.stringify(pageErrors.slice(0, 4)))

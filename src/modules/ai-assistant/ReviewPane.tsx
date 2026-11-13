@@ -74,7 +74,7 @@ function MoveBatchView({ op, compact }: { op: AiPlanOp; compact: boolean }) {
     <div className={`h-full overflow-y-auto ${compact ? 'px-3 py-2' : 'px-5 py-4'}`}>
       <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-[var(--text-primary)]">
         <MoveRight size={14} className="shrink-0 text-[var(--accent)]" />
-        <span className="min-w-0 truncate" title={op.summary}>{op.summary || `批量移动 ${moves.length} 个文件`}</span>
+        <span className="min-w-0 truncate" data-tip={op.summary} aria-label={op.summary}>{op.summary || `批量移动 ${moves.length} 个文件`}</span>
       </div>
       <p className="mb-2 text-[11.5px] text-[var(--text-muted)]">
         预检通过 · 整批应用 / 整批丢弃（v1 不支持逐文件取消；要排除某几条请让 AI 重新提交）
@@ -83,14 +83,14 @@ function MoveBatchView({ op, compact }: { op: AiPlanOp; compact: boolean }) {
         <div key={dir || '(root)'} className="mb-2 overflow-hidden rounded-lg border border-[var(--border-color)]">
           <div className="flex items-center gap-1.5 bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]">
             <MoveRight size={10} className="shrink-0" />
-            <span className="min-w-0 truncate" title={dir || '仓库根目录'}>→ {dir || '仓库根目录'}</span>
+            <span className="min-w-0 truncate" data-tip={dir || '仓库根目录'} aria-label={dir || '仓库根目录'}>→ {dir || '仓库根目录'}</span>
             <span className="ml-auto shrink-0">{rows.length} 个文件</span>
           </div>
           {rows.map((m) => (
             <div key={`${m.from}->${m.to}`} className="flex items-center gap-1.5 px-2.5 py-1 text-[11.5px]">
-              <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]" title={m.from}>{m.from}</span>
+              <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]" data-tip={m.from} aria-label={m.from}>{m.from}</span>
               <MoveRight size={10} className="shrink-0 text-[var(--text-muted)]" />
-              <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]" title={m.to}>{m.to.split('/').pop()}</span>
+              <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]" data-tip={m.to} aria-label={m.to}>{m.to.split('/').pop()}</span>
             </div>
           ))}
         </div>
@@ -134,7 +134,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
               type="button"
               onClick={onClose}
               className="kb-micro-pop flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="返回对话"
+              data-tip="返回对话" aria-label="返回对话"
             >
               <ArrowLeft size={12} /> 返回
             </button>
@@ -148,7 +148,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
               onClick={onRollback}
               disabled={busy}
               className="kb-micro-pop flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:text-[var(--danger)] disabled:opacity-40"
-              title="回滚本任务已应用的全部改动"
+              data-tip="回滚本任务已应用的全部改动" aria-label="回滚本任务已应用的全部改动"
             >
               <Undo2 size={13} /> 回滚整任务
             </button>
@@ -158,7 +158,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
             onClick={onReject}
             disabled={busy}
             className="kb-micro-pop flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40"
-            title="丢弃未应用的变更"
+            data-tip="丢弃未应用的变更" aria-label="丢弃未应用的变更"
           >
             <X size={13} /> 丢弃
           </button>
@@ -167,7 +167,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
             onClick={() => onApply(Array.from(accepted))}
             disabled={busy || accepted.size === 0}
             className="kb-micro-pop flex items-center gap-1 rounded-md bg-[var(--accent)] px-2.5 py-1 text-[12px] text-white disabled:opacity-40"
-            title="把勾选的变更落盘"
+            data-tip="把勾选的变更落盘" aria-label="把勾选的变更落盘"
           >
             <Check size={13} /> 应用 {accepted.size}
           </button>
@@ -211,7 +211,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
                             ? 'text-[var(--danger)]'
                             : 'text-[var(--text-muted)]'
                       }`}
-                      title={op.status === 'failed' ? op.error : undefined}
+                      data-tip={op.status === 'failed' ? op.error : undefined} aria-label={op.status === 'failed' ? op.error : undefined}
                     >
                       {op.status === 'applied' ? '●' : op.status === 'failed' ? '×' : '○'}
                     </span>
@@ -271,7 +271,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
                   : '此变更无文本差异预览'}
               </p>
               {selected.status === 'failed' && selected.error && (
-                <p className="max-w-full break-words text-[12px] text-[var(--danger)]" title={selected.error}>
+                <p className="max-w-full break-words text-[12px] text-[var(--danger)]" data-tip={selected.error} aria-label={selected.error}>
                   失败：{selected.error}
                 </p>
               )}

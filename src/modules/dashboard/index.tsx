@@ -605,7 +605,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
           <button
             type="button"
             onClick={onBack}
-            title="返回工作台"
+            data-tip="返回工作台" aria-label="返回工作台"
             className="rounded-[8px] border border-[var(--border-color)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <ArrowLeft size={15} />
@@ -660,7 +660,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
               <span
                 className="group inline-flex cursor-pointer items-baseline gap-1.5"
                 onClick={() => setNameEdit({ draft: userName })}
-                title="点击修改称呼"
+                data-tip="点击修改称呼" aria-label="点击修改称呼"
               >
                 <span>{userName ? `${greetingOf(d.getHours())}，${userName}` : greetingOf(d.getHours())}</span>
                 <Pencil size={16} className="self-center opacity-0 transition-opacity duration-150 group-hover:opacity-40" />
@@ -724,7 +724,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
                       <button
                         type="button"
                         data-no-drag
-                        title={`隐藏「${def.label}」`}
+                        data-tip={`隐藏「${def.label}」`} aria-label={`隐藏「${def.label}」`}
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={() => hideTile(it.id)}
                         className="absolute right-1.5 top-1.5 z-20 grid h-[22px] w-[22px] place-items-center rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[11px] leading-none text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger-ink)]"
@@ -735,7 +735,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
                     <button
                       type="button"
                       data-no-drag
-                      title="拖角改尺寸"
+                      data-tip="拖角改尺寸" aria-label="拖角改尺寸"
                       onPointerDown={(e) => startResize(e, it.id)}
                       className="absolute bottom-0.5 right-0.5 z-20 h-[18px] w-[18px] cursor-nwse-resize border-0 bg-transparent p-0 text-[12px] leading-none text-[var(--text-disabled)] transition-colors hover:text-[var(--accent)]"
                     >
@@ -775,7 +775,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
                     key={it.id}
                     type="button"
                     data-id={it.id}
-                    title="点击加入看板，或拖进网格"
+                    data-tip="点击加入看板，或拖进网格" aria-label="点击加入看板，或拖进网格"
                     onPointerDown={(e) => startTrayDrag(e, it.id)}
                     className="flex w-[136px] flex-none cursor-grab touch-none flex-col gap-1 rounded-[8px] border-0 bg-transparent p-1 text-left transition-colors hover:bg-[var(--bg-hover)]"
                   >

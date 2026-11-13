@@ -106,7 +106,7 @@ export function SummaryDoc({ summary, onBack, onSaved }: {
           </button>
           <button
             onClick={() => setPreview((v) => !v)}
-            title={preview ? '回到编辑' : '预览'}
+            data-tip={preview ? '回到编辑' : '预览'} aria-label={preview ? '回到编辑' : '预览'}
             className="flex items-center gap-1 rounded border border-[var(--border-color)] px-2 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
           >
             {preview ? <><Pencil size={11} /> 编辑</> : <><Eye size={11} /> 预览</>}

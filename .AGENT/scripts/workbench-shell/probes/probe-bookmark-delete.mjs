@@ -100,7 +100,7 @@ async function main() {
   await evalJs(`(() => { document.querySelector('[data-wb-bookmark="bookshelf"]')?.click(); return true })()`)
   await sleep(1200)
   const opened = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('main button')].find((x) => (x.getAttribute('title') || '').includes('.txt'))
+    const b = [...document.querySelectorAll('main button')].find((x) => (x.getAttribute('data-tip') || '').includes('.txt'))
     b?.click(); return !!b
   })()`)
   ok('找到并点击 TXT 书卡片', opened)
@@ -131,7 +131,7 @@ async function main() {
     }
     await sleep(600) // 让 topPara 随滚动稳定下来
   }
-  const toolbarTitle = () => evalJs(`document.querySelector('[data-wb="txtBookmark"]')?.getAttribute('title') ?? null`)
+  const toolbarTitle = () => evalJs(`document.querySelector('[data-wb="txtBookmark"]')?.getAttribute('data-tip') ?? null`)
   const marksCount = () => evalJs(`(() => {
     const el = document.querySelector('[data-wb="readingMarks"]')
     return el ? Number(el.getAttribute('data-wb-marks')) : null

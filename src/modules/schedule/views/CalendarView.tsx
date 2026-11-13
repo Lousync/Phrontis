@@ -169,7 +169,7 @@ function MonthGrid({ date, tasks, workflows, tagById, onOpenTask, onOpenWorkflow
                 ))}
                 {rows.length > 3 && <div className="px-1 text-[9.5px] text-[var(--text-disabled)]">+{rows.length - 3}</div>}
                 {stageHits.map(({ w, s }) => (
-                  <button key={`${w.id}:${s.id}`} onClick={() => onOpenWorkflow(w.id)} title={`${w.title} / ${s.title} / ${s.start} → ${s.end}`} className="block h-[2px] w-full rounded-full opacity-70 hover:opacity-100" style={{ backgroundColor: w.color }} />
+                  <button key={`${w.id}:${s.id}`} onClick={() => onOpenWorkflow(w.id)} data-tip={`${w.title} / ${s.title} / ${s.start} → ${s.end}`} aria-label={`${w.title} / ${s.title} / ${s.start} → ${s.end}`} className="block h-[2px] w-full rounded-full opacity-70 hover:opacity-100" style={{ backgroundColor: w.color }} />
                 ))}
               </div>
             </div>
@@ -200,7 +200,7 @@ function WeekGrid({ date, tasks, workflows, onOpenTask, onOpenWorkflow, onChange
           </div>
           {workflows.map(w => (
             <div key={w.id} className="grid border-b border-[var(--border-color)] last:border-b-0" style={{ gridTemplateColumns: '120px repeat(7, minmax(0, 1fr))' }}>
-              <button onClick={() => onOpenWorkflow(w.id)} className="flex items-center gap-1 truncate px-2 py-1.5 text-left text-[10.5px] text-[var(--text-secondary)] hover:text-[var(--accent)]" title={w.title}>
+              <button onClick={() => onOpenWorkflow(w.id)} className="flex items-center gap-1 truncate px-2 py-1.5 text-left text-[10.5px] text-[var(--text-secondary)] hover:text-[var(--accent)]" data-tip={w.title} aria-label={w.title}>
                 <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: w.color }} />
                 <span className="truncate">{w.title}</span>
               </button>
@@ -298,7 +298,7 @@ function StageBar({ workflow, stage, startIdx, endIdx, onOpen, onChanged }: {
       onPointerCancel={() => { dragRef.current = null; setDx(0) }}
       className="relative z-10 m-0.5 flex h-5 touch-none items-center overflow-hidden rounded px-1 text-left text-[9.5px] text-white/95"
       style={{ gridColumn: `${startIdx + 1} / span ${days}`, backgroundColor: workflow.color, transform: `translateX(${dx}px)`, opacity: stage.status === 'done' ? 0.55 : 1 }}
-      title={`${workflow.title} / ${stage.title} / ${stage.start} → ${stage.end}`}
+      data-tip={`${workflow.title} / ${stage.title} / ${stage.start} → ${stage.end}`} aria-label={`${workflow.title} / ${stage.title} / ${stage.start} → ${stage.end}`}
     >
       <span className="truncate">{stage.title}</span>
     </button>
@@ -327,7 +327,7 @@ function QuarterGrid({ date, workflows, onOpenWorkflow }: { date: string; workfl
               const endIdx = Math.min(weeks.length - 1, Math.floor(diffDays(start, stage.end) / 7))
               if (endIdx < 0 || startIdx >= weeks.length) return null
               return (
-                <button key={stage.id} onClick={() => onOpenWorkflow(w.id)} title={`${stage.title} / ${stage.start} → ${stage.end}`} className="relative z-10 m-0.5 h-5 truncate rounded px-1 text-left text-[9px] text-white/95" style={{ gridColumn: `${startIdx + 1} / span ${endIdx - startIdx + 1}`, backgroundColor: w.color, opacity: stage.status === 'done' ? 0.55 : 1 }}>
+                <button key={stage.id} onClick={() => onOpenWorkflow(w.id)} data-tip={`${stage.title} / ${stage.start} → ${stage.end}`} aria-label={`${stage.title} / ${stage.start} → ${stage.end}`} className="relative z-10 m-0.5 h-5 truncate rounded px-1 text-left text-[9px] text-white/95" style={{ gridColumn: `${startIdx + 1} / span ${endIdx - startIdx + 1}`, backgroundColor: w.color, opacity: stage.status === 'done' ? 0.55 : 1 }}>
                   {stage.title}
                 </button>
               )

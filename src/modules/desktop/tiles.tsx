@@ -178,7 +178,7 @@ function MiniCalendar({ today, records }: { today: string; records: HabitRecord[
       <button
         key={`wk-${week.key}`}
         className="desk-cal-wk"
-        title={`第 ${week.wno} 周总结`}
+        data-tip={`第 ${week.wno} 周总结`} aria-label={`第 ${week.wno} 周总结`}
         onClick={() => openSummary('week', week.start, week.end)}
       >
         W{week.wno}
@@ -193,7 +193,7 @@ function MiniCalendar({ today, records }: { today: string; records: HabitRecord[
         <span
           key={`c-${week.key}-${c.d}`}
           className={`desk-cal-cell${c.isToday ? ' is-today' : ''}${c.marked ? ' is-marked' : ''}`}
-          title={c.marked ? `${c.ds} · 有打卡` : c.ds}
+          data-tip={c.marked ? `${c.ds} · 有打卡` : c.ds} aria-label={c.marked ? `${c.ds} · 有打卡` : c.ds}
           onClick={() => window.dispatchEvent(new CustomEvent('blog-open-date', { detail: { date: c.ds } }))}
         >
           {c.d}
@@ -205,14 +205,14 @@ function MiniCalendar({ today, records }: { today: string; records: HabitRecord[
   return (
     <div className="desk-cal">
       <div className="desk-cal-head">
-        <button className="desk-cal-nav" onClick={() => setOff((v) => v - 1)} title="上个月"><ChevronLeft size={13} /></button>
+        <button className="desk-cal-nav" onClick={() => setOff((v) => v - 1)} data-tip="上个月" aria-label="上个月"><ChevronLeft size={13} /></button>
         <div className="desk-cal-title">
-          <button className="desk-cal-lk" title="查看年度总结" onClick={() => { const r = yearRangeOf(y); openSummary('year', r.start, r.end) }}>{y} 年</button>
-          <button className="desk-cal-lk" title="查看月度总结" onClick={() => { const r = monthRangeOf(y, m + 1); openSummary('month', r.start, r.end) }}>{m + 1} 月</button>
+          <button className="desk-cal-lk" data-tip="查看年度总结" aria-label="查看年度总结" onClick={() => { const r = yearRangeOf(y); openSummary('year', r.start, r.end) }}>{y} 年</button>
+          <button className="desk-cal-lk" data-tip="查看月度总结" aria-label="查看月度总结" onClick={() => { const r = monthRangeOf(y, m + 1); openSummary('month', r.start, r.end) }}>{m + 1} 月</button>
         </div>
-        <button className="desk-cal-nav" onClick={() => setOff((v) => v + 1)} title="下个月"><ChevronRight size={13} /></button>
+        <button className="desk-cal-nav" onClick={() => setOff((v) => v + 1)} data-tip="下个月" aria-label="下个月"><ChevronRight size={13} /></button>
         {off !== 0 && (
-          <button className="desk-cal-back" onClick={() => setOff(0)} title="回到本月">今天</button>
+          <button className="desk-cal-back" onClick={() => setOff(0)} data-tip="回到本月" aria-label="回到本月">今天</button>
         )}
       </div>
       <div className="desk-cal-grid desk-cal-grid-wk">{grid}</div>
@@ -288,7 +288,7 @@ function DaybookTile({ w, h, data, onOpen }: { w: number; h: number; data: Deskt
                     const onCount = dotDays.filter((d) => data.records.some((r) => r.habitId === hb.id && r.date === d)).length
                     return (
                       <div key={hb.id} className="desk-db-habit">
-                        <span className="desk-db-habit-name" title={hb.name}>{hb.name}</span>
+                        <span className="desk-db-habit-name" data-tip={hb.name} aria-label={hb.name}>{hb.name}</span>
                         <span className="desk-db-dots">
                           {dotDays.map((d) => {
                             const on = data.records.some((r) => r.habitId === hb.id && r.date === d)
@@ -297,7 +297,7 @@ function DaybookTile({ w, h, data, onOpen }: { w: number; h: number; data: Deskt
                               <button
                                 key={d}
                                 className={`desk-db-dot${on ? ' is-on' : ''}${isToday ? ' is-today' : ''}`}
-                                title={`${d}${on ? ' · 已打卡' : ' · 未打卡'}`}
+                                data-tip={`${d}${on ? ' · 已打卡' : ' · 未打卡'}`} aria-label={`${d}${on ? ' · 已打卡' : ' · 未打卡'}`}
                                 onClick={() => { void data.toggleHabitOn(hb.id, d) }}
                               />
                             )
@@ -352,7 +352,7 @@ function DaybookTile({ w, h, data, onOpen }: { w: number; h: number; data: Deskt
                     <button
                       key={p.id}
                       className="desk-row desk-row-btn"
-                      title={p.path ?? p.title}
+                      data-tip={p.path ?? p.title} aria-label={p.path ?? p.title}
                       onClick={() => {
                         if (p.path) window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: p.path, from: 'desktop' } }))
                         else onOpen('knowledge')
@@ -405,7 +405,7 @@ function ActivityTile({ today, records, weeks }: { today: string; records: Habit
     <div className="desk-stack desk-stack-fill">
       <div className="desk-act">
         {cells.map((c) => (
-          <i key={c.date} className={c.lv ? `lv${c.lv}` : ''} title={`${c.date}${c.lv ? ` · ${c.lv} 项打卡` : ' · 未打卡'}`} />
+          <i key={c.date} className={c.lv ? `lv${c.lv}` : ''} data-tip={`${c.date}${c.lv ? ` · ${c.lv} 项打卡` : ' · 未打卡'}`} aria-label={`${c.date}${c.lv ? ` · ${c.lv} 项打卡` : ' · 未打卡'}`} />
         ))}
       </div>
       <div className="desk-act-foot">
@@ -490,7 +490,7 @@ const CONTENT_TILES: TileDef[] = [
               key={t.id}
               className={`desk-row desk-row-btn${t.status === 'done' ? ' is-done' : ''}`}
               onClick={() => { void data.toggleTodo(t.id, t.status !== 'done') }}
-              title={t.title}
+              data-tip={t.title} aria-label={t.title}
             >
               <span className="desk-check" />
               <span className="desk-row-txt">{t.title}</span>
@@ -524,7 +524,7 @@ const CONTENT_TILES: TileDef[] = [
                   key={hb.id}
                   className={`desk-row desk-row-btn${on ? ' is-done' : ''}`}
                   onClick={() => { void data.toggleHabit(hb.id) }}
-                  title={`今天：${on ? '已打卡（点击取消）' : '未打卡（点击完成）'}`}
+                  data-tip={`今天：${on ? '已打卡（点击取消）' : '未打卡（点击完成）'}`} aria-label={`今天：${on ? '已打卡（点击取消）' : '未打卡（点击完成）'}`}
                 >
                   <span className="desk-check" style={on ? { background: hb.color, borderColor: hb.color } : undefined} />
                   <span className="desk-row-txt">{hb.name}</span>
@@ -556,7 +556,7 @@ const CONTENT_TILES: TileDef[] = [
             <button
               key={p.id}
               className="desk-row desk-row-btn"
-              title={p.path ?? p.title}
+              data-tip={p.path ?? p.title} aria-label={p.path ?? p.title}
               onClick={() => {
                 // 有仓库相对路径 → 交给编辑器打开真身；没有（合成的知识页）→ 退回知识库
                 if (p.path) window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: p.path, from: 'desktop' } }))
@@ -638,7 +638,7 @@ const CONTENT_TILES: TileDef[] = [
         <div className="desk-stack">
           {list.length === 0 && <Empty text="还没有说说" />}
           {list.map((m) => (
-            <button key={m.id} className="desk-quote" onClick={() => onOpen('moments')} title="打开说说">
+            <button key={m.id} className="desk-quote" onClick={() => onOpen('moments')} data-tip="打开说说" aria-label="打开说说">
               <span className="desk-quote-txt">{m.contentMd.replace(/[#*`>[\]]/g, '').slice(0, 60) || '(空)'}</span>
               <span className="desk-row-meta">{relTime(m.createdAt)}</span>
             </button>

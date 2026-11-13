@@ -40,7 +40,7 @@ export function WorkbenchStatusBar() {
   return (
     <div className="kb-statusbar flex h-6 shrink-0 items-center gap-3 border-t border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-tertiary)_72%,transparent)] px-3 text-[11px] text-[var(--text-secondary)] select-none">
       {repo && (
-        <span className="flex min-w-0 items-center gap-1.5" title="当前仓库">
+        <span className="flex min-w-0 items-center gap-1.5" data-tip="当前仓库" aria-label="当前仓库">
           <FolderGit2 size={11} className="shrink-0 text-[var(--accent)]" />
           <span className="truncate">{repo.name}</span>
         </span>
@@ -49,14 +49,14 @@ export function WorkbenchStatusBar() {
       {pomActive && (
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('pomodoro:activate'))}
-          title="打开番茄钟面板"
+          data-tip="打开番茄钟面板" aria-label="打开番茄钟面板"
           className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
           <Timer size={11} className={pom.mode === 'rating' ? 'text-[var(--warning)]' : pom.state.running ? 'text-[var(--accent)]' : ''} />
           {pomLabel}
         </button>
       )}
-      <span className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[var(--text-tertiary)]" title="快捷键">
+      <span className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[var(--text-tertiary)]" data-tip="快捷键" aria-label="快捷键">
         <Keyboard size={11} />
         Ctrl+B 折叠侧栏
       </span>

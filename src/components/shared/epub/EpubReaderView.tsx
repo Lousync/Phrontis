@@ -1124,7 +1124,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     <div className="kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)]">
       {onBack && (
         <>
-          <button onClick={onBack} title={backLabel ?? '返回书架'} data-wb="epubBack"
+          <button onClick={onBack} data-tip={backLabel ?? '返回书架'} aria-label={backLabel ?? '返回书架'} data-wb="epubBack"
             className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
             <ArrowLeft size={13} /><span className="kb-l1">{backLabel ?? '返回书架'}</span>
           </button>
@@ -1136,9 +1136,9 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       {/* data-wb 锚点：探针断言「目录跳转真的换了章」（无锚点时只能读整条 toolbar 文本） */}
       {chapter && <span data-wb="epubChapter" className="kb-l1 min-w-0 truncate text-[var(--text-tertiary)]">· {chapter}</span>}
       <div className="min-w-0 flex-1" />
-      <button onClick={() => turn(-1)} title="上一页（←）" data-wb="epubPrev"
+      <button onClick={() => turn(-1)} data-tip="上一页" aria-label="上一页" data-keys="←" data-wb="epubPrev"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronLeft size={15} /></button>
-      <button onClick={() => turn(1)} title="下一页（→ / 空格）" data-wb="epubNext"
+      <button onClick={() => turn(1)} data-tip="下一页" aria-label="下一页" data-keys="→,空格" data-wb="epubNext"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronRight size={15} /></button>
       {/* 字号只对文字书有意义：`changeFont` 改的是注入文本 CSS 的 `--kb-font-scale`，
           固定版式（cbz）整页是图片，改了毫无反应 —— 与其留两个无效按钮，不如换成缩放档。 */}
@@ -1148,13 +1148,13 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
               放在这个分支里，按钮可见性 = 可存性，不会出现"存了但从没出现过"的孤儿条目）。
               判定 = 当前 CFI 与已存书签按**起点归一化**比对（B-22，见 bookmarkCfiKey）。 */}
           <button onClick={toggleBookmark} data-wb="epubBookmark" data-wb-marked={pageMarked ? '1' : '0'}
-            title={pageMarked ? '移除本页书签' : '收藏本页书签'}
+            data-tip={pageMarked ? '移除本页书签' : '收藏本页书签'} aria-label={pageMarked ? '移除本页书签' : '收藏本页书签'}
             className={`flex items-center gap-1 rounded p-0.5 ${pageMarked ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
             {pageMarked ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}<span className="kb-l1">书签</span>
           </button>
-          <button onClick={() => changeFont(-0.1)} title="缩小字号" data-wb="epubFontDec"
+          <button onClick={() => changeFont(-0.1)} data-tip="缩小字号" aria-label="缩小字号" data-wb="epubFontDec"
             className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">−</span></button>
-          <button onClick={() => changeFont(0.1)} title="放大字号" data-wb="epubFontInc"
+          <button onClick={() => changeFont(0.1)} data-tip="放大字号" aria-label="放大字号" data-wb="epubFontInc"
             className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">＋</span></button>
         </>
       )}
@@ -1162,16 +1162,18 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
           `data-wb-zoom` 是探针断言「点了真的换档」的锚（比读图标可靠）。 */}
       {isFixedLayoutBook && (
         <button onClick={cycleZoom} data-wb="epubZoom" data-wb-zoom={zoomMode}
-          title={zoomMode === 'fit-page' ? '适应整页（点击切换为适应宽度）' : '适应宽度（点击切换为适应整页）'}
+          data-tip={zoomMode === 'fit-page' ? '适应整页（点击切换为适应宽度）' : '适应宽度（点击切换为适应整页）'}
+        aria-label={zoomMode === 'fit-page' ? '适应整页（点击切换为适应宽度）' : '适应宽度（点击切换为适应整页）'}
           className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           {zoomMode === 'fit-page' ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
       )}
-      <button onClick={cyclePaper} title={`纸色：${paperLabel}`} data-wb="epubPaper"
+      <button onClick={cyclePaper} data-tip={`纸色：${paperLabel}`} aria-label={`纸色：${paperLabel}`} data-wb="epubPaper"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Contrast size={14} /></button>
       {/* 边缘翻页提示形态（设置 edgePageHint；本阅读器 = foliate 系，恒有这对热区 → 恒显示。
           PDF / TXT 走各自的阅读器组件，那里没有这对热区，所以也不会出现这个按钮。） */}
-      <button onClick={cycleEdgeHint} title={`边缘翻页提示：${EDGE_HINT_LABEL[hintStyle]}（点击切换形态）`}
+      <button onClick={cycleEdgeHint} data-tip={`边缘翻页提示：${EDGE_HINT_LABEL[hintStyle]}（点击切换形态）`}
+        aria-label={`边缘翻页提示：${EDGE_HINT_LABEL[hintStyle]}（点击切换形态）`}
         data-wb="epubHintStyle" data-wb-hint={hintStyle}
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><MousePointerClick size={14} /></button>
       <span className="shrink-0 text-[var(--text-tertiary)]" data-wb="epubPct">{pct}%</span>
@@ -1254,9 +1256,9 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
           <div className="mb-1 flex items-center gap-1.5">
             <span className={`kb-exc-dot kb-exc-${notePop.excerpt.color}`} />
             <span className="min-w-0 flex-1 truncate text-[10px] text-[var(--text-tertiary)]">{notePop.excerpt.chapter || '正文'}</span>
-            <button onClick={() => deleteExcerpt(notePop.excerpt)} title="删除这条摘录"
+            <button onClick={() => deleteExcerpt(notePop.excerpt)} data-tip="删除这条摘录" aria-label="删除这条摘录"
               className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-warning)]"><Trash2 size={11} /></button>
-            <button onClick={() => setNotePop(null)} title="关闭"
+            <button onClick={() => setNotePop(null)} data-tip="关闭" aria-label="关闭"
               className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={11} /></button>
           </div>
           <div className="line-clamp-3 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">{notePop.excerpt.text}</div>

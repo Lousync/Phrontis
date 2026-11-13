@@ -2195,7 +2195,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
               data-wb="immersiveExitZone"
               className="absolute top-0 inset-x-0 h-9 z-40 group/rtop cursor-pointer"
               onClick={exitReading}
-              title="退出沉浸阅读 (Esc)"
+              data-tip="退出沉浸阅读" aria-label="退出沉浸阅读" data-keys="Esc"
             >
               <div className="h-full opacity-0 group-hover/rtop:opacity-100 transition-opacity duration-200 flex items-center gap-2 px-4 bg-gradient-to-b from-black/45 to-transparent">
                 <X size={15} className="text-white/90" />
@@ -2255,7 +2255,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                       const isImg = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)
                       if (isImg) {
                         return (
-                          <span key={att} title={att}
+                          <span key={att} data-tip={att} aria-label={att}
                             className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[12px] text-[var(--text-tertiary)]">
                             <ImageIcon size={13} />{fn}
                           </span>
@@ -2263,13 +2263,13 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                       }
                       const openable = ext === 'pdf' || ext === ''
                       return openable ? (
-                        <button key={att} onClick={() => openAttachmentInEditor(att)} title={`在阅读器中打开：${att}`}
+                        <button key={att} onClick={() => openAttachmentInEditor(att)} data-tip={`在阅读器中打开：${att}`} aria-label={`在阅读器中打开：${att}`}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]">
                           <FileText size={13} className="text-[var(--accent)]" />{fn}
                           <span className="text-[10px] text-[var(--text-tertiary)]">阅读</span>
                         </button>
                       ) : (
-                        <span key={att} title={att}
+                        <span key={att} data-tip={att} aria-label={att}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[12px] text-[var(--text-tertiary)]">
                           <FileText size={13} />{fn}
                         </span>
@@ -2380,7 +2380,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
         {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
           <button
             onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenuPos({ x: r.left, y: r.bottom + 6 }) }}
-            title="排序方式"
+            data-tip="排序方式"
+            aria-label="排序方式"
             data-wb="kbTreeSortBtn"
             className={`rounded p-1 transition-colors ${sortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
           >
@@ -2440,14 +2441,14 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                 }`
               return (
                 <div className="mx-1.5 mt-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] p-0.5">
-                  <button onClick={() => setSidebarTab('files')} className={tabCls(sidebarTab === 'files')} title="文件">
+                  <button onClick={() => setSidebarTab('files')} className={tabCls(sidebarTab === 'files')} data-tip="文件" aria-label="文件">
                     <FolderTree size={12} /><span>文件</span>
                   </button>
                   <button
                     onClick={() => { if (activeIsMd) setSidebarTab('outline') }}
                     disabled={!activeIsMd}
                     className={`${tabCls(sidebarTab === 'outline')} ${activeIsMd ? '' : 'cursor-default opacity-40 hover:bg-transparent'}`}
-                    title={activeIsMd ? '大纲' : '大纲（仅 md 页面可用）'}
+                    data-tip={activeIsMd ? '大纲' : '大纲（仅 md 页面可用）'} aria-label={activeIsMd ? '大纲' : '大纲（仅 md 页面可用）'}
                   >
                     <ListTree size={12} /><span>大纲</span>
                   </button>
@@ -2623,7 +2624,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                   <button
                     key={`${v.pluginId}:${v.slot}`}
                     onClick={() => setActivePluginView(v)}
-                    title={`${v.name}（插件）`}
+                    data-tip={`${v.name}（插件）`} aria-label={`${v.name}（插件）`}
                     className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                   >
                     <PluginIcon size={14} />
@@ -2739,7 +2740,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                 <button
                   type="button"
                   onClick={onBackToWorkbench}
-                  title="回到工作台（中间空态，带命令面板 / 快速打开文件 / AI 助手三条快捷指令）"
+                  data-tip="回到工作台（中间空态，带命令面板 / 快速打开文件 / AI 助手三条快捷指令）" aria-label="回到工作台（中间空态，带命令面板 / 快速打开文件 / AI 助手三条快捷指令）"
                   className="kb-item-in flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   <House size={14} />
@@ -2874,7 +2875,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
             <div className="flex-1" />
             <button
               onClick={() => setActivePluginView(null)}
-              title="关闭"
+              data-tip="关闭"
+              aria-label="关闭"
               className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
             >
               <X size={14} />

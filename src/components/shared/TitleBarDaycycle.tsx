@@ -32,7 +32,7 @@ export function TitleBarDaycycle() {
   }, [])
 
   return (
-    <div className="kb-dc-chip no-drag relative z-10 ml-auto mr-3" title="随一天时间变化的动态主题（设置 → 外观 可更换）">
+    <div className="kb-dc-chip no-drag relative z-10 ml-auto mr-3" data-tip="随一天时间变化的动态主题（设置 → 外观 可更换）" aria-label="随一天时间变化的动态主题（设置 → 外观 可更换）">
       <span className="kb-dc-chip-icon">{tick.isNight ? <Moon size={12} /> : <Sun size={12} />}</span>
       <span className="kb-dc-chip-time">{formatMinute(tick.minute)}</span>
       <span className="kb-dc-chip-phase">{tick.phase}</span>

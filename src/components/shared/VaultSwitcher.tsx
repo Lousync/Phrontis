@@ -163,7 +163,7 @@ export function VaultSwitcher() {
       <button
         ref={btnRef}
         onClick={toggleMenu}
-        title={cur ? `当前仓库：${cur.name}\n${cur.path}` : '打开仓库'}
+        data-tip={cur ? `当前仓库：${cur.name}\n${cur.path}` : '打开仓库'} aria-label={cur ? `当前仓库：${cur.name}\n${cur.path}` : '打开仓库'}
         className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[12px] transition-colors ${open ? 'bg-[var(--bg-hover)]' : 'hover:bg-[var(--bg-hover)]'} text-[var(--text-primary)]`}
       >
         <Layers size={13} className="shrink-0 text-[var(--accent)]" />
@@ -247,7 +247,7 @@ export function VaultSwitcher() {
                   </button>
                   <button
                     onClick={() => setManage({ v, confirm: 'none' })}
-                    title="管理此仓库"
+                    data-tip="管理此仓库" aria-label="管理此仓库"
                     className="mr-1 shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
                   >
                     <MoreHorizontal size={13} />

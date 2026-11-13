@@ -58,7 +58,7 @@ const sessionSet = async () => {
 /** 右栏收敛到指定折叠态（折叠/展开都能双向切；`[data-wb="rightPanel"]` 只在展开时渲染） */
 async function setRightCollapsed(collapsed) {
   const st = await evalJs(`(() => {
-    const strips = [...document.querySelectorAll('[title="拖拽或点击展开"]')]
+    const strips = [...document.querySelectorAll('[data-tip="拖拽或点击展开"]')]
       .map(e => e.getBoundingClientRect()).filter(r => r.width > 0).sort((a, b) => b.left - a.left)
     return { expanded: !!document.querySelector('[data-wb="rightPanel"]'),
       sx: strips[0] ? Math.round(strips[0].left + strips[0].width / 2) : null,

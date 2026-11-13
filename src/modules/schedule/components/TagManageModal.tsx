@@ -119,7 +119,7 @@ export function TagManageModal({ open, tags, onClose, onCreateTag, onDeleteTag }
                       <span className="w-3 h-3 rounded-full" style={{ backgroundColor: t.color }} />
                       <span className="text-[13px] text-[var(--text-secondary)]">{t.name}</span>
                     </div>
-                    <span className="flex items-center gap-1 text-[11px] text-[var(--text-disabled)]" title="由周/月总结功能自动维护，创建对应总结任务时自动使用">
+                    <span className="flex items-center gap-1 text-[11px] text-[var(--text-disabled)]" data-tip="由周/月总结功能自动维护，创建对应总结任务时自动使用" aria-label="由周/月总结功能自动维护，创建对应总结任务时自动使用">
                       <Lock size={11} /> 来源
                     </span>
                   </div>

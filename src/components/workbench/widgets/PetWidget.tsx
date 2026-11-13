@@ -335,7 +335,7 @@ export function PetWidget() {
             ref={menuBtnRef}
             data-wb="petMenuBtn"
             onClick={menu.toggle}
-            title="宠物菜单"
+            data-tip="宠物菜单" aria-label="宠物菜单"
             className={`ml-auto rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${menu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
           ><MoreHorizontal size={14} /></button>
         </div>
@@ -347,7 +347,7 @@ export function PetWidget() {
         <div data-wb="petBottom" className="flex shrink-0 flex-col items-center gap-1.5 px-2.5 pb-2.5">
           <div className="relative">
             <div id="pet-widget-bubble" className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 rounded-lg bg-[#33384a] px-2.5 py-1 text-[11.5px] text-white opacity-0 transition-opacity duration-150 data-[show='1']:opacity-100 after:absolute after:left-1/2 after:top-full after:-translate-x-1/2 after:border-[5px] after:border-transparent after:border-t-[#33384a] after:content-['']" />
-            <canvas ref={canvasRef} width={CANVAS} height={CANVAS} className="cursor-pointer" style={{ imageRendering: 'pixelated', maxWidth: '100%' }} title="点它摸摸头" onClick={onTouch} />
+            <canvas ref={canvasRef} width={CANVAS} height={CANVAS} className="cursor-pointer" style={{ imageRendering: 'pixelated', maxWidth: '100%' }} data-tip="点它摸摸头" aria-label="点它摸摸头" onClick={onTouch} />
             <div ref={fxRef} className="pointer-events-none absolute inset-0" />
           </div>
 
@@ -363,7 +363,7 @@ export function PetWidget() {
                 onKeyDown={(e) => { if (e.key === 'Enter') commitRename() }}
               />
             ) : (
-              <span className="text-[13.5px] font-semibold text-[var(--text-primary)] cursor-pointer" title="点击改名" onClick={() => { setDraftName(snap.name); setEditing(true) }}>{snap.name}</span>
+              <span className="text-[13.5px] font-semibold text-[var(--text-primary)] cursor-pointer" data-tip="点击改名" aria-label="点击改名" onClick={() => { setDraftName(snap.name); setEditing(true) }}>{snap.name}</span>
             )}
             <span className="rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--accent)]">{stageLabel}</span>
             <span className="ml-auto text-[10.5px] text-[var(--text-muted)]">{expText}</span>

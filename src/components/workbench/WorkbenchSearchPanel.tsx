@@ -266,12 +266,12 @@ export function WorkbenchSearchPanel({ onOpenPage, onLocateCategory, onRunComman
     <div data-wb="leftSearch" className="flex min-h-0 flex-1 flex-col">
       {/* 头部：🏠 返回顶层 + 🔒 锁定（简图右图排版；与总览态头部同一居中语言） */}
       <div className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
-        <button onClick={onExit} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+        <button onClick={onExit} data-tip="返回总览" aria-label="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <House {...SIDEBAR_HEADER_ICON} />
         </button>
         <button
           onClick={onToggleLock}
-          title={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'}
+          data-tip={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'} aria-label={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'}
           className={`rounded p-1 transition-colors ${locked ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
         >
           {locked ? <Lock {...SIDEBAR_HEADER_ICON} /> : <LockOpen {...SIDEBAR_HEADER_ICON} />}

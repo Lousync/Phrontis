@@ -68,11 +68,11 @@ export function UsageBreakdown({ models }: { models: UsageModelRow[] }) {
                 <span>{r.model}</span>
               </td>
               <td className="px-2 py-1.5 text-right tabular-nums">{r.calls}</td>
-              <td className="px-2 py-1.5 text-right tabular-nums" title={exactTokens(r.i0)}>{fmtTokens(r.i0)}</td>
-              <td className="px-2 py-1.5 text-right tabular-nums" title={exactTokens(r.ir)}>{fmtTokens(r.ir)}</td>
-              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--text-muted)]" title="上游未上报缓存写即为 0">{fmtTokens(r.iw)}</td>
-              <td className="px-2 py-1.5 text-right tabular-nums" title={exactTokens(r.out)}>{fmtTokens(r.out)}</td>
-              <td className="px-2 py-1.5 text-right font-medium tabular-nums" title={exactTokens(totOf(r))}>{fmtTokens(totOf(r))}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums" data-tip={exactTokens(r.i0)} aria-label={exactTokens(r.i0)}>{fmtTokens(r.i0)}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums" data-tip={exactTokens(r.ir)} aria-label={exactTokens(r.ir)}>{fmtTokens(r.ir)}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--text-muted)]" data-tip="上游未上报缓存写即为 0" aria-label="上游未上报缓存写即为 0">{fmtTokens(r.iw)}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums" data-tip={exactTokens(r.out)} aria-label={exactTokens(r.out)}>{fmtTokens(r.out)}</td>
+              <td className="px-2 py-1.5 text-right font-medium tabular-nums" data-tip={exactTokens(totOf(r))} aria-label={exactTokens(totOf(r))}>{fmtTokens(totOf(r))}</td>
               <td className={`px-2 py-1.5 text-right tabular-nums ${r.cost === null ? 'text-[var(--text-muted)]' : ''}`}>{fmtUsd(r.cost)}</td>
               <td className="px-2 py-1.5">
                 <div className="flex items-center justify-end gap-1.5">

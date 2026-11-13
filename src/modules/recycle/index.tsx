@@ -200,13 +200,13 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
           <button
             onClick={() => handleRestorePartial(item.id, 'category', item.module)}
             className="p-0.5 rounded text-[var(--accent)] hover:bg-[var(--bg-hover)] shrink-0"
-            title="恢复此目录">
+            data-tip="恢复此目录" aria-label="恢复此目录">
             <RotateCcw size={12} />
           </button>
           <button
             onClick={() => handleTrashPartialToOS(item.id, 'category')}
             className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-            title="移入系统回收站">
+            data-tip="移入系统回收站" aria-label="移入系统回收站">
             <X size={12} />
           </button>
         </div>
@@ -226,13 +226,13 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                     <button
                       onClick={() => handleRestorePartial(item.id, `children.${ci}`, item.module)}
                       className="p-0.5 rounded text-[var(--accent)] hover:bg-[var(--bg-hover)] shrink-0"
-                      title="恢复此子目录">
+                      data-tip="恢复此子目录" aria-label="恢复此子目录">
                       <RotateCcw size={11} />
                     </button>
                     <button
                       onClick={() => handleTrashPartialToOS(item.id, `children.${ci}`)}
                       className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-                      title="移入系统回收站">
+                      data-tip="移入系统回收站" aria-label="移入系统回收站">
                       <X size={11} />
                     </button>
                   </div>
@@ -244,13 +244,13 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                       <button
                         onClick={() => handleRestorePartial(item.id, `children.${ci}.pages.${pi}`, item.module)}
                         className="p-0.5 rounded text-[var(--accent)] hover:bg-[var(--bg-hover)] shrink-0"
-                        title="恢复此页面">
+                        data-tip="恢复此页面" aria-label="恢复此页面">
                         <RotateCcw size={11} />
                       </button>
                       <button
                         onClick={() => handleTrashPartialToOS(item.id, `children.${ci}.pages.${pi}`)}
                         className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-                        title="移入系统回收站">
+                        data-tip="移入系统回收站" aria-label="移入系统回收站">
                         <X size={11} />
                       </button>
                     </div>
@@ -267,13 +267,13 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                 <button
                   onClick={() => handleRestorePartial(item.id, `pages.${pi}`, item.module)}
                   className="p-0.5 rounded text-[var(--accent)] hover:bg-[var(--bg-hover)] shrink-0"
-                  title="恢复此页面">
+                  data-tip="恢复此页面" aria-label="恢复此页面">
                   <RotateCcw size={11} />
                 </button>
                 <button
                   onClick={() => handleTrashPartialToOS(item.id, `pages.${pi}`)}
                   className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-                  title="移入系统回收站">
+                  data-tip="移入系统回收站" aria-label="移入系统回收站">
                   <X size={11} />
                 </button>
               </div>
@@ -299,7 +299,7 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
           <button
             onClick={handleEmptyAll}
             disabled={emptying}
-            title="全部移入系统回收站（可在系统回收站找回）"
+            data-tip="全部移入系统回收站（可在系统回收站找回）" aria-label="全部移入系统回收站（可在系统回收站找回）"
             className={`ml-auto px-1.5 py-0.5 rounded-md text-[11.5px] transition-colors disabled:opacity-50 ${emptyArmed ? 'text-white bg-[var(--danger)] hover:opacity-90' : 'text-[var(--danger)] hover:bg-[var(--bg-hover)]'}`}
           >
             {emptying ? '正在移入…' : emptyArmed ? '确认全部移入？' : '全部移入系统回收站'}
@@ -318,7 +318,7 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
         <button
           onClick={() => setSortOrder(o => o === 'desc' ? 'asc' : 'desc')}
           className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title={`按删除时间${sortOrder === 'desc' ? '正序' : '倒序'}`}
+          data-tip={`按删除时间${sortOrder === 'desc' ? '正序' : '倒序'}`} aria-label={`按删除时间${sortOrder === 'desc' ? '正序' : '倒序'}`}
         >
           <ArrowUpDown size={12} />
           {sortOrder === 'desc' ? '最近删除' : '最早删除'}
@@ -336,7 +336,7 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
               key={ft}
               onClick={() => setTypeFilter(typeFilter === ft ? '' : ft)}
               className={`px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${typeFilter === ft ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
-              title={`${ft} (${typeCounts[ft]})`}
+              data-tip={`${ft} (${typeCounts[ft]})`} aria-label={`${ft} (${typeCounts[ft]})`}
             >
               {ft.toUpperCase()}
               <span className="ml-0.5 opacity-60">{typeCounts[ft]}</span>
@@ -395,14 +395,14 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                       <button
                         onClick={() => handleRestore(item.id, item.module)}
                         className="p-1.5 rounded text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
-                        title={isCategory ? '恢复整个目录树' : '恢复'}
+                        data-tip={isCategory ? '恢复整个目录树' : '恢复'} aria-label={isCategory ? '恢复整个目录树' : '恢复'}
                       >
                         <RotateCcw size={15} />
                       </button>
                       <button
                         onClick={() => handleTrashToOS(item.id)}
                         className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] transition-colors"
-                        title="移入系统回收站"
+                        data-tip="移入系统回收站" aria-label="移入系统回收站"
                       >
                         <X size={15} />
                       </button>

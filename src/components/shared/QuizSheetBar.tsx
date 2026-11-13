@@ -62,7 +62,7 @@ export function QuizSheetBar({ quizzes, store, onReview }: {
         onClick={() => { void copyAnswers() }}
         disabled={answerExport.answered === 0}
         className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-default transition-colors"
-        title={answerExport.answered === 0 ? '当前还没有作答' : '把当前题单的作答复制成文本，粘贴给 AI 即可判题'}
+        data-tip={answerExport.answered === 0 ? '当前还没有作答' : '把当前题单的作答复制成文本，粘贴给 AI 即可判题'} aria-label={answerExport.answered === 0 ? '当前还没有作答' : '把当前题单的作答复制成文本，粘贴给 AI 即可判题'}
       >
         <ClipboardCopy size={12} />
         提取答案
@@ -72,7 +72,7 @@ export function QuizSheetBar({ quizzes, store, onReview }: {
           onClick={onReview}
           disabled={wrong === 0}
           className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-default transition-colors"
-          title={wrong === 0 ? '当前没有判错的题' : '只重做当前题单判错的题，带着上次答案'}
+          data-tip={wrong === 0 ? '当前没有判错的题' : '只重做当前题单判错的题，带着上次答案'} aria-label={wrong === 0 ? '当前没有判错的题' : '只重做当前题单判错的题，带着上次答案'}
         >
           <RotateCcw size={12} />
           错题重做 ({wrong})

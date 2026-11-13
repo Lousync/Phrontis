@@ -30,7 +30,7 @@ export function Sheet({ open, title, onClose, children, footer }: {
         <button
           type="button"
           onClick={onClose}
-          title="关闭"
+          data-tip="关闭" aria-label="关闭"
           className="ml-auto grid h-6 w-6 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
           <X size={13} strokeWidth={2} />

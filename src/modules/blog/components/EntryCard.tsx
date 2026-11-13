@@ -47,7 +47,7 @@ export function EntryCard({ entry, onClick, onToggleStar, size = 'm' }: EntryCar
         <button
           onClick={e => { e.stopPropagation(); onToggleStar(entry.id) }}
           className="shrink-0 p-0.5 hover:scale-110 transition-[transform,scale]"
-          title={entry.isStarred ? '取消收藏' : '收藏'}
+          data-tip={entry.isStarred ? '取消收藏' : '收藏'} aria-label={entry.isStarred ? '取消收藏' : '收藏'}
         >
           {/* key 随收藏态变化 → 图标重挂载，micro-pop 每次切换都重播（E 类状态反馈） */}
           <Star key={entry.isStarred ? 'on' : 'off'} size={14} className={`kb-micro-pop ${entry.isStarred ? 'text-[var(--warning)] fill-[var(--warning)]' : 'text-[var(--text-muted)]'}`} />
@@ -70,10 +70,10 @@ export function EntryCard({ entry, onClick, onToggleStar, size = 'm' }: EntryCar
 
         {/* 周期总结日标注(月总结优先,与详情页总结面板一致) */}
         {summary?.type === 'month' && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 shrink-0" title={summary.label}>月总结</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 shrink-0" data-tip={summary.label} aria-label={summary.label}>月总结</span>
         )}
         {summary?.type === 'week' && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400 shrink-0" title={summary.label}>周总结</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400 shrink-0" data-tip={summary.label} aria-label={summary.label}>周总结</span>
         )}
       </div>
 

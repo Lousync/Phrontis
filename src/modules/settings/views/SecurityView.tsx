@@ -78,7 +78,11 @@ export function SecurityView() {
                         : 'border-[var(--accent)] bg-[var(--bg-selected)] text-[var(--text-primary)]'
                       : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                   }`}
-                  title={
+                  data-tip={
+                    lv === 'C' ? 'C 级能力插件需逐项授权' :
+                    lv === 'S' ? 'S 级（系统级）' :
+                    lv === 'A' ? 'A 级（高权限）' : 'B 级（普通）'
+                  } aria-label={
                     lv === 'C' ? 'C 级能力插件需逐项授权' :
                     lv === 'S' ? 'S 级（系统级）' :
                     lv === 'A' ? 'A 级（高权限）' : 'B 级（普通）'

@@ -30,7 +30,7 @@ export function RowMenuButton({ label, size = 14, className, children }: {
         ref={btnRef}
         type="button"
         onClick={e => { e.stopPropagation(); setOpen(v => !v) }}
-        title={label}
+        data-tip={label}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}

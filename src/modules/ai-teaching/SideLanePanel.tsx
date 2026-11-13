@@ -256,17 +256,17 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
       >
         {onBack ? (
           <>
-            <button onClick={onBack} title="返回支线列表"
+            <button onClick={onBack} data-tip="返回支线列表" aria-label="返回支线列表"
               className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <ChevronLeft size={13} />列表
             </button>
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text-primary)]" title={title || parentTitle}>{title || '支线旁问'}</span>
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text-primary)]" data-tip={title || parentTitle} aria-label={title || parentTitle}>{title || '支线旁问'}</span>
           </>
         ) : (
           <>
             <Sparkles size={13} className="shrink-0 text-[var(--accent)]" />
             <span className="shrink-0 text-[12px] font-medium text-[var(--text-primary)]">支线旁问</span>
-            <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={parentTitle}>来自「{parentTitle}」</span>
+            <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" data-tip={parentTitle} aria-label={parentTitle}>来自「{parentTitle}」</span>
           </>
         )}
         {/* 轮数切换：新建且未发送时可调；既有支线快照已固化，不可调 */}
@@ -274,7 +274,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
           <div className="shrink-0 flex items-center gap-0.5 rounded-md bg-[var(--bg-secondary)] p-0.5">
             {TURN_OPTIONS.map(t => (
               <button key={t} disabled={!!openLaneId || lockedRef.current || pending} onClick={() => { void changeTurns(t) }}
-                title={openLaneId ? '既有支线的上下文已固化' : lockedRef.current ? '已发送，上下文已锁定' : `带入主线最近 ${t} 轮`}
+                data-tip={openLaneId ? '既有支线的上下文已固化' : lockedRef.current ? '已发送，上下文已锁定' : `带入主线最近 ${t} 轮`} aria-label={openLaneId ? '既有支线的上下文已固化' : lockedRef.current ? '已发送，上下文已锁定' : `带入主线最近 ${t} 轮`}
                 className={`px-1.5 py-0.5 rounded text-[10.5px] tabular-nums transition-colors ${turns === t ? 'bg-[var(--bg-hover)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'} disabled:opacity-40 disabled:cursor-not-allowed`}>
                 {t}轮
               </button>
@@ -282,13 +282,13 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
           </div>
         )}
         {onDock && (
-          <button onClick={onDock} title="停靠到右栏支线中心（也可直接把窗口拖到右缘松手）"
+          <button onClick={onDock} data-tip="停靠到右栏支线中心（也可直接把窗口拖到右缘松手）" aria-label="停靠到右栏支线中心（也可直接把窗口拖到右缘松手）"
             className="shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
             <Maximize2 size={13} />
           </button>
         )}
         {!onBack && (
-          <button onClick={onClose} title="关闭支线（内容保留在支线会话里）"
+          <button onClick={onClose} data-tip="关闭支线（内容保留在支线会话里）" aria-label="关闭支线（内容保留在支线会话里）"
             className="shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
             <X size={13} />
           </button>
@@ -335,7 +335,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
               <>
                 <div className="max-w-[90%] min-w-0 select-text bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3 py-1.5 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap">{m.content}</div>
                 <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制' })).catch(() => null) }}
-                  title="复制" className="absolute right-full top-1/2 -translate-y-1/2 mr-1 px-1 py-0.5 rounded text-[10.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-opacity">
+                  data-tip="复制" aria-label="复制" className="absolute right-full top-1/2 -translate-y-1/2 mr-1 px-1 py-0.5 rounded text-[10.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-opacity">
                   <Copy size={10} />
                 </button>
               </>
@@ -343,7 +343,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
               <div className="min-w-0 group relative">
                 <MarkdownPreview content={m.content} codeBlockChrome="card" />
                 <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制' })).catch(() => null) }}
-                  title="复制" className="absolute right-0 -top-1 px-1 py-0.5 rounded text-[10.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-opacity">
+                  data-tip="复制" aria-label="复制" className="absolute right-0 -top-1 px-1 py-0.5 rounded text-[10.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-opacity">
                   <Copy size={10} />
                 </button>
               </div>
@@ -370,13 +370,13 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 border-t border-[var(--border-color)]">
           {onQuote && (
             <button onClick={() => { const lastAi = [...messages].reverse().find(m => m.role === 'assistant'); onQuote(lastAi?.content ?? '') }}
-              title="把这条支线的结论作为引用放进主线输入框（不自动发送，你可继续编辑）"
+              data-tip="把这条支线的结论作为引用放进主线输入框（不自动发送，你可继续编辑）" aria-label="把这条支线的结论作为引用放进主线输入框（不自动发送，你可继续编辑）"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <Quote size={11} />引用到主线
             </button>
           )}
           {onFloat && (
-            <button onClick={onFloat} title="浮出为可拖动窗口（与右栏同一条支线）"
+            <button onClick={onFloat} data-tip="浮出为可拖动窗口（与右栏同一条支线）" aria-label="浮出为可拖动窗口（与右栏同一条支线）"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <Maximize2 size={11} />浮出窗口
             </button>
@@ -405,14 +405,14 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
           <div className="flex items-center gap-2 mt-0.5">
             {/* 拍板② 同原则：底栏左端补合规提示 */}
             <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
-              title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+              data-tip="AI 生成内容可能存在错误，请自行核实" aria-label="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
             {pending ? (
-              <button onClick={() => { if (laneId) void agentAbortSession(laneId) }} title="停止生成"
+              <button onClick={() => { if (laneId) void agentAbortSession(laneId) }} data-tip="停止生成" aria-label="停止生成"
                 className="w-8 h-8 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity">
                 <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
               </button>
             ) : (
-              <button onClick={() => { void doSend() }} disabled={!input.trim() || stopped} title="发送"
+              <button onClick={() => { void doSend() }} disabled={!input.trim() || stopped} data-tip="发送" aria-label="发送"
                 className="w-8 h-8 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
                 <ArrowUp size={15} />
               </button>

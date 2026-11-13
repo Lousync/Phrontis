@@ -88,7 +88,7 @@ export function HabitTracker({ onBack, sidebarEl, sidebarHosted }: Props) {
         <button
           onClick={onBack}
           className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title="返回"
+          data-tip="返回" aria-label="返回"
         >
           <ArrowLeft size={12} />
         </button>

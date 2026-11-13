@@ -85,7 +85,7 @@ const clickText = (label) => evalJs(`(() => {
   return true
 })()`)
 const clickRail = (label) => evalJs(`(() => {
-  const b = [...document.querySelectorAll('button[title]')].find(x => x.title === ${JSON.stringify(label)})
+  const b = [...document.querySelectorAll('button[data-tip]')].find(x => x.title === ${JSON.stringify(label)})
   if (!b) return false
   b.click()
   return true
@@ -105,7 +105,7 @@ const SVG_FP = `(el) => {
 
 // 观测点：活动栏「插件市场」按钮
 const JS_RAIL_ICON = `(() => { const fp = ${SVG_FP};
-  const b = [...document.querySelectorAll('button[title]')].find(x => x.title === '插件市场')
+  const b = [...document.querySelectorAll('button[data-tip]')].find(x => x.title === '插件市场')
   return fp(b)
 })()`
 
@@ -283,7 +283,7 @@ async function main() {
   // ---------- R5 负向：观测点无一残留裸 lucide 的 stroke-width="2" ----------
   const r5 = await evalJs(`(() => {
     const hits = []
-    const b = [...document.querySelectorAll('button[title]')].find(x => x.title === '插件市场')
+    const b = [...document.querySelectorAll('button[data-tip]')].find(x => x.title === '插件市场')
     const s = b?.querySelector('svg')
     if (s && s.getAttribute('stroke-width') === '2') hits.push('rail')
     const tabBtn = [...document.querySelectorAll('button')].find(x => /^已安装 \\(/.test((x.textContent || '').trim()))

@@ -50,11 +50,11 @@ export function PasswordWidget() {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
-        <code className="min-w-0 flex-1 break-all font-mono text-[12px] leading-relaxed text-[var(--text-primary)]" title="点击右侧按钮重新生成">{pwd}</code>
+        <code className="min-w-0 flex-1 break-all font-mono text-[12px] leading-relaxed text-[var(--text-primary)]" data-tip="点击右侧按钮重新生成" aria-label="点击右侧按钮重新生成">{pwd}</code>
         <button
           onClick={() => regen(len)}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-          title="重新生成"
+          data-tip="重新生成" aria-label="重新生成"
         >
           <RefreshCw size={12} />
         </button>
@@ -65,7 +65,7 @@ export function PasswordWidget() {
               ? 'border-[var(--success)] bg-[var(--success)]/10 text-[var(--success)]'
               : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
           }`}
-          title={copied ? '已复制' : '复制到剪贴板'}
+          data-tip={copied ? '已复制' : '复制到剪贴板'} aria-label={copied ? '已复制' : '复制到剪贴板'}
         >
           {copied ? <Check size={12} strokeWidth={2.5} /> : <Copy size={12} />}
         </button>
@@ -84,7 +84,7 @@ export function PasswordWidget() {
             regen(n)
           }}
           className="min-w-0 flex-1 accent-[var(--accent)]"
-          title="密码长度"
+          data-tip="密码长度" aria-label="密码长度"
         />
         <span className="w-8 shrink-0 text-right tabular-nums" style={{ color: meta.color }}>{meta.label}</span>
       </div>

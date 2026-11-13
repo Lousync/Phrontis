@@ -114,7 +114,7 @@ export function BookshelfSideList({ onOpenBook, activeRelPath = null }: {
               onClick={() => onOpenBook(b.relPath, title, b.kind)}
               data-wb-active={active ? '1' : undefined}
               className={`kb-item-in group relative flex w-full items-center gap-2 rounded-md p-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${active ? 'bg-[var(--bg-hover)]' : ''}`}
-              title={b.kind !== 'pdf' ? (pct > 0 ? `已读 ${pct}%` : title) : (b.hasProgress && b.totalPages > 0 ? `第 ${b.lastPage} / ${b.totalPages} 页 · ${pct}%` : title)}
+              data-tip={b.kind !== 'pdf' ? (pct > 0 ? `已读 ${pct}%` : title) : (b.hasProgress && b.totalPages > 0 ? `第 ${b.lastPage} / ${b.totalPages} 页 · ${pct}%` : title)} aria-label={b.kind !== 'pdf' ? (pct > 0 ? `已读 ${pct}%` : title) : (b.hasProgress && b.totalPages > 0 ? `第 ${b.lastPage} / ${b.totalPages} 页 · ${pct}%` : title)}
             >
               {/* 在读标记：左侧细竖条（只改底色 + 竖条，不加文字标签） */}
               {active && <span className="absolute left-0.5 top-2 bottom-2 w-[2px] rounded-full bg-[var(--accent)]" />}

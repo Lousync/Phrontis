@@ -58,17 +58,17 @@ export function HabitSidebar({ habits, records, onNew, onEdit, onArchive }: Prop
       )}
       {/* 悬停操作 */}
       <div className="absolute right-1.5 hidden group-hover:flex items-center gap-0.5 bg-[var(--bg-secondary)] pl-1">
-        <button onClick={() => onEdit(h)} title="编辑"
+        <button onClick={() => onEdit(h)} data-tip="编辑" aria-label="编辑"
           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)] transition-colors">
           <Pencil size={13} />
         </button>
         {isArchived ? (
-          <button onClick={() => onArchive({ ...h, archived: false })} title="恢复"
+          <button onClick={() => onArchive({ ...h, archived: false })} data-tip="恢复" aria-label="恢复"
             className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
             <ArchiveRestore size={13} />
           </button>
         ) : (
-          <button onClick={() => onArchive({ ...h, archived: true })} title="归档"
+          <button onClick={() => onArchive({ ...h, archived: true })} data-tip="归档" aria-label="归档"
             className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--warning)] hover:bg-[var(--bg-selected)] transition-colors">
             <Archive size={13} />
           </button>
@@ -83,7 +83,7 @@ export function HabitSidebar({ habits, records, onNew, onEdit, onArchive }: Prop
         <span className="flex-1 text-[12px] font-medium text-[var(--text-secondary)]">习惯</span>
         <button onClick={onNew}
           className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-          title="新建习惯">
+          data-tip="新建习惯" aria-label="新建习惯">
           <Plus {...SIDEBAR_HEADER_ICON} />
         </button>
       </div>

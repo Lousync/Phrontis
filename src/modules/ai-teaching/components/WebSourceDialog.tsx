@@ -83,7 +83,7 @@ export function WebSourceDialog({ sessionId, entry, onClose, onDone }: Props) {
           </div>
           {phase === 'crawling'
             ? <button onClick={() => { void aiTeachSrcWebCancel(sessionId) }} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--text-secondary)] border border-[var(--border-color)] hover:bg-[var(--bg-hover)] transition-colors"><Square size={10} />停止</button>
-            : <button onClick={onClose} className="p-1 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" title="关闭"><X size={14} /></button>}
+            : <button onClick={onClose} className="p-1 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors" data-tip="关闭" aria-label="关闭"><X size={14} /></button>}
         </div>
 
         {/* 体 */}
@@ -102,7 +102,7 @@ export function WebSourceDialog({ sessionId, entry, onClose, onDone }: Props) {
               <div className="text-[11.5px] text-[var(--text-secondary)] mb-2">这是门户/导航页，选择一个教程入口继续：</div>
               <div className="rounded-lg border border-[var(--border-color)] divide-y divide-[var(--border-color)] overflow-hidden">
                 {(probe?.candidates ?? []).map(c => (
-                  <button key={c.url} onClick={() => void doProbe(c.url)} className="w-full text-left px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors truncate" title={c.url}>
+                  <button key={c.url} onClick={() => void doProbe(c.url)} className="w-full text-left px-3 py-2 text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors truncate" data-tip={c.url} aria-label={c.url}>
                     {c.title} <span className="text-[10px] text-[var(--text-muted)]">{c.url}</span>
                   </button>
                 ))}
@@ -137,7 +137,7 @@ export function WebSourceDialog({ sessionId, entry, onClose, onDone }: Props) {
                       <label key={c.url} className="flex items-center gap-2 px-4 py-1 cursor-pointer hover:bg-[var(--bg-hover)] transition-colors">
                         <input type="checkbox" checked={checked.has(c.url)} className="accent-[var(--accent)]"
                           onChange={() => setChecked(prev => { const n = new Set(prev); if (n.has(c.url)) n.delete(c.url); else n.add(c.url); return n })} />
-                        <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]" title={c.url}>{c.title}</span>
+                        <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]" data-tip={c.url} aria-label={c.url}>{c.title}</span>
                       </label>
                     ))}
                   </div>
@@ -174,7 +174,7 @@ export function WebSourceDialog({ sessionId, entry, onClose, onDone }: Props) {
                     <div className="rounded-lg border border-[var(--border-color)] divide-y divide-[var(--border-color)] overflow-hidden max-h-44 overflow-y-auto">
                       {result.failed!.map(f => (
                         <div key={f.url} className="flex items-center gap-2 px-3 py-1.5">
-                          <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]" title={`${f.url}\n${f.reason}`}>{f.title || f.url} <span className="text-[10px] text-[var(--text-muted)]">— {f.reason}</span></span>
+                          <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]" data-tip={`${f.url}\n${f.reason}`} aria-label={`${f.url}\n${f.reason}`}>{f.title || f.url} <span className="text-[10px] text-[var(--text-muted)]">— {f.reason}</span></span>
                         </div>
                       ))}
                       <div className="px-3 py-2">

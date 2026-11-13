@@ -169,10 +169,10 @@ export function BlogView() {
                     {(t.contentMd || '').replace(/[#*`>\-\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60) || '空模板'}
                   </div>
                 </div>
-                <button onClick={() => startEdit(t)} className="p-1.5 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all shrink-0" title="编辑">
+                <button onClick={() => startEdit(t)} className="p-1.5 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all shrink-0" data-tip="编辑" aria-label="编辑">
                   <PencilLine size={14} />
                 </button>
-                <button onClick={() => void removeTemplate(t.id)} className="p-1.5 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--danger)] hover:bg-[#e8112320] transition-all shrink-0" title="删除">
+                <button onClick={() => void removeTemplate(t.id)} className="p-1.5 rounded text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--danger)] hover:bg-[#e8112320] transition-all shrink-0" data-tip="删除" aria-label="删除">
                   <Trash2 size={14} />
                 </button>
               </div>

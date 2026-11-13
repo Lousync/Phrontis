@@ -320,7 +320,7 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit, pendingRule
           >收入</button>
           <button
             onClick={() => { setType('transfer'); setCategory('') }}
-            title="账户之间转移资金，不计入收支"
+            data-tip="账户之间转移资金，不计入收支" aria-label="账户之间转移资金，不计入收支"
             className={'h-8 flex-1 rounded-md border text-[12.5px] transition-colors ' + (type === 'transfer' ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] font-semibold text-[var(--accent)]' : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]')}
           >转账</button>
         </div>

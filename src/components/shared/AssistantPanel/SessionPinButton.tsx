@@ -20,7 +20,7 @@ export function SessionPinButton({ pinned, onToggle, size = 11 }: Props) {
           ? 'text-[var(--warning)]'
           : 'text-[var(--text-disabled)] opacity-0 hover:text-[var(--warning)] group-hover:opacity-100'
       }`}
-      title={pinned ? '取消收藏' : '收藏'}
+      data-tip={pinned ? '取消收藏' : '收藏'}
       aria-label={pinned ? '取消收藏' : '收藏'}
       aria-pressed={pinned}
     >

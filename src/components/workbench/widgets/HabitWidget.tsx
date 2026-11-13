@@ -118,7 +118,7 @@ export function HabitWidget({ onManage }: Props) {
             ))}
           </div>
           {onManage && (
-            <button onClick={onManage} className="inline-flex items-center gap-0.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)]" title="打开习惯打卡工具管理">
+            <button onClick={onManage} className="inline-flex items-center gap-0.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)]" data-tip="打开习惯打卡工具管理" aria-label="打开习惯打卡工具管理">
               管理 <ExternalLink size={10} />
             </button>
           )}
@@ -150,7 +150,7 @@ export function HabitWidget({ onManage }: Props) {
                     className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border transition-colors ${
                       done ? 'border-[var(--success)] bg-[var(--success)] text-white' : 'border-[var(--border-color)] hover:border-[var(--success)]'
                     }`}
-                    title={done ? '取消打卡' : '打卡'}
+                    data-tip={done ? '取消打卡' : '打卡'} aria-label={done ? '取消打卡' : '打卡'}
                   >
                     {done && <Check size={12} strokeWidth={3} />}
                   </button>

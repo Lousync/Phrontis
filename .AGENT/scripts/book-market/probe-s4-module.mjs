@@ -267,7 +267,7 @@ const { evalJs, sleep } = K
 
 /** 渲染层里点一个 title= 的按钮（左栏图标条 / 书架卡片 / 队列图标钮都用它） */
 const clickTitle = (title, scope = 'document') => `(() => {
-  const b = [...${scope}.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === ${JSON.stringify(title)})
+  const b = [...${scope}.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === ${JSON.stringify(title)})
   if (!b) return 'no-btn'
   b.scrollIntoView({ block: 'nearest' })
   b.click()
@@ -309,7 +309,7 @@ const myOk = (name, cond, extra = '') => { checks.push({ name, ok: !!cond, extra
 //
 // ★★ 三条**踩过的坑**都收在这里（S4 首轮三条全踩了一遍，表象都是「明明看得见那个按钮却点不到/判错」）：
 //
-//   ① **结果卡不能全局捞 `button[title]`**：模块栏那个「下载」pill 也带 title（=「下载队列」），
+//   ① **结果卡不能全局捞 `button[data-tip]`**：模块栏那个「下载」pill 也带 title（=「下载队列」），
 //      会被当成一张书卡混进结果集 —— 首轮「去重」断言看到的卡就是 `["下载队列"]`。
 //      结果网格有稳定类名（`grid-cols-[repeat(auto-fill,minmax(148px,1fr))]`），只在该容器里捞。
 //   ② **检索中时整个结果区被骨架屏替换**（DiscoverView 的 `loading ? <Skeleton/> : …`），
@@ -320,13 +320,13 @@ const myOk = (name, cond, extra = '') => { checks.push({ name, ok: !!cond, extra
 //      `openDrawer()` 会等它真开稳（class 不是 `kb-drawer-out`），必要时再点一次。
 const GRID = '[data-wb="bookMarket"] [class*="auto-fill"]'
 const DRAWER = '[data-wb="bookMarketDetail"]'
-const cardsOf = () => evalJs(`[...document.querySelectorAll('${GRID} button[title]')].map((b) => b.getAttribute('title'))`)
-const cardText = (t) => evalJs(`(() => { const b = [...document.querySelectorAll('${GRID} button[title]')].find((x) => x.getAttribute('title') === ${JSON.stringify(t)}); return b ? b.textContent : null })()`)
+const cardsOf = () => evalJs(`[...document.querySelectorAll('${GRID} button[data-tip]')].map((b) => b.getAttribute('data-tip'))`)
+const cardText = (t) => evalJs(`(() => { const b = [...document.querySelectorAll('${GRID} button[data-tip]')].find((x) => x.getAttribute('data-tip') === ${JSON.stringify(t)}); return b ? b.textContent : null })()`)
 /** 结果区是否还在「检索中」（骨架屏态） */
 const searching = async () => (await evalJs(`(document.querySelector('[data-wb="bookMarket"]')?.textContent ?? '').includes('检索中')`)) === true
 const waitSearchIdle = async (ms = 20000) => await until(async () => (await searching()) === false, ms)
 const clickCard = (title) => evalJs(`(() => {
-  const b = [...document.querySelectorAll('${GRID} button[title]')].find((x) => x.getAttribute('title') === ${JSON.stringify(title)})
+  const b = [...document.querySelectorAll('${GRID} button[data-tip]')].find((x) => x.getAttribute('data-tip') === ${JSON.stringify(title)})
   if (!b) return 'no-card'
   b.scrollIntoView({ block: 'nearest' })
   b.click()
@@ -462,7 +462,7 @@ myOk('★ 声明了 auth 的源，authType 原样落库（空入参 ref 不能�
 // ===== ② 模块挂载 + 左栏高亮（§八 7 前半）=====
 console.log('\n--- ② 模块挂载与左栏高亮 ---')
 const railState = `(() => {
-  const b = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '书市' && x.closest('div[class*="w-11"]'))
+  const b = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '书市' && x.closest('div[class*="w-11"]'))
   if (!b) return { found: false }
   return { found: true, marked: !!b.querySelector('div[class*="left-"]') }
 })()`
@@ -471,7 +471,7 @@ myOk('左栏图标条上有「书市」按钮', railBefore?.found === true)
 myOk('未激活时没有高亮标记（负向基线）', railBefore?.marked === false)
 
 const clicked = await evalJs(`(() => {
-  const b = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '书市' && x.closest('div[class*="w-11"]'))
+  const b = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '书市' && x.closest('div[class*="w-11"]'))
   if (!b) return 'no-rail'
   b.click(); return 'ok'
 })()`)
@@ -532,7 +532,7 @@ myOk('切回「发现」：检索结果还在（切视图不丢结果）',
 await evalJs(clickTitle('工作台'))
 await sleep(700)
 myOk('切到工作台后书市只是隐藏（保活，不卸载）', await evalJs(`!!document.querySelector('[data-wb="bookMarket"]')`))
-await evalJs(`(() => { const b = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '书市' && x.closest('div[class*="w-11"]')); if (b) { b.click(); return 'ok' } return 'no-rail' })()`)
+await evalJs(`(() => { const b = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '书市' && x.closest('div[class*="w-11"]')); if (b) { b.click(); return 'ok' } return 'no-rail' })()`)
 await sleep(600)
 myOk('切回来：检索结果仍在', JSON.stringify(await cardsOf()) === JSON.stringify(cardsBeforeSwitch),
   JSON.stringify(await cardsOf()))
@@ -607,7 +607,7 @@ myOk('★ 书架卡上显示的是书市下到的真封面（data: 图，不是�
     return !!img && String(img.getAttribute('src') || '').startsWith('data:')
   })()`)) === true, 12000))
 // 回书市
-await evalJs(`(() => { const b = [...document.querySelectorAll('button[title]')].find((x) => x.getAttribute('title') === '书市' && x.closest('div[class*="w-11"]')); if (b) { b.click(); return 'ok' } return 'no' })()`)
+await evalJs(`(() => { const b = [...document.querySelectorAll('button[data-tip]')].find((x) => x.getAttribute('data-tip') === '书市' && x.closest('div[class*="w-11"]')); if (b) { b.click(); return 'ok' } return 'no' })()`)
 await until(() => evalJs(`!!document.querySelector('[data-wb="bookMarket"]')`))
 
 // ===== ⑥ 同名冲突：覆盖 / 另存副本（模块弹层）=====
@@ -632,7 +632,7 @@ myOk('原文件与副本内容都对', existsSync(MAIN_ABS) && existsSync(COPY_A
 console.log('\n--- ⑦ 下载队列：并发恒 1 · 暂停接管 · 取消 · 全部暂停/开始 · 清除已完成 ---')
 const qNow = async () => await evalJs(`(async () => { try { const r = await window.api.bookMarketListQueue(${JSON.stringify(ROOT)}); return r.ok ? r.tasks : { __err: r.error } } catch (e) { return { __err: String(e) } } })()`)
 /** 让队列先干净：清掉已完成的（也验了「清除已完成」） */
-await evalJs(`(() => { const q = document.querySelector('[data-wb="bookMarketQueue"]'); if (!q) return 'no-q'; const b = [...q.querySelectorAll('button[title="清除已完成"]')][0]; if (b) { b.click(); return 'ok' } return 'no-btn' })()`)
+await evalJs(`(() => { const q = document.querySelector('[data-wb="bookMarketQueue"]'); if (!q) return 'no-q'; const b = [...q.querySelectorAll('button[data-tip="清除已完成"]')][0]; if (b) { b.click(); return 'ok' } return 'no-btn' })()`)
 myOk('清除已完成：队列里不再有 done 任务', await until(async () => ((await qNow()) ?? []).every((t) => t.state !== 'done')))
 
 // 入队两个慢任务（并发恒 1）
@@ -664,7 +664,7 @@ myOk('★ 其余排队等待（见到过 queued）', sawQueued === true)
 const paused = await evalJs(`(() => {
   const q = document.querySelector('[data-wb="bookMarketQueue"]')
   if (!q) return 'no-queue'
-  const b = q.querySelector('button[title="暂停"]')
+  const b = q.querySelector('button[data-tip="暂停"]')
   if (!b) return 'no-pause-btn'
   b.click(); return 'ok'
 })()`)
@@ -701,7 +701,7 @@ const allGo = await evalJs(`(() => {
   if (!q) return 'no-q'
   const b = q.querySelector('button[title="全部开始"]') || q.querySelector('button[title="全部暂停"]')
   if (!b) return 'no-btn'
-  b.click(); return b.getAttribute('title')
+  b.click(); return b.getAttribute('data-tip')
 })()`)
 note('二级控制钮', String(allGo))
 myOk('「全部开始」后队列重新动起来', await until(async () => ((await qNow()) ?? []).some((t) => t.state === 'down' || t.state === 'done'), 8000))
@@ -710,7 +710,7 @@ await until(async () => ((await qNow()) ?? []).every((t) => t.state === 'done' |
 const doneN = ((await qNow()) ?? []).filter((t) => t.state === 'done').length
 myOk('慢书真的下完了（至少一本 done）', doneN >= 1, `done=${doneN}`)
 if (doneN > 0) {
-  await evalJs(`(() => { const q = document.querySelector('[data-wb="bookMarketQueue"]'); if (!q) return 'no-q'; const b = q.querySelector('button[title="清除已完成"]'); if (b) { b.click(); return 'ok' } return 'no-btn' })()`)
+  await evalJs(`(() => { const q = document.querySelector('[data-wb="bookMarketQueue"]'); if (!q) return 'no-q'; const b = q.querySelector('button[data-tip="清除已完成"]'); if (b) { b.click(); return 'ok' } return 'no-btn' })()`)
   myOk('清除已完成：done 全没了', await until(async () => ((await qNow()) ?? []).every((t) => t.state !== 'done'), 8000))
 }
 

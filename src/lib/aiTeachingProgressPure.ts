@@ -183,3 +183,25 @@ export function chapterSegments(
     .map(([sessionId, lesson]) => ({ sessionId, lesson }))
     .sort((a, b) => (Number(a.lesson.order) || 0) - (Number(b.lesson.order) || 0))
 }
+
+/** 大纲的结构型（只用到章 → 知识点 id，避免纯函数依赖 types 里的富形状） */
+export interface ProgressOutlineLike {
+  chapters: { units: { id: string }[] }[]
+}
+
+/**
+ * 整门课进度（AI教学选择页预览用）。
+ * 口径与章节 x/y 完全一致：`unitLearned()` —— 所在段未收尾的知识点不算学完。
+ * `total === 0`（无大纲 / 空大纲）时 pct 为 0，不产生 NaN。
+ */
+export function courseProgressSummary(
+  outline: ProgressOutlineLike | null | undefined,
+  progress: Record<string, ProgressUnitLike> | null | undefined,
+  lessons: Record<string, ProgressLessonLike> | null | undefined,
+): { learned: number; total: number; pct: number } {
+  const ids = (outline?.chapters ?? []).flatMap((c) => (c?.units ?? []).map((u) => String(u?.id ?? ''))).filter(Boolean)
+  const total = ids.length
+  if (!total) return { learned: 0, total: 0, pct: 0 }
+  const learned = ids.filter((id) => unitLearned(id, progress, lessons)).length
+  return { learned, total, pct: Math.round((learned / total) * 100) }
+}

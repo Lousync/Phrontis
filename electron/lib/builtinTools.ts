@@ -6,6 +6,7 @@ import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/wind
 import { webSearch, webReadPage } from './webSearch'
 import { writeVisual, writeMindmap, writeImage } from './aiTeachingSources'
 import { readConstraintsForAiTeaching, writeConstraintsForAiTeaching, type AiTeachConstraintLevel } from './aiTeachingScope'
+import { CONSTRAINT_AUTHORING_TEXT_PARAM, CONSTRAINT_AUTHORING_TOOL_RULES, CONSTRAINT_LAYER_HINTS } from './constraintAuthoring'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import {
@@ -2778,7 +2779,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'visual.html',
     title: '生成 HTML 示意图',
-    description: '生成单文件 HTML 示意图辅助讲解，写入本会话文件夹 visuals/<slug>.html 并自动在右栏工件栏打开。html 为完整自包含单文件：CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、建议 ≤150 行、画幅 680×400 比例 SVG 为主、中文标注。配色：文字与背景对比度 ≥4.5:1（深底近白字、浅底深字，禁同色系深浅叠加）。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+    description: '生成可查看、可交互的单文件 HTML 示意图辅助讲解（不是网页，不做站点导航/多页），写入本会话文件夹 visuals/<slug>.html 并自动在右栏工件栏打开。CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体），可按讲解需要加入点击、悬停、拖拽、滑杆等轻量交互。画幅以 680×400 比例 SVG 为主、中文标注，宽高自适应工件栏；画面不必精美，清晰可读优先（文字与背景保持基本对比）。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3129,12 +3130,12 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'course.constraints.write',
     title: '写入分层要求',
-    description: '把用户的规范 / 限制 / 约束 / 要求写入 AI 教学四层要求文件 CONSTRAINTS.md。level=global 全局、workspace 本课程、unit 本知识点、segment 本段；默认 append 追加条目，只有用户明确要求整篇重写才用 replace。返回落盘相对路径；写入后下一轮对话生效。',
+    description: '把用户的规范 / 限制 / 约束 / 要求写入 AI 教学四层要求文件 CONSTRAINTS.md。level=global 全局、workspace 本课程、unit 本知识点、segment 本段；默认 append 追加条目，只有用户明确要求整篇重写才用 replace。返回落盘相对路径；写入后下一轮对话生效。' + CONSTRAINT_AUTHORING_TOOL_RULES,
     inputSchema: {
       type: 'object',
       properties: {
-        level: { type: 'string', enum: ['global', 'workspace', 'unit', 'segment'], description: '要求层：global=所有课程；workspace=本课程；unit=本知识点；segment=本段/本对话' },
-        text: { type: 'string', description: 'markdown 正文；append 时建议一行一条，以「- 」开头' },
+        level: { type: 'string', enum: ['global', 'workspace', 'unit', 'segment'], description: `要求层：global=${CONSTRAINT_LAYER_HINTS.global}；workspace=${CONSTRAINT_LAYER_HINTS.workspace}；unit=${CONSTRAINT_LAYER_HINTS.unit}；segment=${CONSTRAINT_LAYER_HINTS.segment}` },
+        text: { type: 'string', description: CONSTRAINT_AUTHORING_TEXT_PARAM },
         mode: { type: 'string', enum: ['append', 'replace'], description: 'append=追加（默认，推荐）；replace=整篇覆盖本层，仅用户明确要求重写时用' },
         unit: { type: 'string', description: 'level=unit 时的知识点名称或 id；缺省=当前聚焦知识点' },
       },

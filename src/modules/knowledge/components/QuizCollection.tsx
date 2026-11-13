@@ -326,7 +326,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
           <button
             onClick={() => { if (selectMode) toggleSelect(r.id); else setExpanded(isExp ? null : r.id) }}
             className="w-full text-left"
-            title={selectMode ? (isSel ? '取消勾选' : '勾选本题') : (isExp ? '收起' : '展开完整题目')}
+            data-tip={selectMode ? (isSel ? '取消勾选' : '勾选本题') : (isExp ? '收起' : '展开完整题目')} aria-label={selectMode ? (isSel ? '取消勾选' : '勾选本题') : (isExp ? '收起' : '展开完整题目')}
           >
             <div className="text-[13px] leading-relaxed text-[var(--text-primary)] line-clamp-3">{summary}</div>
             <div className="flex items-center gap-1.5 mt-2">
@@ -336,7 +336,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
               <span className="text-[11px] text-[var(--text-muted)] truncate">{r.pageTitle}</span>
               <div className="flex-1" />
               {r.streakCorrect === 1 && (
-                <span className="shrink-0 px-1 py-px rounded bg-[var(--success)]/10 text-[10px] text-[var(--success)]" title="连续答对 1 次，再答对 1 次即掌握">复习中</span>
+                <span className="shrink-0 px-1 py-px rounded bg-[var(--success)]/10 text-[10px] text-[var(--success)]" data-tip="连续答对 1 次，再答对 1 次即掌握" aria-label="连续答对 1 次，再答对 1 次即掌握">复习中</span>
               )}
               {r.wrongCount > 0 && (
                 <span className="shrink-0 px-1 py-px rounded bg-[var(--danger)]/10 text-[10px] text-[var(--danger)]">错 {r.wrongCount}</span>
@@ -348,7 +348,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
             {onOpenPage && (
               <button
                 onClick={() => onOpenPage(r.pageId)}
-                title="打开源页面看上下文"
+                data-tip="打开源页面看上下文" aria-label="打开源页面看上下文"
                 className="shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)]"
               >
                 <ExternalLink size={13} />
@@ -363,21 +363,21 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
                   startReview([r])
                 }
               }}
-              title={isShort ? '去原题单重做（简答题）' : '重刷本题'}
+              data-tip={isShort ? '去原题单重做（简答题）' : '重刷本题'} aria-label={isShort ? '去原题单重做（简答题）' : '重刷本题'}
               className="shrink-0 p-1 rounded text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)]"
             >
               <RotateCcw size={13} />
             </button>
             <button
               onClick={() => void toggleFav(r)}
-              title={r.isFavorite ? '取消收藏' : '收藏'}
+              data-tip={r.isFavorite ? '取消收藏' : '收藏'} aria-label={r.isFavorite ? '取消收藏' : '收藏'}
               className={`shrink-0 p-1 rounded hover:bg-[var(--bg-hover)] ${r.isFavorite ? 'text-[var(--warning)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
             >
               <Star key={r.isFavorite ? 'on' : 'off'} size={14} className="kb-micro-pop" fill={r.isFavorite ? 'currentColor' : 'none'} />
             </button>
             <button
               onClick={() => void removeRecord(r)}
-              title="移除记录"
+              data-tip="移除记录" aria-label="移除记录"
               className="shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--bg-hover)]"
             >
               <Trash2 size={14} />
@@ -435,7 +435,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
                     <button
                       key={id}
                       onClick={() => void toggleTag(r, id)}
-                      title="点击移除"
+                      data-tip="点击移除" aria-label="点击移除"
                       className="px-2 py-0.5 rounded-full border text-[11px] flex items-center gap-1 transition-colors hover:opacity-80"
                       style={{ borderColor: t.color, color: t.color, background: `${t.color}1a` }}
                     >
@@ -471,7 +471,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
                   value={newTagKind}
                   onChange={e => setNewTagKind(e.target.value)}
                   className="px-1 py-1 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[11px] text-[var(--text-secondary)] outline-none"
-                  title="标签类型"
+                  data-tip="标签类型" aria-label="标签类型"
                 >
                   <option value="topic">考点</option>
                   <option value="type">题型</option>
@@ -525,7 +525,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
                 <button
                   onClick={() => { setEditingNote(r.id); setNoteDraft(r.note || '') }}
                   className="w-full flex items-center gap-1.5 text-left text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                  title={r.note ? '编辑备注' : '添加备注'}
+                  data-tip={r.note ? '编辑备注' : '添加备注'} aria-label={r.note ? '编辑备注' : '添加备注'}
                 >
                   <StickyNote size={12} className="shrink-0" />
                   <span className="truncate">{r.note || '添加备注'}</span>
@@ -575,7 +575,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
             <button
               onClick={() => setShowBulkTag(true)}
               className="flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-              title="给勾选的题目批量打标签"
+              data-tip="给勾选的题目批量打标签" aria-label="给勾选的题目批量打标签"
             >
               <Tag size={13} />
               打标签
@@ -594,7 +594,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
             <button
               onClick={() => setSelectMode(true)}
               className="flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-              title="勾选多道题批量重刷"
+              data-tip="勾选多道题批量重刷" aria-label="勾选多道题批量重刷"
             >
               <CheckSquare size={13} />
               勾选
@@ -602,7 +602,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
             <button
               onClick={() => startReview(filtered)}
               className="flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-              title="重刷当前筛选下全部题目"
+              data-tip="重刷当前筛选下全部题目" aria-label="重刷当前筛选下全部题目"
             >
               <RotateCcw size={13} />
               重刷全部
@@ -611,7 +611,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
         )}
         <button
           onClick={() => setShowDataPanel(true)}
-          title="错题本数据：概览 / 分布 / 导出备份 / 清理"
+          data-tip="错题本数据：概览 / 分布 / 导出备份 / 清理" aria-label="错题本数据：概览 / 分布 / 导出备份 / 清理"
           className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
         >
           <Database size={13} />
@@ -704,7 +704,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
                       <button
                         key={name}
                         onClick={() => openBook(name)}
-                        title={`翻开「${name}」错题本`}
+                        data-tip={`翻开「${name}」错题本`} aria-label={`翻开「${name}」错题本`}
                         className="group text-left w-[150px] h-[104px] rounded-lg overflow-hidden border border-[var(--border-color)] hover:border-[var(--text-secondary)]/40 transition-colors"
                       >
                         <div className="flex h-full">

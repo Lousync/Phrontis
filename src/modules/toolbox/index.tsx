@@ -205,7 +205,7 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
         <div className="relative ml-auto" ref={manageRef}>
           <button
             onClick={() => setManageOpen((o) => !o)}
-            title="管理显示的工具"
+            data-tip="管理显示的工具" aria-label="管理显示的工具"
             aria-expanded={manageOpen}
             className={`p-1 rounded-md transition-colors ${manageOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
           >
@@ -255,7 +255,7 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
                           <span
                             className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full border border-[var(--bg-secondary)]"
                             style={{ background: t.riskLevel === 'B' ? 'var(--danger)' : t.riskLevel === 'A' ? 'var(--warning)' : 'var(--success)' }}
-                            title={`安全等级 ${t.riskLevel}`}
+                            data-tip={`安全等级 ${t.riskLevel}`} aria-label={`安全等级 ${t.riskLevel}`}
                           />
                         </div>
                         <div className="text-[13px] font-medium leading-tight text-[var(--text-primary)]">{t.name}</div>

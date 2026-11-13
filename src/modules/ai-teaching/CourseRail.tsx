@@ -66,7 +66,7 @@ export function CourseRail(props: Props) {
       <button
         key={u.id}
         onClick={() => onUnit(ch.id, u.id)}
-        title={title}
+        data-tip={title} aria-label={title}
         className={`w-full flex items-center gap-1.5 pl-4 pr-2 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] ${u.active ? 'bg-[var(--bg-selected)]' : ''}`}
       >
         <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${dot}`} />
@@ -91,7 +91,7 @@ export function CourseRail(props: Props) {
 
       <button
         onClick={onAssistant}
-        title="课程助手：建课 / 登记素材 / 改大纲 / 按章分配"
+        data-tip="课程助手：建课 / 登记素材 / 改大纲 / 按章分配" aria-label="课程助手：建课 / 登记素材 / 改大纲 / 按章分配"
         className={`mx-1.5 mb-1 flex items-center gap-1.5 px-2 py-1.5 rounded-md text-left transition-colors ${assistantActive ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
       >
         <Bot size={13} className="shrink-0 text-[var(--accent)]" />
@@ -116,7 +116,7 @@ export function CourseRail(props: Props) {
             <div key={ch.id} className="mb-0.5">
               <button
                 onClick={() => { if (closed) onActivateChapter?.(ch.id); onToggleChapter(ch.id) }}
-                title={closed ? '展开本章' : '收起本章'}
+                data-tip={closed ? '展开本章' : '收起本章'} aria-label={closed ? '展开本章' : '收起本章'}
                 className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] ${current ? 'bg-[var(--bg-secondary)]' : ''}`}
               >
                 <ChevronRight size={11} className={`shrink-0 text-[var(--text-muted)] kb-chevron ${closed ? '' : 'rotate-90'}`} />
@@ -141,7 +141,7 @@ export function CourseRail(props: Props) {
                               aria-expanded={open}
                               aria-label={open ? '收起该段' : '展开该段'}
                               disabled={searching}
-                              title={searching ? '搜索时自动展开' : open ? '收起该段' : '展开该段'}
+                              data-tip={searching ? '搜索时自动展开' : open ? '收起该段' : '展开该段'}
                               className="shrink-0 w-5 h-5 inline-flex items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               <ChevronRight size={10} className={`kb-chevron ${open ? 'rotate-90' : ''}`} />
@@ -153,7 +153,7 @@ export function CourseRail(props: Props) {
                                 onSegment(row.sessionId)
                               }}
                               className="min-w-0 flex-1 flex items-center gap-1.5 py-1 text-left"
-                              title="打开该段对话"
+                              data-tip="打开该段对话" aria-label="打开该段对话"
                             >
                               <span className="shrink-0 text-[10px] text-[var(--text-muted)]">第{row.order}段</span>
                               <span className={`shrink-0 rounded-full border px-1 text-[9px] leading-[14px] ${row.status === 'open' ? 'border-[var(--accent)]/25 bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-muted)]'}`}>
@@ -174,7 +174,7 @@ export function CourseRail(props: Props) {
                     })}
                     <button
                       onClick={() => onReview(ch.id)}
-                      title={ch.review.state === 'locked' ? `本章还有 ${ch.review.remaining} 个知识点没学完` : ch.review.state === 'done' ? '查看复习讲义' : '开始章末复习'}
+                      data-tip={ch.review.state === 'locked' ? `本章还有 ${ch.review.remaining} 个知识点没学完` : ch.review.state === 'done' ? '查看复习讲义' : '开始章末复习'} aria-label={ch.review.state === 'locked' ? `本章还有 ${ch.review.remaining} 个知识点没学完` : ch.review.state === 'done' ? '查看复习讲义' : '开始章末复习'}
                       className={`w-full flex items-center gap-1.5 pl-4 pr-2 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] ${ch.review.state === 'locked' ? 'opacity-70' : ''}`}
                     >
                       {ch.review.state === 'done' ? <Check size={10} className="shrink-0 text-[var(--success)]" /> : ch.review.state === 'unlocked' ? <Sparkles size={10} className="shrink-0 text-[var(--accent)]" /> : <Lock size={10} className="shrink-0 text-[var(--text-muted)]" />}

@@ -60,14 +60,14 @@ export function ArchiveTextView({ path, fileType, fontSize, onBack, banner, back
           <button
             data-wb="archiveViewBack"
             onClick={onBack}
-            title={backLabel === '返回' ? '返回文件信息' : backLabel}
+            data-tip={backLabel === '返回' ? '返回文件信息' : backLabel} aria-label={backLabel === '返回' ? '返回文件信息' : backLabel}
             className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
           >
             <ArrowLeft size={12} />
             {backLabel}
           </button>
         )}
-        <span className="truncate text-[11px] text-[var(--text-muted)]" title={path}>
+        <span className="truncate text-[11px] text-[var(--text-muted)]" data-tip={path} aria-label={path}>
           只读预览 · {path}
         </span>
       </div>

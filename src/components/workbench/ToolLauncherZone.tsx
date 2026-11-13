@@ -117,10 +117,10 @@ export function ToolLauncherZone({ onOpenTool, onOpenPluginTool }: Props) {
     const id = `${t.pluginId}:${t.toolId}`
     if (hiddenIds.has(id)) return null
     return (
-      <button key={id} className={rowCls} title={`打开「${t.name}」标签页`} onClick={() => onOpenPluginTool(t)}>
+      <button key={id} className={rowCls} data-tip={`打开「${t.name}」标签页`} aria-label={`打开「${t.name}」标签页`} onClick={() => onOpenPluginTool(t)}>
         <span className="shrink-0 text-[var(--accent)]"><PluginIconImg src={t.icon} size={13} /></span>
         <span className="min-w-0 flex-1 truncate">{t.name}</span>
-        <span className="h-[13px] w-1 shrink-0 rounded-[2px]" style={{ backgroundColor: '#e8b23c' }} title="插件工具" />
+        <span className="h-[13px] w-1 shrink-0 rounded-[2px]" style={{ backgroundColor: '#e8b23c' }} data-tip="插件工具" aria-label="插件工具" />
       </button>
     )
   }
@@ -137,7 +137,7 @@ export function ToolLauncherZone({ onOpenTool, onOpenPluginTool }: Props) {
           <button
             ref={moreBtnRef}
             onClick={toggleMenu}
-            title="管理工具入口（显示 / 隐藏）"
+            data-tip="管理工具入口（显示 / 隐藏）" aria-label="管理工具入口（显示 / 隐藏）"
             aria-expanded={menuOpen}
             className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${menuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
           >
@@ -151,7 +151,7 @@ export function ToolLauncherZone({ onOpenTool, onOpenPluginTool }: Props) {
         <div className="grid grid-cols-2 items-start gap-x-1.5 gap-y-1">
           <div className="flex min-w-0 flex-col gap-1">
             {leftTools.map((t) => (
-              <button key={t.id} className={rowCls} title={`打开「${t.name}」标签页`} onClick={() => onOpenTool(t.id)}>
+              <button key={t.id} className={rowCls} data-tip={`打开「${t.name}」标签页`} aria-label={`打开「${t.name}」标签页`} onClick={() => onOpenTool(t.id)}>
                 <span className="shrink-0 text-[var(--text-secondary)] group-hover:text-[var(--accent)]"><t.Icon size={13} strokeWidth={1.8} /></span>
                 <span className="min-w-0 flex-1 truncate">{t.name}</span>
                 <span className="h-[13px] w-1 shrink-0 rounded-[2px]" style={{ backgroundColor: t.color }} />
@@ -160,7 +160,7 @@ export function ToolLauncherZone({ onOpenTool, onOpenPluginTool }: Props) {
           </div>
           <div className="flex min-w-0 flex-col gap-1">
             {rightTools.map((t) => (
-              <button key={t.id} className={rowCls} title={`打开「${t.name}」标签页`} onClick={() => onOpenTool(t.id)}>
+              <button key={t.id} className={rowCls} data-tip={`打开「${t.name}」标签页`} aria-label={`打开「${t.name}」标签页`} onClick={() => onOpenTool(t.id)}>
                 <span className="shrink-0 text-[var(--text-secondary)] group-hover:text-[var(--accent)]"><t.Icon size={13} strokeWidth={1.8} /></span>
                 <span className="min-w-0 flex-1 truncate">{t.name}</span>
                 <span className="h-[13px] w-1 shrink-0 rounded-[2px]" style={{ backgroundColor: t.color }} />

@@ -325,7 +325,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
       {variant !== 'sidebar' && (showDrawer || (isNarrow && onExpand)) && (
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
           {showDrawer && (
-            <button onClick={toggleDrawer} title="会话列表"
+            <button onClick={toggleDrawer} data-tip="会话列表" aria-label="会话列表"
               className={`p-1.5 rounded-md transition-colors ${drawerOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
               <Menu size={14} />
             </button>
@@ -339,7 +339,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
           {/* N-5/N-7 拍板④：助手要求与术语表常驻入口（右栏 AI 态头部与悬浮侧栏同位）；日程助手不适用 */}
           {!scheduleMode && <AssistantEntryButton activeId={activeId} />}
           {isNarrow && onExpand && (
-            <button onClick={onExpand} title="扩大为完整对话页"
+            <button onClick={onExpand} data-tip="扩大为完整对话页" aria-label="扩大为完整对话页"
               className="ml-auto rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <Maximize2 size={13} />
             </button>
@@ -394,7 +394,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                           <button
                             onClick={e => { e.stopPropagation(); void removeSession(sess.id) }}
                             className={`shrink-0 p-0.5 rounded ${deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 group-hover:opacity-100 hover:text-red-400'}`}
-                            title={deletingId === sess.id ? '再点一次确认删除' : '删除会话'}>
+                            data-tip={deletingId === sess.id ? '再点一次确认删除' : '删除会话'}
+                            aria-label={deletingId === sess.id ? '再点一次确认删除' : '删除会话'}>
                             <Trash2 size={11} />
                           </button>
                         </div>
@@ -493,7 +494,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] border-b border-[var(--border-color)]">
                     <Wrench size={10} className="text-[var(--accent)]" />
                     <span className="flex-1">本次已改动 {lastChanges.length} 项</span>
-                    <button onClick={dismissChanges} title="关闭"
+                    <button onClick={dismissChanges} data-tip="关闭" aria-label="关闭"
                       className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                       <X size={11} />
                     </button>
@@ -514,7 +515,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                           {canOpen ? (
                             <button
                               onClick={() => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file } }))}
-                              title="在编辑器中打开该文件"
+                              data-tip="在编辑器中打开该文件" aria-label="在编辑器中打开该文件"
                               className="w-full flex items-center gap-1.5 px-2.5 py-1 text-left text-[11.5px] text-[var(--text-primary)] group/item transition-colors hover:bg-[var(--bg-hover)]"
                             >
                               {row}
@@ -567,7 +568,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       data-wb={contextRemoved ? 'ctxRestoreBtn' : 'ctxDismissBtn'}
                       onClick={contextRemoved ? restoreContext : dismissContext}
                       onMouseDown={e => e.preventDefault()}
-                      title={contextRemoved ? '恢复：把当前界面作为上下文附带' : '移除：本轮提问不附带当前界面上下文'}
+                      data-tip={contextRemoved ? '恢复：把当前界面作为上下文附带' : '移除：本轮提问不附带当前界面上下文'}
+                      aria-label={contextRemoved ? '恢复：把当前界面作为上下文附带' : '移除：本轮提问不附带当前界面上下文'}
                       className="shrink-0 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
                     >
                       {contextRemoved ? <RotateCcw size={10} /> : <X size={10} />}
@@ -583,7 +585,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                         <span className="max-w-[160px] truncate">{f.title}</span>
                         <button
                           onClick={() => setAttachedFiles(prev => prev.filter(x => x.pageId !== f.pageId))}
-                          className="shrink-0 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]" title="移除附件"
+                          className="shrink-0 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]" data-tip="移除附件" aria-label="移除附件"
                         ><X size={9} /></button>
                       </span>
                     ))}
@@ -600,7 +602,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                     <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
                     <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
-                    <button onClick={() => setPickedSkill(null)} title="移除该 Skill"
+                    <button onClick={() => setPickedSkill(null)} data-tip="移除该 Skill" aria-label="移除该 Skill"
                       className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
                   </span>
                 )}
@@ -670,7 +672,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   {!scheduleMode && (<>
                   <button
                     onClick={() => setPop(p => (p === 'scope' ? null : 'scope'))}
-                    title={scopeAll ? '作用域：整个仓库（点击选择文件）' : `作用域：${scope.length} 项`}
+                    data-tip={scopeAll ? '作用域：整个仓库（点击选择文件）' : `作用域：${scope.length} 项`} aria-label={scopeAll ? '作用域：整个仓库（点击选择文件）' : `作用域：${scope.length} 项`}
                     className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
                       pop === 'scope' || (!scopeAll && scope.length === 0)
                         ? 'text-[var(--accent)]'
@@ -683,7 +685,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   <button
                     onClick={() => setPop(p => (p === 'writeMode' ? null : 'writeMode'))}
                     disabled={pending}
-                    title={writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'}
+                    data-tip={writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'} aria-label={writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'}
                     className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${
                       writeMode === 'confirm'
                         ? 'text-[var(--accent)]'
@@ -697,7 +699,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   {!scheduleMode && (<>
                   <button
                     onClick={() => setPop(p => (p === 'model' ? null : 'model'))}
-                    title="对话模型"
+                    data-tip="对话模型" aria-label="对话模型"
                     data-wb="aiModelBtn"
                     className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
                       pop === 'model' ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
@@ -711,7 +713,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   {ctxUsageDetail !== 'off' && (
                     <span
                       data-wb="aiCtxUsage"
-                      title={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}（窗口大小在 设置→AI教学 配置）` : '本会话最近一次上下文占用（设置模型上下文窗口后按比例着色）'}
+                      data-tip={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}（窗口大小在 设置→AI教学 配置）` : '本会话最近一次上下文占用（设置模型上下文窗口后按比例着色）'} aria-label={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}（窗口大小在 设置→AI教学 配置）` : '本会话最近一次上下文占用（设置模型上下文窗口后按比例着色）'}
                       className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[var(--text-secondary)]"
                     >
                       <UsageRing pct={ctxWindow > 0 ? ctxUsed / ctxWindow : null} used={ctxUsed} />
@@ -727,12 +729,12 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                        与 AI 教学中栏同一个口径（那儿一直是这么做的）。★ 这一面此前**只能**从消息流
                        里的「停止」中断，生成态改版把状态区那颗按钮去掉了，所以这里必须补上，
                        否则全局面板/右栏/整页三个宿主会失去唯一的中断入口。 */
-                    <button onClick={() => { void abort() }} title="停止生成（已完成的轮次保留）"
+                    <button onClick={() => { void abort() }} data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）"
                       className="h-7 w-7 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity">
                       <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
                     </button>
                   ) : (
-                    <button onClick={() => { void send() }} disabled={compressing || !input.trim()} title="发送"
+                    <button onClick={() => { void send() }} disabled={compressing || !input.trim()} data-tip="发送" aria-label="发送"
                       className="h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity">
                       <ArrowUp size={14} />
                     </button>
@@ -753,7 +755,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                         type="button"
                         onClick={() => setPop(null)}
                         className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                        title="收起"
+                        data-tip="收起" aria-label="收起"
                       ><X size={12} /></button>
                     </div>
                     <div className="min-h-0 flex-1">
@@ -826,7 +828,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                           className={`w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${
                             atPosRef.current !== null && idx === atActive ? 'bg-[var(--bg-selected)]' : ''
                           }`}
-                          title={p.path ?? p.title}
+                          data-tip={p.path ?? p.title} aria-label={p.path ?? p.title}
                         >
                           <span className="block truncate text-[11.5px] text-[var(--text-primary)]">{p.title || p.path || '无标题'}</span>
                           {p.path && <span className="block truncate text-[10px] text-[var(--text-disabled)]">{p.path}</span>}
@@ -910,7 +912,8 @@ function PerceptionToggle({ on, onToggle }: { on: boolean; onToggle: () => void 
       onClick={onToggle}
       aria-pressed={on}
       data-wb="perceptionToggle"
-      title={on
+      aria-label="感知模式"
+      data-tip={on
         ? '感知模式：已开启 —— 发送前自动检索知识库，把最相关的笔记素材注入本轮上下文（纯本地检索，不消耗对话 token）'
         : '感知模式：已关闭 —— 点击开启后，发送前会自动检索知识库并注入相关笔记素材'}
       className={`flex items-center rounded-md px-1.5 py-1 transition-colors ${on

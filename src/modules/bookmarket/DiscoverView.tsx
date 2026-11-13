@@ -112,7 +112,7 @@ export function DiscoverView({ q, setQ, srcFilter, setSrcFilter, sources, loadin
           <select
             value={srcFilter}
             onChange={(e) => setSrcFilter(e.target.value)}
-            title="限定检索哪个书源"
+            data-tip="限定检索哪个书源" aria-label="限定检索哪个书源"
             className="h-8 max-w-[168px] rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] px-1.5 text-[12px] text-[var(--text-secondary)] outline-none"
           >
             <option value="all">全部书源（{enabled.length}）</option>

@@ -210,7 +210,7 @@ export default function TerminalModule({ active, sidebarEl }: Props) {
         <button
           className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
           disabled={showAi || !activeId}
-          title="清屏（当前会话）"
+          data-tip="清屏（当前会话）" aria-label="清屏（当前会话）"
           onClick={() => setClearSignal(n => n + 1)}
         ><Eraser size={13} /> 清屏</button>
         {/* 创建入口只在会话条「＋」与左栏，此处不再放第三份 */}
@@ -242,7 +242,7 @@ export default function TerminalModule({ active, sidebarEl }: Props) {
         </div>
         <button
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          title="新建会话"
+          data-tip="新建会话" aria-label="新建会话"
           onClick={() => void createSession()}
         ><Plus size={13} /></button>
         <div

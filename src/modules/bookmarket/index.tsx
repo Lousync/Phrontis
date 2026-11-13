@@ -315,7 +315,7 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
             <Plus size={13} strokeWidth={1.9} />
             新增书源
           </button>
-          <button type="button" className={pill} onClick={() => setQueueOpen((v) => !v)} title="下载队列">
+          <button type="button" className={pill} onClick={() => setQueueOpen((v) => !v)} data-tip="下载队列" aria-label="下载队列">
             <Download size={13} strokeWidth={1.8} />
             下载
             {activeCount > 0 && (

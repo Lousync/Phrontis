@@ -443,7 +443,7 @@ export function PasswordVault({ onBack }: Props) {
         {/* 收藏 */}
         <button
           onClick={ev => { ev.stopPropagation(); void setFavoriteFor(e.id, !e.favorite) }}
-          title={e.favorite ? '取消收藏' : '收藏并置顶'}
+          data-tip={e.favorite ? '取消收藏' : '收藏并置顶'} aria-label={e.favorite ? '取消收藏' : '收藏并置顶'}
           className={`flex items-center justify-center rounded transition-colors ${e.favorite ? 'text-[var(--warning)]' : 'text-[var(--text-disabled)] hover:text-[var(--text-muted)]'}`}
         >
           <Star key={e.favorite ? 'on' : 'off'} size={13} className="kb-micro-pop" fill={e.favorite ? 'currentColor' : 'none'} />
@@ -461,7 +461,7 @@ export function PasswordVault({ onBack }: Props) {
         </div>
 
         {/* 账号 */}
-        <div className="text-[11.5px] text-[var(--text-secondary)] truncate" title={e.account || e.username}>
+        <div className="text-[11.5px] text-[var(--text-secondary)] truncate" data-tip={e.account || e.username} aria-label={e.account || e.username}>
           {e.account || e.username || <span className="text-[var(--text-disabled)]">—</span>}
         </div>
 
@@ -470,7 +470,7 @@ export function PasswordVault({ onBack }: Props) {
           {e.passwordUndecryptable ? (
             <span
               className="flex-1 truncate text-[11px] text-[var(--warning)]"
-              title="密文由其他系统加密，本机密钥解不开；请在本机重新录入密码并保存"
+              data-tip="密文由其他系统加密，本机密钥解不开；请在本机重新录入密码并保存" aria-label="密文由其他系统加密，本机密钥解不开；请在本机重新录入密码并保存"
             >
               无法解密
             </span>
@@ -482,7 +482,7 @@ export function PasswordVault({ onBack }: Props) {
           <button
             onClick={ev => { ev.stopPropagation(); toggleReveal(e.id) }}
             disabled={e.passwordUndecryptable}
-            title={e.passwordUndecryptable ? '本机无法解密这条密文' : (isRevealed ? '隐藏' : '显示明文')}
+            data-tip={e.passwordUndecryptable ? '本机无法解密这条密文' : (isRevealed ? '隐藏' : '显示明文')} aria-label={e.passwordUndecryptable ? '本机无法解密这条密文' : (isRevealed ? '隐藏' : '显示明文')}
             className="shrink-0 p-0.5 rounded text-[var(--text-disabled)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)] disabled:opacity-30 disabled:hover:bg-transparent"
           >
             {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
@@ -490,7 +490,7 @@ export function PasswordVault({ onBack }: Props) {
           <button
             onClick={ev => { ev.stopPropagation(); if (e.password) handleCopyText(e.password, 'pass', e.id) }}
             disabled={!e.password}
-            title={e.passwordUndecryptable ? '本机无法解密这条密文' : '复制密码'}
+            data-tip={e.passwordUndecryptable ? '本机无法解密这条密文' : '复制密码'} aria-label={e.passwordUndecryptable ? '本机无法解密这条密文' : '复制密码'}
             className="shrink-0 p-0.5 rounded text-[var(--text-disabled)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] disabled:opacity-30"
           >
             {copiedId === e.id ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
@@ -505,14 +505,14 @@ export function PasswordVault({ onBack }: Props) {
           <button
             onClick={ev => { ev.stopPropagation(); handleOpenUrl(e.url) }}
             disabled={!e.url}
-            title={e.url ? '打开网址' : '未填写网址'}
+            data-tip={e.url ? '打开网址' : '未填写网址'} aria-label={e.url ? '打开网址' : '未填写网址'}
             className="p-0.5 rounded text-[var(--text-disabled)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)] disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ExternalLink size={12} />
           </button>
           <button
             onClick={ev => { ev.stopPropagation(); setDeleteTarget(e.id) }}
-            title="删除"
+            data-tip="删除" aria-label="删除"
             className="p-0.5 rounded text-[var(--text-disabled)] hover:text-[var(--danger)] hover:bg-[var(--bg-selected)]"
           >
             <Trash2 size={12} />
@@ -629,7 +629,7 @@ export function PasswordVault({ onBack }: Props) {
         <button
           onClick={() => { flushIfPending(); onBack() }}
           className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title="返回工具箱"
+          data-tip="返回工具箱" aria-label="返回工具箱"
         >
           <ArrowLeft size={12} />
         </button>
@@ -665,7 +665,7 @@ export function PasswordVault({ onBack }: Props) {
             </div>
             <button
               onClick={() => setGroupMode(v => !v)}
-              title={groupMode ? '切换为平铺列表' : '按分组折叠展示'}
+              data-tip={groupMode ? '切换为平铺列表' : '按分组折叠展示'} aria-label={groupMode ? '切换为平铺列表' : '按分组折叠展示'}
               className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[11.5px] border transition-colors ${groupMode ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
             >
               <Layers size={12} /> 分组
@@ -747,7 +747,7 @@ export function PasswordVault({ onBack }: Props) {
               </span>
               <button
                 onClick={() => { const next = !favorite; setFavorite(next); favoriteRef.current = next; void setFavoriteFor(view.kind === 'detail' ? view.id : '', next) }}
-                title={favorite ? '取消收藏' : '收藏并置顶'}
+                data-tip={favorite ? '取消收藏' : '收藏并置顶'} aria-label={favorite ? '取消收藏' : '收藏并置顶'}
                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] border transition-colors ${favorite ? 'border-[var(--warning)] text-[var(--warning)]' : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 <Star key={favorite ? 'on' : 'off'} size={12} className="kb-micro-pop" fill={favorite ? 'currentColor' : 'none'} /> {favorite ? '已收藏' : '收藏'}
@@ -803,7 +803,7 @@ export function PasswordVault({ onBack }: Props) {
                         onClick={() => account && handleCopyText(account, 'account')}
                         disabled={!account}
                         className="shrink-0 p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                        title="复制账号"
+                        data-tip="复制账号" aria-label="复制账号"
                       >
                         {copiedAccount ? <Check size={15} /> : <Copy size={15} />}
                       </button>
@@ -825,7 +825,7 @@ export function PasswordVault({ onBack }: Props) {
                         onClick={() => username && handleCopyText(username, 'user')}
                         disabled={!username}
                         className="shrink-0 p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                        title="复制用户名"
+                        data-tip="复制用户名" aria-label="复制用户名"
                       >
                         {copiedUser ? <Check size={15} /> : <Copy size={15} />}
                       </button>
@@ -857,7 +857,7 @@ export function PasswordVault({ onBack }: Props) {
                       <button
                         onClick={() => setShowPassword(v => !v)}
                         className="shrink-0 p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                        title={showPassword ? '隐藏' : '显示'}
+                        data-tip={showPassword ? '隐藏' : '显示'} aria-label={showPassword ? '隐藏' : '显示'}
                       >
                         {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
@@ -865,7 +865,7 @@ export function PasswordVault({ onBack }: Props) {
                     <button
                       onClick={() => { const p = genPassword(); setPassword(p); setShowPassword(true); scheduleSave() }}
                       className="shrink-0 p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                      title="生成强密码"
+                      data-tip="生成强密码" aria-label="生成强密码"
                     >
                       <RefreshCw size={15} />
                     </button>
@@ -873,7 +873,7 @@ export function PasswordVault({ onBack }: Props) {
                       onClick={() => password && handleCopyText(password, 'pass')}
                       disabled={!password}
                       className="shrink-0 p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                      title="复制密码"
+                      data-tip="复制密码" aria-label="复制密码"
                     >
                       {copiedPass ? <Check size={15} /> : <Copy size={15} />}
                     </button>
@@ -896,7 +896,7 @@ export function PasswordVault({ onBack }: Props) {
                       onClick={() => handleOpenUrl(url)}
                       disabled={!url}
                       className="shrink-0 p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
-                      title="打开网址"
+                      data-tip="打开网址" aria-label="打开网址"
                     >
                       <ExternalLink size={15} />
                     </button>
@@ -1017,7 +1017,7 @@ export function PasswordVault({ onBack }: Props) {
                   />
                   <button
                     onClick={() => setNewPassword(genPassword())}
-                    title="生成强密码"
+                    data-tip="生成强密码" aria-label="生成强密码"
                     className="shrink-0 px-2 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                   >
                     <RefreshCw size={14} />

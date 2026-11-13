@@ -106,7 +106,8 @@ const termIdx = read('src/modules/terminal/index.tsx')
 check('index: 侧栏底栏 nvim 提示已删（教学内容保留在 help 语料）', !termIdx.includes('nvim 等 TUI'))
 check('index: 侧栏底栏 swap-bar（默认 ⓘ 悬停展开）', termIdx.includes('group-hover:opacity-0') && termIdx.includes('<Info size={13} />'))
 check('index: 会话条保活文案只收不删（悬停层）', termIdx.includes('会话随 Tab 保活，关闭应用即回收'))
-check('index: 工具栏去重（新建会话入口仅侧栏按钮 + 会话条＋，Toast 失败文案除外）', (termIdx.match(/新建会话(?!失败)/g) || []).length === 2)
+check('index: 工具栏去重（新建会话入口仅侧栏按钮 + 会话条＋，Toast 失败文案除外）',
+  /> 新建会话<\/button>/.test(termIdx) && (termIdx.match(/data-tip="新建会话"/g) || []).length === 1)
 
 // ===== B 段 pty 冒烟 =====
 async function ptySmoke() {

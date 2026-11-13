@@ -57,7 +57,7 @@ export function PluginSlotEntry({ slot, title = '插件' }: { slot: string; titl
           <button
             key={`${v.pluginId}:${v.slot}`}
             onClick={() => setActive(v)}
-            title={`${v.name}（插件）`}
+            data-tip={`${v.name}（插件）`} aria-label={`${v.name}（插件）`}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <PluginIcon size={14} />
@@ -76,7 +76,7 @@ export function PluginSlotEntry({ slot, title = '插件' }: { slot: string; titl
             <div className="flex-1" />
             <button
               onClick={() => setActive(null)}
-              title="关闭"
+              data-tip="关闭" aria-label="关闭"
               className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
             >
               <X size={14} />

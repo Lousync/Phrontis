@@ -90,7 +90,7 @@ check('知识库消费撤销/重做文件操作事件（kb-fs-op-changed）', /k
 check('AI 教学消费 ws:fs-changed', /onWsFsChanged\(/.test(aiTeachIdx))
 check('AI 教学窗口聚焦兜底重扫', /addEventListener\('focus', onFocus\)/.test(aiTeachIdx))
 check('AI 教学左栏刷新按钮（RefreshCw + 标题）',
-  /RefreshCw/.test(aiTeachIdx) && /title="刷新资源管理器"/.test(aiTeachIdx))
+  /RefreshCw/.test(aiTeachIdx) && /data-tip="刷新资源管理器"/.test(aiTeachIdx))
 check('AI 教学刷新走口径 b 全量（workspaceRefreshVault）', /workspaceRefreshVault\(\)/.test(aiTeachIdx))
 check('AI 教学刷新不动视图态（未清 dirCache）',
   !/setDirCache\(\{\}\)[\s\S]{0,200}refreshTree/.test(aiTeachIdx))

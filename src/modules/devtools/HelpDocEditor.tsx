@@ -197,14 +197,14 @@ export function HelpDocEditor() {
                       ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] border-l-2 border-l-[var(--accent)] pl-[14px]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] border-l-2 border-l-transparent pl-[14px]'
                   }`}
-                  title={d.fileName}
+                  data-tip={d.fileName} aria-label={d.fileName}
                 >
                   <span className={active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}>
                     <IconPreview name={d.icon} size={14} />
                   </span>
                   <span className="truncate flex-1 text-left">{d.title}</span>
                   {dirty.has(d.fileName) && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--warning)] shrink-0" title="有未提交的 git 改动" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--warning)] shrink-0" data-tip="有未提交的 git 改动" aria-label="有未提交的 git 改动" />
                   )}
                 </button>
               )
@@ -263,7 +263,7 @@ export function HelpDocEditor() {
                   <button
                     key={name}
                     onClick={() => update({ icon: name })}
-                    title={name}
+                    data-tip={name} aria-label={name}
                     className={`w-6 h-6 flex items-center justify-center rounded border transition-colors ${
                       draft.icon === name
                         ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--bg-hover)]'

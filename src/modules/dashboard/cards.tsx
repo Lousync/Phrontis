@@ -154,7 +154,7 @@ function HabitCard({ snap, compact, onToggleHabit }: { snap: DashboardSnapshot; 
         <button
           key={it.id}
           type="button"
-          title={it.done ? '取消打卡' : '打卡'}
+          data-tip={it.done ? '取消打卡' : '打卡'} aria-label={it.done ? '取消打卡' : '打卡'}
           onClick={(e) => {
             if (it.done) { onToggleHabit?.(it.id); return } // 取消勾不庆祝（同打卡列表口径）
             const r = e.currentTarget.getBoundingClientRect()
@@ -229,7 +229,7 @@ function TodoCard({ snap, compact, onMarkDone, onJumpSchedule }: {
               <button
                 type="button"
                 onClick={() => onMarkDone?.(t.id)}
-                title="标记完成"
+                data-tip="标记完成" aria-label="标记完成"
                 className="mt-0.5 grid h-[15px] w-[15px] flex-none place-items-center rounded-[4px] border-[1.5px] border-[var(--text-muted)] text-transparent transition-colors hover:border-[var(--accent)]"
               >
                 <Check size={10} />
@@ -254,7 +254,7 @@ function TodoCard({ snap, compact, onMarkDone, onJumpSchedule }: {
           <button
             type="button"
             onClick={onJumpSchedule}
-            title="去日程处理剩余待办"
+            data-tip="去日程处理剩余待办" aria-label="去日程处理剩余待办"
             className="flex-none rounded-md px-1 py-0.5 text-[11px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]"
           >
             还有 {hiddenTodoCount} 件 → 去日程
@@ -274,7 +274,7 @@ function NotesCard({ snap, compact, onOpenNote }: { snap: DashboardSnapshot; com
         <button
           key={n.id}
           type="button"
-          title="在笔记区打开"
+          data-tip="在笔记区打开" aria-label="在笔记区打开"
           onClick={() => onOpenNote?.(n.path)}
           className="flex w-full items-center gap-2.5 rounded-md px-1 py-1.5 text-left text-[12.5px] hover:bg-[var(--bg-hover)]"
         >
@@ -295,7 +295,7 @@ function BookCard({ snap, onOpenBook }: { snap: DashboardSnapshot; onOpenBook?: 
         <button
           key={b.relPath}
           type="button"
-          title="去书架继续阅读"
+          data-tip="去书架继续阅读" aria-label="去书架继续阅读"
           onClick={() => onOpenBook?.(b.relPath)}
           className="flex gap-2.5 rounded-md text-left hover:bg-[var(--bg-hover)]"
         >

@@ -52,7 +52,7 @@ export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes, view
             <FileIcon ext={fileType} size={22} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-medium text-[var(--text-primary)] truncate" title={title}>{title}</div>
+            <div className="text-[14px] font-medium text-[var(--text-primary)] truncate" data-tip={title} aria-label={title}>{title}</div>
             <div className="flex items-center gap-1.5 mt-0.5">
               {fi.badge && (
                 <span className="text-[9px] px-1.5 py-px rounded font-medium"
@@ -86,7 +86,7 @@ export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes, view
             data-wb="metaOpenInSystem"
             onClick={onOpenInSystem}
             disabled={!hasPath}
-            title="用系统默认程序打开"
+            data-tip="用系统默认程序打开" aria-label="用系统默认程序打开"
             className={secondaryBtn}
           >
             <ExternalLink size={12} />
@@ -96,7 +96,7 @@ export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes, view
             data-wb="metaRevealInFolder"
             onClick={onRevealInFolder}
             disabled={!hasPath}
-            title="在资源管理器中定位"
+            data-tip="在资源管理器中定位" aria-label="在资源管理器中定位"
             className={secondaryBtn}
           >
             <FolderSearch size={12} />

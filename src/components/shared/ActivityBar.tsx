@@ -220,7 +220,8 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
           工作台态高亮 + 点击无操作（入口幂等）；整窗模块态 = 唯一的「回工作台」入口 */}
       <button
         onClick={() => { if (!inWorkbench) onWorkbench?.() }}
-        title="工作台"
+        data-tip="工作台"
+        aria-label="工作台"
         className={railCls(inWorkbench)}
       >
         {inWorkbench && railMark}
@@ -257,7 +258,8 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
               if (Date.now() - railDragGuard.lastEnd < 250) return   // 拖完补发的 click
               onChange(id)
             }}
-            title={`${b.label}${id === 'recycle' && recycleCount > 0 ? `（${recycleCount} 项）` : ''}`}
+            data-tip={`${b.label}${id === 'recycle' && recycleCount > 0 ? `（${recycleCount} 项）` : ''}`}
+            aria-label={`${b.label}${id === 'recycle' && recycleCount > 0 ? `（${recycleCount} 项）` : ''}`}
             className={`${railCls(active === id)} ${isDragged ? 'opacity-40' : ''}`}
             style={dragStyle}
           >
@@ -277,14 +279,14 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
 
       <div className="mt-auto flex flex-col items-center">
         {/* 设置 —— 直接打开设置标签页（拍板：设置=中间标签页；原底部弹出菜单删除） */}
-        <button onClick={() => onChange('settings')} title="设置" className={railCls(active === 'settings')}>
+        <button onClick={() => onChange('settings')} data-tip="设置" aria-label="设置" className={railCls(active === 'settings')}>
           {active === 'settings' && railMark}
           <SettingsIcon size={22} />
         </button>
 
         {/* 开发者工具 — 仅 DEV 渲染,打包构建时该分支被静态消除 */}
         {import.meta.env.DEV && (
-          <button onClick={() => onChange('devtools')} title="开发者工具 (DEV)" className={railCls(active === 'devtools')}>
+          <button onClick={() => onChange('devtools')} data-tip="开发者工具 (DEV)" aria-label="开发者工具 (DEV)" className={railCls(active === 'devtools')}>
             {active === 'devtools' && railMark}
             <FlaskConical size={22} />
           </button>

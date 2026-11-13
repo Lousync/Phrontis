@@ -397,20 +397,20 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           {activeView === 'map' && doc && (
             <>
-              <button type="button" onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)"
+              <button type="button" onClick={undo} disabled={!canUndo} data-tip="撤销 (Ctrl+Z)" aria-label="撤销 (Ctrl+Z)"
                 className="p-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
-              <button type="button" onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Y)"
+              <button type="button" onClick={redo} disabled={!canRedo} data-tip="重做 (Ctrl+Y)" aria-label="重做 (Ctrl+Y)"
                 className="p-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>
               <span className="w-px h-4 bg-[var(--border-color)]" />
-              <button type="button" onClick={fit} title="适应画布（复位）"
+              <button type="button" onClick={fit} data-tip="适应画布（复位）" aria-label="适应画布（复位）"
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                 <Frame size={11} /> 适应画布
               </button>
-              <button type="button" onClick={() => { setAll(doc.root, false); doc.root.collapsed = false; setFoldVersion(v => v + 1) }} title="展开全部节点"
+              <button type="button" onClick={() => { setAll(doc.root, false); doc.root.collapsed = false; setFoldVersion(v => v + 1) }} data-tip="展开全部节点" aria-label="展开全部节点"
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                 <ChevronsUpDown size={11} /> 全部展开
               </button>
-              <button type="button" onClick={() => { doc.root.children?.forEach(c => setAll(c, true)); setFoldVersion(v => v + 1) }} title="折叠到一级"
+              <button type="button" onClick={() => { doc.root.children?.forEach(c => setAll(c, true)); setFoldVersion(v => v + 1) }} data-tip="折叠到一级" aria-label="折叠到一级"
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                 <ChevronsDownUp size={11} /> 全部折叠
               </button>
@@ -535,12 +535,12 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
                   {/* 悬停操作：加子节点 / 删除 */}
                   {editingId !== id && (
                     <span className="mm-node-act absolute -top-2.5 right-1 hidden group-hover:flex items-center gap-0.5 z-10">
-                      <button type="button" title="添加子节点"
+                      <button type="button" data-tip="添加子节点" aria-label="添加子节点"
                         onPointerDown={e => e.stopPropagation()}
                         onClick={e => { e.stopPropagation(); addChild(n) }}
                         className="w-4 h-4 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:bg-[var(--accent-hover)]"><Plus size={10} /></button>
                       {!isRoot && (
-                        <button type="button" title="删除节点"
+                        <button type="button" data-tip="删除节点" aria-label="删除节点"
                           onPointerDown={e => e.stopPropagation()}
                           onClick={e => { e.stopPropagation(); delNode(n) }}
                           className="w-4 h-4 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-secondary)] flex items-center justify-center hover:bg-[var(--danger)]/15 hover:text-[var(--danger)]"><X size={10} /></button>
@@ -554,11 +554,11 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
 
           {/* 缩放条 */}
           <div className="mm-zoombar absolute right-3 bottom-3 flex items-center gap-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-sm">
-            <button type="button" title="缩小" onClick={() => zoomBy(1 / 1.15)}
+            <button type="button" data-tip="缩小" aria-label="缩小" onClick={() => zoomBy(1 / 1.15)}
               className="w-6 h-6 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">−</button>
-            <button type="button" title="重置 100%" onClick={() => { viewRef.current = { ...viewRef.current, s: 1 }; applyView() }}
+            <button type="button" data-tip="重置 100%" aria-label="重置 100%" onClick={() => { viewRef.current = { ...viewRef.current, s: 1 }; applyView() }}
               className="w-6 h-6 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">⤾</button>
-            <button type="button" title="放大" onClick={() => zoomBy(1.15)}
+            <button type="button" data-tip="放大" aria-label="放大" onClick={() => zoomBy(1.15)}
               className="w-6 h-6 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">+</button>
           </div>
           <div className="absolute left-3 bottom-3 text-[11px] text-[var(--text-muted)] bg-[var(--bg-primary)]/80 rounded-md px-2 py-0.5 border border-[var(--border-color)]">

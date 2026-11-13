@@ -177,14 +177,14 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
                 data-wb-active={t.id === activeId ? '1' : '0'}
                 onMouseDown={e => { if (e.button === 1 && !t.generating) { e.preventDefault(); onClose(t.id) } }}
                 onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: t.id }) }}
-                title={`${t.generating ? '生成中…' : t.name}${t.rel ? `\n${t.rel}` : ''}`}
+                data-tip={`${t.generating ? '生成中…' : t.name}${t.rel ? `\n${t.rel}` : ''}`} aria-label={`${t.generating ? '生成中…' : t.name}${t.rel ? `\n${t.rel}` : ''}`}
                 style={{ maxWidth: tabMaxWidth }}
                 className={`group shrink-0 flex items-center gap-1 px-2 py-1 rounded-t-lg border border-b-0 text-[11.5px] cursor-pointer whitespace-nowrap transition-colors ${
                   t.id === activeId ? 'bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] font-medium' : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
                 {iconOf(t)}
                 <span className="truncate">{t.generating ? '生成中…' : t.name}</span>
                 {!t.generating && (
-                  <button onClick={e => { e.stopPropagation(); onClose(t.id) }} title="关闭页签"
+                  <button onClick={e => { e.stopPropagation(); onClose(t.id) }} data-tip="关闭页签" aria-label="关闭页签"
                     className="shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"><X size={10} /></button>
                 )}
               </div>
@@ -199,7 +199,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
             type="button"
             onClick={allTabsMenu.toggle}
             aria-expanded={allTabsMenu.open}
-            title={`全部页签（共 ${tabs.length} 个${hiddenTabs > 0 ? `，${hiddenTabs} 个未显示` : ''}）`}
+            data-tip={`全部页签（共 ${tabs.length} 个${hiddenTabs > 0 ? `，${hiddenTabs} 个未显示` : ''}）`} aria-label={`全部页签（共 ${tabs.length} 个${hiddenTabs > 0 ? `，${hiddenTabs} 个未显示` : ''}）`}
             className={`shrink-0 flex h-[22px] items-center gap-1 rounded-md px-1.5 text-[10.5px] tabular-nums transition-colors ${
               allTabsMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
             }`}
@@ -214,7 +214,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
         {/* 原位放大阅读切换（页签行右端，仿编辑器全屏）：占满内容区而非弹窗；Esc 同退出。
             F-3：按钮固定在滚动容器**外**，页签再多也始终可见。 */}
         {tab && !tab.generating && tab.rel && (
-          <button onClick={() => onToggleExpanded(!expanded)} title={expanded ? '退出全屏阅读 (Esc)' : '全屏阅读：工件占满窗口（Esc 退出）'}
+          <button onClick={() => onToggleExpanded(!expanded)} data-tip={expanded ? '退出全屏阅读 (Esc)' : '全屏阅读：工件占满窗口（Esc 退出）'} aria-label={expanded ? '退出全屏阅读 (Esc)' : '全屏阅读：工件占满窗口（Esc 退出）'}
             className={`shrink-0 self-start mb-1 p-1 rounded-md transition-colors ${expanded ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
             {expanded ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
           </button>
@@ -240,12 +240,12 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
                 }`}
               >
                 {iconOf(t)}
-                <span className="flex-1 min-w-0 truncate" title={t.rel || t.name}>{t.generating ? '生成中…' : t.name}</span>
+                <span className="flex-1 min-w-0 truncate" data-tip={t.rel || t.name} aria-label={t.rel || t.name}>{t.generating ? '生成中…' : t.name}</span>
                 {t.id === activeId && <Check size={10} className="shrink-0 text-[var(--accent)]" />}
                 {!t.generating && (
                   <button
                     onClick={e => { e.stopPropagation(); onClose(t.id) }}
-                    title="关闭页签"
+                    data-tip="关闭页签" aria-label="关闭页签"
                     className="shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
                   ><X size={10} /></button>
                 )}
@@ -268,7 +268,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
       {/* 工具条：落盘路径 + ↗编辑 + ⟳ + ✕关闭（§2） */}
       {tab && (
         <div className="shrink-0 flex items-center gap-2 px-2.5 py-1 bg-[var(--bg-primary)] border-b border-[var(--border-color)] text-[10.5px] select-none min-w-0">
-          <span className="flex-1 min-w-0 truncate text-[var(--text-muted)]" title={tab.rel || ''}>
+          <span className="flex-1 min-w-0 truncate text-[var(--text-muted)]" data-tip={tab.rel || ''} aria-label={tab.rel || ''}>
             {tab.generating
               ? (tab.kind === 'mindmap' ? `mindmaps/${tab.slug ?? ''}.json（生成中）`
                 : tab.kind === 'image' ? `outputs/${tab.slug ?? ''}.png（生成中）`
@@ -278,31 +278,31 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           {/* 图片页签不给「编辑」也不给 ⟳（v3.6.0 阶段二）：png 在编辑器里没有可编辑语义，
               重读由查看器自己的异常态卡「重试」承接（批 3 口径：只看，不改图） */}
           {!tab.generating && tab.rel && tab.kind !== 'image' && (
-            <button onClick={() => onEdit(tab.rel)} title="在编辑器中打开（可编辑保存后 ⟳ 刷新）"
+            <button onClick={() => onEdit(tab.rel)} data-tip="在编辑器中打开（可编辑保存后 ⟳ 刷新）" aria-label="在编辑器中打开（可编辑保存后 ⟳ 刷新）"
               className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <ExternalLink size={10} /> 编辑
             </button>
           )}
           {!tab.generating && tab.rel && tab.kind !== 'image' && (
-            <button onClick={() => onReload(tab)} title="重读磁盘文件刷新"
+            <button onClick={() => onReload(tab)} data-tip="重读磁盘文件刷新" aria-label="重读磁盘文件刷新"
               className="shrink-0 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">⟳</button>
           )}
           {/* 缩放小工具条（v3.1.1 条目11，仅 html 示意图）：− / 百分比 / + / 适应——快捷键 Ctrl+=/-/0/Ctrl+滚轮 同效 */}
           {!tab.generating && tab.kind === 'html' && tab.rel && (
             <span className="shrink-0 flex items-center gap-0.5 text-[var(--text-secondary)]">
-              <button onClick={() => stepZoom(tab.rel, -1)} title="缩小（Ctrl+- 或 Ctrl+滚轮）"
+              <button onClick={() => stepZoom(tab.rel, -1)} data-tip="缩小（Ctrl+- 或 Ctrl+滚轮）" aria-label="缩小（Ctrl+- 或 Ctrl+滚轮）"
                 className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ZoomOut size={10} /></button>
-              <span className="tabular-nums w-[52px] text-center text-[10px] text-[var(--text-muted)]" title={`缩放比例（手动值覆盖自动铺满，范围 50%–600%）`}>
+              <span className="tabular-nums w-[52px] text-center text-[10px] text-[var(--text-muted)]" data-tip={`缩放比例（手动值覆盖自动铺满，范围 50%–600%）`} aria-label={`缩放比例（手动值覆盖自动铺满，范围 50%–600%）`}>
                 {manualMap[tab.rel] == null ? '适应' : `${Math.round((effMap[tab.rel] ?? 1) * 100)}%`}
               </span>
-              <button onClick={() => stepZoom(tab.rel, 1)} title="放大（Ctrl+= 或 Ctrl+滚轮）"
+              <button onClick={() => stepZoom(tab.rel, 1)} data-tip="放大（Ctrl+= 或 Ctrl+滚轮）" aria-label="放大（Ctrl+= 或 Ctrl+滚轮）"
                 className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ZoomIn size={10} /></button>
-              <button onClick={() => setManualZoom(tab.rel, null)} disabled={manualMap[tab.rel] == null} title="回到自动铺满（Ctrl+0）"
+              <button onClick={() => setManualZoom(tab.rel, null)} disabled={manualMap[tab.rel] == null} data-tip="回到自动铺满（Ctrl+0）" aria-label="回到自动铺满（Ctrl+0）"
                 className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"><Frame size={10} /></button>
             </span>
           )}
           {!tab.generating && (
-            <button onClick={() => onClose(tab.id)} title="关闭页签"
+            <button onClick={() => onClose(tab.id)} data-tip="关闭页签" aria-label="关闭页签"
               className="shrink-0 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">✕</button>
           )}
         </div>
@@ -335,12 +335,12 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
               </div>
             </div>
             {outline.length > 2 && widthPx >= 640 && (
-              <div className="w-[140px] shrink-0 border-l border-[var(--border-color)] overflow-y-auto py-2" title="文档大纲（h2/h3，点击定位）">
+              <div className="w-[140px] shrink-0 border-l border-[var(--border-color)] overflow-y-auto py-2" data-tip="文档大纲（h2/h3，点击定位）" aria-label="文档大纲（h2/h3，点击定位）">
                 <div className="px-2.5 pb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">大纲</div>
                 {outline.map((h, i) => (
                   <button key={`${h.id}-${i}`} onClick={() => { const el = mdScrollRef.current?.querySelector(`[id="${CSS.escape(h.id)}"]`); el?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
                     className={`block w-full text-left px-2.5 py-0.5 text-[10.5px] truncate text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors ${h.lv === 3 ? 'pl-5' : ''}`}
-                    title={h.text}>{h.text}</button>
+                    data-tip={h.text} aria-label={h.text}>{h.text}</button>
                 ))}
               </div>
             )}

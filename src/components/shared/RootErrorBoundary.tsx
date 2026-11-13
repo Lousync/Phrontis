@@ -26,7 +26,7 @@ export class RootErrorBoundary extends Component<Props, State> {
       return (
         <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-3 bg-[var(--bg-primary)] text-[var(--text-primary)]">
           <div className="text-[15px] font-medium">界面渲染出错了</div>
-          <div className="max-w-[560px] truncate px-6 text-[12px] text-[var(--text-secondary)]" title={String(this.state.err?.stack ?? this.state.err)}>
+          <div className="max-w-[560px] truncate px-6 text-[12px] text-[var(--text-secondary)]" data-tip={String(this.state.err?.stack ?? this.state.err)} aria-label={String(this.state.err?.stack ?? this.state.err)}>
             {String(this.state.err?.message ?? this.state.err)}
           </div>
           <div className="flex items-center gap-2">

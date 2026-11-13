@@ -261,21 +261,21 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
         {/* topbar：@container 供窄宽度下隐藏按钮文字（2026-10-25 反馈：窄列不折行，文字隐去只留图标） */}
         <div className="@container flex h-[42px] shrink-0 items-center gap-2.5 border-b border-[var(--border-color)] px-3.5">
           <span className="shrink-0 whitespace-nowrap text-[13.5px] font-semibold text-[var(--text-primary)]">情报</span>
-          <span className="min-w-0 max-w-[190px] shrink truncate rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-[3px] text-[11px] text-[var(--text-secondary)]" title={statText}>
+          <span className="min-w-0 max-w-[190px] shrink truncate rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-[3px] text-[11px] text-[var(--text-secondary)]" data-tip={statText} aria-label={statText}>
             {statText}
           </span>
           {meta?.lastFetchAt && (
-            <span className="min-w-0 shrink truncate text-[11px] text-[var(--text-muted)]" title={meta.lastFetchAt}>上次更新 {relTime(meta.lastFetchAt)}</span>
+            <span className="min-w-0 shrink truncate text-[11px] text-[var(--text-muted)]" data-tip={meta.lastFetchAt} aria-label={meta.lastFetchAt}>上次更新 {relTime(meta.lastFetchAt)}</span>
           )}
           {meta?.lastFetchStats && meta.lastFetchStats.failed.length > 0 && (
-            <span className="min-w-0 shrink truncate text-[11px] text-[var(--warning)]" title={meta.lastFetchStats.failed.join('、')}>
+            <span className="min-w-0 shrink truncate text-[11px] text-[var(--warning)]" data-tip={meta.lastFetchStats.failed.join('、')} aria-label={meta.lastFetchStats.failed.join('、')}>
               {meta.lastFetchStats.failed.length} 源失败
             </span>
           )}
           <span className="flex-1" />
           <button
             disabled
-            title="每日简报将在 3.12.x 提供"
+            data-tip="每日简报将在 3.12.x 提供" aria-label="每日简报将在 3.12.x 提供"
             className="flex h-7 cursor-default items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 text-[12px] text-[var(--text-muted)] opacity-50"
           >
             <FileText size={12} className="shrink-0" />
@@ -284,7 +284,9 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
           <button
             onClick={() => { void refresh() }}
             disabled={refreshing}
-            title={INTEL_SOURCE_KEYS.includes(filter as IntelSourceKey) || filter.startsWith('custom:')
+            data-tip={INTEL_SOURCE_KEYS.includes(filter as IntelSourceKey) || filter.startsWith('custom:')
+              ? `只刷新该源；左栏停在「全部」或版面时刷新 = 全部内置源 + 自定义源并行`
+              : '抓取一轮（全部内置源 + 自定义源并行，单源失败不影响其余）；左栏停在某个源时只刷该源'} aria-label={INTEL_SOURCE_KEYS.includes(filter as IntelSourceKey) || filter.startsWith('custom:')
               ? `只刷新该源；左栏停在「全部」或版面时刷新 = 全部内置源 + 自定义源并行`
               : '抓取一轮（全部内置源 + 自定义源并行，单源失败不影响其余）；左栏停在某个源时只刷该源'}
             className="flex h-7 items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 text-[12px] text-[var(--text-primary)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-50"
@@ -294,14 +296,14 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
           </button>
           <button
             onClick={onOpenSettings}
-            title="抓取设置（设置 › 模块 › 情报）"
+            data-tip="抓取设置（设置 › 模块 › 情报）" aria-label="抓取设置（设置 › 模块 › 情报）"
             className="flex size-7 items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
           >
             <Settings2 size={13} />
           </button>
           <button
             onClick={onExpandAssistant}
-            title="情报助手（推荐 / 查找 / 筛选）"
+            data-tip="情报助手（推荐 / 查找 / 筛选）" aria-label="情报助手（推荐 / 查找 / 筛选）"
             className="flex size-7 items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
           >
             <Bot size={13} />
@@ -330,7 +332,7 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
           <div className="flex shrink-0 items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-[2px]">
             <button
               onClick={() => setView('headline')}
-              title="头条视图：报纸头版式，按版面分区各取质量分 top 3"
+              data-tip="头条视图：报纸头版式，按版面分区各取质量分 top 3" aria-label="头条视图：报纸头版式，按版面分区各取质量分 top 3"
               className={`flex h-[22px] items-center gap-1 rounded-[4px] px-2 text-[11px] transition-colors ${view === 'headline' ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
             >
               <Newspaper size={11} />
@@ -338,7 +340,7 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
             </button>
             <button
               onClick={() => setView('timeline')}
-              title="时间流视图：单列卡片，按质量分排序"
+              data-tip="时间流视图：单列卡片，按质量分排序" aria-label="时间流视图：单列卡片，按质量分排序"
               className={`flex h-[22px] items-center gap-1 rounded-[4px] px-2 text-[11px] transition-colors ${view === 'timeline' ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
             >
               <List size={11} />
@@ -419,7 +421,7 @@ function HeadlineView({ visible, customNames, onOpen, onFilterSection }: {
         <section key={sec}>
           <div
             onClick={() => onFilterSection(sec)}
-            title={`点版面名筛选「${SECTION_META[sec].label}」全部条目`}
+            data-tip={`点版面名筛选「${SECTION_META[sec].label}」全部条目`} aria-label={`点版面名筛选「${SECTION_META[sec].label}」全部条目`}
             className="mb-2 flex cursor-pointer select-none items-baseline gap-2 border-b border-[var(--border-color)] pb-1"
           >
             <span className="text-[14px] font-semibold text-[var(--text-primary)]">{SECTION_META[sec].label}</span>
@@ -434,7 +436,7 @@ function HeadlineView({ visible, customNames, onOpen, onFilterSection }: {
                 data-zh={it.titleZh ? '1' : undefined}
                 data-en={isEnglishText(it.title) || (it.summary ? isEnglishText(it.summary) : false) ? '1' : undefined}
                 className="kb-item-in mb-2 cursor-pointer rounded-[10px] border border-[var(--border-color)] bg-[var(--card-bg)] px-4 py-3.5 transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]"
-                title={it.url}
+                data-tip={it.url} aria-label={it.url}
               >
                 <div className="mb-1.5 flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
                   <SourceBadge item={it} customNames={customNames} />
@@ -455,7 +457,7 @@ function HeadlineView({ visible, customNames, onOpen, onFilterSection }: {
                 data-zh={it.titleZh ? '1' : undefined}
                 data-en={isEnglishText(it.title) ? '1' : undefined}
                 className="kb-item-in flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-[var(--bg-hover)]"
-                title={it.url}
+                data-tip={it.url} aria-label={it.url}
               >
                 <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)]">{it.score}</span>
                 <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--text-primary)]">{it.title}</span>
@@ -488,7 +490,7 @@ function FilterPill({ label, onClick }: { label: string; onClick: () => void }) 
   return (
     <button
       onClick={onClick}
-      title="点掉该筛选"
+      data-tip="点掉该筛选" aria-label="点掉该筛选"
       className="shrink-0 rounded-full border border-[var(--accent)] px-2 py-[1.5px] text-[11px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10"
     >
       {label} ✕
@@ -530,7 +532,7 @@ function FeedCard({ item, index, pop, pendingZh, customNames, onOpen, onFav }: {
       data-en={isEnglishText(item.title) || (item.summary ? isEnglishText(item.summary) : false) ? '1' : undefined}
       className="kb-cv kb-item-in mb-2.5 cursor-pointer rounded-[10px] border border-[var(--border-color)] bg-[var(--card-bg)] px-3.5 py-3 transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]"
       style={{ animationDelay: `${Math.min(index * 30, 360)}ms` }}
-      title={item.url}
+      data-tip={item.url} aria-label={item.url}
     >
       <div className="mb-1.5 flex items-center gap-2">
         <span
@@ -572,7 +574,7 @@ function FeedCard({ item, index, pop, pendingZh, customNames, onOpen, onFav }: {
         <span className="flex-1" />
         <button
           onClick={(e) => { e.stopPropagation(); onFav() }}
-          title={item.fav ? '取消收藏' : '收藏'}
+          data-tip={item.fav ? '取消收藏' : '收藏'} aria-label={item.fav ? '取消收藏' : '收藏'}
           className={`kb-micro-pop flex size-[26px] items-center justify-center rounded-md transition-colors hover:bg-[var(--bg-tertiary)] ${
             item.fav ? 'text-[var(--danger)]' : 'text-[var(--text-muted)] hover:text-[var(--danger)]'
           }`}

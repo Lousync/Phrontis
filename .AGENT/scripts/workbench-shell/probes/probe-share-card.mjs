@@ -65,7 +65,7 @@ async function rightPanelOpen() {
 async function expandRight() {
   if (await rightPanelOpen()) return true
   const strip = await evalJs(`(() => {
-    const strips = [...document.querySelectorAll('[title="拖拽或点击展开"]')]
+    const strips = [...document.querySelectorAll('[data-tip="拖拽或点击展开"]')]
       .map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0).sort((a, b) => b.left - a.left)
     return strips[0] ? { x: Math.round(strips[0].left + strips[0].width / 2), y: Math.round(Math.min(strips[0].top + 120, 300)) } : null
   })()`)
@@ -121,7 +121,7 @@ async function main() {
     // ===== 1) 夹具自证 =====
     console.log('\n--- 1) 夹具：右栏展开 + 🎨 分享 Tab 激活 ---')
     const expanded = await expandRight()
-    ok('右栏已展开', expanded, await evalJs(`document.querySelectorAll('[title="拖拽或点击展开"]').length + ' strips'`))
+    ok('右栏已展开', expanded, await evalJs(`document.querySelectorAll('[data-tip="拖拽或点击展开"]').length + ' strips'`))
     const clicked = await clickShareTab()
     const tabActive = await evalJs(`document.querySelector('[data-wb-rp-tab="share"]')?.dataset.wbRpActive`)
     ok('点 🎨 后分享 Tab 成为激活态', clicked && tabActive === '1', `active=${tabActive}`)

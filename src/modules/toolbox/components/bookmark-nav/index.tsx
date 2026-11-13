@@ -220,7 +220,7 @@ export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
         <button
           onClick={onBack}
           className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title="返回"
+          data-tip="返回" aria-label="返回"
         >
           <ArrowLeft size={12} />
         </button>
@@ -325,7 +325,7 @@ export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
                   return (
                     <div key={b.id}
                       onClick={() => void handleOpen(b)}
-                      title={`${b.title}\n${b.url}`}
+                      data-tip={`${b.title}\n${b.url}`} aria-label={`${b.title}\n${b.url}`}
                       className="group relative flex flex-col gap-1.5 p-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] cursor-pointer hover:border-[var(--accent)] hover:bg-[var(--bg-tertiary)] active:scale-[0.99] transition-all"
                     >
                       <div className="flex items-center gap-2.5">
@@ -347,23 +347,23 @@ export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
                       {/* 悬停操作 */}
                       <div className="absolute right-1.5 top-1.5 hidden group-hover:flex items-center gap-0.5 bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-color)]"
                         onClick={e => e.stopPropagation()}>
-                        <button onClick={() => void handleOpen(b)} title="打开网页"
+                        <button onClick={() => void handleOpen(b)} data-tip="打开网页" aria-label="打开网页"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
                           <ExternalLink size={13} />
                         </button>
-                        <button onClick={() => void handleToggleStar(b)} title={b.starred ? '取消收藏' : '收藏'}
+                        <button onClick={() => void handleToggleStar(b)} data-tip={b.starred ? '取消收藏' : '收藏'} aria-label={b.starred ? '取消收藏' : '收藏'}
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
                           <Star size={13} className={b.starred ? 'text-[var(--warning, #d97706)]' : ''} fill={b.starred ? 'currentColor' : 'none'} />
                         </button>
-                        <button onClick={() => handleCopyLink(b)} title="复制链接"
+                        <button onClick={() => handleCopyLink(b)} data-tip="复制链接" aria-label="复制链接"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
                           {copiedId === b.id ? <Check size={13} style={{ color: 'var(--success)' }} /> : <Copy size={13} />}
                         </button>
-                        <button onClick={() => setBookmarkEditor({ mode: 'edit', bookmark: b })} title="编辑"
+                        <button onClick={() => setBookmarkEditor({ mode: 'edit', bookmark: b })} data-tip="编辑" aria-label="编辑"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)] transition-colors">
                           <Pencil size={13} />
                         </button>
-                        <button onClick={() => void handleDeleteBookmark(b)} title="删除"
+                        <button onClick={() => void handleDeleteBookmark(b)} data-tip="删除" aria-label="删除"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-[var(--bg-selected)] transition-colors">
                           <Trash2 size={13} />
                         </button>

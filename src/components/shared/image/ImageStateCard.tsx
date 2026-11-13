@@ -63,7 +63,7 @@ export function ImageStateCard({
               : <ImageOff size={20} className="text-[var(--text-muted)]" />}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-medium text-[var(--text-primary)] truncate" title={name}>{name}</div>
+            <div className="text-[14px] font-medium text-[var(--text-primary)] truncate" data-tip={name} aria-label={name}>{name}</div>
             <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
               {kind === 'toobig' ? '图片过大，未在应用内打开' : '图片无法显示'}
             </div>
@@ -81,12 +81,12 @@ export function ImageStateCard({
             <button data-wb="imgStateRetry" onClick={onRetry} className={secondaryBtn}>重新读取</button>
           )}
           {onOpenInSystem && (
-            <button data-wb="imgStateOpenSys" onClick={onOpenInSystem} title="用系统默认程序打开" className={secondaryBtn}>
+            <button data-wb="imgStateOpenSys" onClick={onOpenInSystem} data-tip="用系统默认程序打开" aria-label="用系统默认程序打开" className={secondaryBtn}>
               <ExternalLink size={12} />在系统中打开
             </button>
           )}
           {onRevealInFolder && (
-            <button data-wb="imgStateReveal" onClick={onRevealInFolder} title="在资源管理器中定位" className={secondaryBtn}>
+            <button data-wb="imgStateReveal" onClick={onRevealInFolder} data-tip="在资源管理器中定位" aria-label="在资源管理器中定位" className={secondaryBtn}>
               <FolderSearch size={12} />在文件夹中显示
             </button>
           )}

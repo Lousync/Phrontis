@@ -226,7 +226,7 @@ export function PdfToolkit({ onBack, sidebarEl, sidebarHosted }: { onBack: () =>
     <div className="kb-theme-surface flex flex-col h-full">
       {/* 顶栏 */}
       <div className="shrink-0 flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 flex-wrap">
-        <button onClick={onBack} title="返回工具箱"
+        <button onClick={onBack} data-tip="返回工具箱" aria-label="返回工具箱"
           className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
         </button>
@@ -245,7 +245,7 @@ export function PdfToolkit({ onBack, sidebarEl, sidebarHosted }: { onBack: () =>
         )}
         {busy && <span className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]"><Loader2 size={12} className="animate-spin" />{busy}</span>}
         {files.length > 0 && (
-          <button onClick={() => { setFiles([]); setActiveIdx(-1); setPages([]) }} title="清空列表"
+          <button onClick={() => { setFiles([]); setActiveIdx(-1); setPages([]) }} data-tip="清空列表" aria-label="清空列表"
             className="ml-auto p-1 rounded text-[var(--text-muted)] hover:text-red-400 transition-colors"><X size={13} /></button>
         )}
       </div>
@@ -344,10 +344,10 @@ export function PdfToolkit({ onBack, sidebarEl, sidebarHosted }: { onBack: () =>
                           </div>
                           {/* 页内操作钮 */}
                           <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-0.5 py-0.5 bg-black/45 opacity-0 hover:opacity-100 transition-opacity rounded-b-md">
-                            <button onClick={() => move(p.srcIndex, -1)} title="前移" className="p-0.5 text-white/80 hover:text-white"><ChevronUp size={12} /></button>
-                            <button onClick={() => remove(p.srcIndex)} title="删除此页" className="p-0.5 text-white/80 hover:text-red-400"><Trash2 size={12} /></button>
-                            <button onClick={() => rotate(p.srcIndex)} title="旋转 90°" className="p-0.5 text-white/80 hover:text-white"><RotateCw size={12} /></button>
-                            <button onClick={() => move(p.srcIndex, 1)} title="后移" className="p-0.5 text-white/80 hover:text-white"><ChevronDown size={12} /></button>
+                            <button onClick={() => move(p.srcIndex, -1)} data-tip="前移" aria-label="前移" className="p-0.5 text-white/80 hover:text-white"><ChevronUp size={12} /></button>
+                            <button onClick={() => remove(p.srcIndex)} data-tip="删除此页" aria-label="删除此页" className="p-0.5 text-white/80 hover:text-red-400"><Trash2 size={12} /></button>
+                            <button onClick={() => rotate(p.srcIndex)} data-tip="旋转 90°" aria-label="旋转 90°" className="p-0.5 text-white/80 hover:text-white"><RotateCw size={12} /></button>
+                            <button onClick={() => move(p.srcIndex, 1)} data-tip="后移" aria-label="后移" className="p-0.5 text-white/80 hover:text-white"><ChevronDown size={12} /></button>
                           </div>
                         </div>
                       )
