@@ -26,10 +26,16 @@ export function WorkbenchStatusBar() {
     return () => { alive = false; window.removeEventListener('wb-repo-changed', h) }
   }, [])
 
-  const pomActive = pom.state.visible
-  const pomLabel = pomActive
-    ? `${pom.state.phase === 'work' ? '专注' : '休息'} ${pom.display}${pom.state.running ? '' : '（已暂停）'}`
-    : ''
+  const pomActive = pom.mode !== 'idle'
+  const pomLabel = pom.mode === 'rating'
+    ? '待评分'
+    : pom.mode === 'breakReady'
+      ? `准备休息 ${pom.preset.break} 分钟`
+      : pom.mode === 'breakRunning'
+        ? `休息 ${pom.display}`
+        : pom.mode === 'breakDone'
+          ? '休息结束'
+          : `${pom.state.phase === 'work' ? '专注' : '休息'} ${pom.display}${pom.state.running ? '' : '（已暂停）'}`
 
   return (
     <div className="kb-statusbar flex h-6 shrink-0 items-center gap-3 border-t border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-tertiary)_72%,transparent)] px-3 text-[11px] text-[var(--text-secondary)] select-none">
@@ -46,7 +52,7 @@ export function WorkbenchStatusBar() {
           title="打开番茄钟面板"
           className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
-          <Timer size={11} className={pom.state.running ? 'text-[var(--accent)]' : ''} />
+          <Timer size={11} className={pom.mode === 'rating' ? 'text-[var(--warning)]' : pom.state.running ? 'text-[var(--accent)]' : ''} />
           {pomLabel}
         </button>
       )}

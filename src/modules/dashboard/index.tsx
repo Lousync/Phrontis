@@ -53,6 +53,7 @@ function useDashboardSnapshot(): DashboardSnapshot | null {
   useDataChanged('quiz', load)
   useDataChanged('pdfReader', load)
   useDataChanged('readerState', load)
+  useDataChanged('pomodoro', load)
   return snap
 }
 

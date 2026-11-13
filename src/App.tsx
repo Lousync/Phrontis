@@ -1364,7 +1364,7 @@ export default function App() {
   // 插件工具标签：App 层持插件工具清单（pluginTools），tool:<pluginId:toolId> 按清单匹配宿主。
   const handleOpenTool = useCallback((toolId: string) => {
     if (toolId === 'pomodoro') {
-      window.dispatchEvent(new CustomEvent('pomodoro:activate', { detail: { preset: 0 } }))
+      window.dispatchEvent(new CustomEvent('pomodoro:activate'))
       return
     }
     setActiveTab(null)

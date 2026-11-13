@@ -953,7 +953,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.pomodoro.summary',
     title: '番茄钟专注统计',
-    description: '近 N 天每日专注分钟与场次',
+    description: '近 N 天每日专注分钟、场次、主题与评分',
     inputSchema: {
       type: 'object',
       properties: {
@@ -971,11 +971,30 @@ export function registerBuiltinTools(): void {
     // R6 去库化：pomodoro 场次读 .knowbase/modules/pomodoro/sessions.json
     const sessions = pomoSessionsAll().filter((r) => r.date >= formatLocalDate(start) && r.date <= formatLocalDate(end))
     const byDate = new Map<string, { sessions: number; minutes: number }>()
+    const topicMap = new Map<string, { sessions: number; minutes: number }>()
+    let ratingSum = 0
+    let ratedCount = 0
+    let untopicSessions = 0
     for (const r of sessions) {
       const hit = byDate.get(r.date) ?? { sessions: 0, minutes: 0 }
       hit.sessions += 1
       hit.minutes += Number(r.minutes) || 0
       byDate.set(r.date, hit)
+
+      const topic = typeof r.topic === 'string' ? r.topic.trim() : ''
+      if (topic) {
+        const t = topicMap.get(topic) ?? { sessions: 0, minutes: 0 }
+        t.sessions += 1
+        t.minutes += Number(r.minutes) || 0
+        topicMap.set(topic, t)
+      } else {
+        untopicSessions += 1
+      }
+      const rating = Math.round(Number(r.rating))
+      if (rating >= 1 && rating <= 5) {
+        ratingSum += rating
+        ratedCount += 1
+      }
     }
     const out: { date: string; minutes: number; sessions: number }[] = []
     let totalMinutes = 0
@@ -989,7 +1008,20 @@ export function registerBuiltinTools(): void {
       totalMinutes += minutes
       totalSessions += sessions
     }
-    return { windowDays: days, totalMinutes, totalSessions, days: out }
+    const topics = [...topicMap.entries()]
+      .map(([topic, v]) => ({ topic, minutes: v.minutes, sessions: v.sessions }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 8)
+    return {
+      windowDays: days,
+      totalMinutes,
+      totalSessions,
+      avgRating: ratedCount ? Math.round((ratingSum / ratedCount) * 10) / 10 : null,
+      ratedSessions: ratedCount,
+      untopicSessions,
+      topics,
+      days: out,
+    }
   })
 
   // 6b. builtin.time.now —— 当前时间（**核心只读工具**：通用助手 / 日程助手 / AI 教学 三面处处可用）

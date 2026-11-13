@@ -2,10 +2,11 @@ import { ipcMain } from 'electron'
 import { vaultTodosAll } from 'phrontis-core/kbStore/scheduleVaultRepo'
 import { vaultRecordsAll, vaultHabitsAll } from 'phrontis-core/kbStore/habitVaultRepo'
 import { vaultListEntries } from 'phrontis-core/kbStore/blogVaultRepo'
-import { pomoSessionCreate, pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
+import { pomoSessionCreate, pomoSessionUpdate, pomoSessionsAll, type PomoSessionInput, type PomoSessionPatch } from 'phrontis-core/kbStore/pomoVaultRepo'
 import { vaultAccountingPeriodStats } from 'phrontis-core/kbStore/accountingVaultRepo'
 import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { checkinTotalInWindow, habitPeriodStats } from 'phrontis-core/kbStore/habitStats'
+import { broadcastDataChanged } from '../../main/windowBus'
 
 /**
  * 周期总结支持服务 ——
@@ -16,17 +17,33 @@ import { checkinTotalInWindow, habitPeriodStats } from 'phrontis-core/kbStore/ha
 
 export function registerSummaryHandlers(): void {
 
-  // 番茄钟：记录一次完成的专注（fire-and-forget，失败不影响计时）
-  ipcMain.handle('pomodoro:createSession', (_e, minutes: number) => {
+  // 番茄钟：记录一场专注（自然完成 / 提前结束共用；失败不影响计时）
+  // 入参兼容旧的 number 分钟，避免旧调用方 / 插件路径静默失效。
+  ipcMain.handle('pomodoro:createSession', (_e, input: PomoSessionInput | number) => {
     try {
-      const mins = Math.max(1, Math.round(minutes || 0))
-      pomoSessionCreate(mins)
-      return true
+      const row = pomoSessionCreate(input)
+      broadcastDataChanged('pomodoro')
+      return row
     } catch (err) {
       console.error('[summary] Failed to record pomodoro:', err)
-      return false
+      return null
     }
   })
+
+  // 番茄钟：补评分 / 修改状态标签（统计面板行内编辑）
+  ipcMain.handle('pomodoro:updateSession', (_e, id: string, patch: PomoSessionPatch) => {
+    try {
+      const row = pomoSessionUpdate(String(id || ''), patch ?? {})
+      if (row) broadcastDataChanged('pomodoro')
+      return row
+    } catch (err) {
+      console.error('[summary] Failed to update pomodoro:', err)
+      return null
+    }
+  })
+
+  // 番茄钟：全量场次（本地数据量小，统计侧按区间在前端过滤）
+  ipcMain.handle('pomodoro:listSessions', () => pomoSessionsAll())
 
   // 区间统计：start/end 均为本地 YYYY-MM-DD（含端点）
   ipcMain.handle('blog:periodStats', (_e, start: string, end: string) => {

@@ -678,7 +678,9 @@ const api = {
   superviseSendDailyNow: () => ipcRenderer.invoke('supervise:sendDailyNow'),
   superviseClearHistory: () => ipcRenderer.invoke('supervise:clearHistory'),
   // period summary (weekly / monthly)
-  createPomodoroSession: (minutes: number) => ipcRenderer.invoke('pomodoro:createSession', minutes),
+  createPomodoroSession: (input: unknown) => ipcRenderer.invoke('pomodoro:createSession', input),
+  updatePomodoroSession: (id: string, patch: unknown) => ipcRenderer.invoke('pomodoro:updateSession', id, patch),
+  listPomodoroSessions: () => ipcRenderer.invoke('pomodoro:listSessions'),
   getBlogPeriodStats: (start: string, end: string) => ipcRenderer.invoke('blog:periodStats', start, end),
   // 层级总结文件（周 / 月 / 年，.knowbase/blog/summaries/）
   listSummaries: () => ipcRenderer.invoke('blog:listSummaries'),

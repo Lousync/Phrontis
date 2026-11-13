@@ -6,9 +6,15 @@ import type { SummaryKind } from '../lib/summary'
 import type { ScheduleRecurring, ScheduleStageStatus, ScheduleWorkflow, ScheduleWorkflowStage, ScheduleWorkflowCheckpoint, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, CreateScheduleWorkflowDTO, UpdateScheduleWorkflowDTO } from 'phrontis-core/types/schedule'
 import type { AccountingAccount, AccountingRecurring, AccountingType, AccountingRecurringMode, AccountingTransaction, AccountingTxType } from 'phrontis-core/types/accounting'
 import type { VocabDayRecord, VocabReviewOptions, VocabReviewResult, VocabSessionInput } from 'phrontis-core/kbStore/vocabVaultRepo'
+import type { PomoSessionRow, PomoSessionInput, PomoSessionPatch } from 'phrontis-core/kbStore/pomoVaultRepo'
 export type { ScheduleRecurring, ScheduleStageStatus, ScheduleWorkflow, ScheduleWorkflowStage, ScheduleWorkflowCheckpoint, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, CreateScheduleWorkflowDTO, UpdateScheduleWorkflowDTO } from 'phrontis-core/types/schedule'
 export type { AccountingAccount, AccountingRecurring, AccountingType, AccountingRecurringMode, AccountingTransaction, AccountingTxType } from 'phrontis-core/types/accounting'
 export type { VocabDayRecord, VocabReviewOptions, VocabReviewResult, VocabSessionInput } from 'phrontis-core/kbStore/vocabVaultRepo'
+
+/** 番茄钟场次（唯一形状源 = phrontis-core/kbStore/pomoVaultRepo） */
+export type PomodoroSession = PomoSessionRow
+export type CreatePomodoroSessionInput = PomoSessionInput
+export type UpdatePomodoroSessionPatch = PomoSessionPatch
 
 
 export type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult }
@@ -2724,7 +2730,9 @@ export interface ElectronAPI {
   superviseSendDailyNow: () => Promise<{ ok: boolean; skipped?: string; error?: string }>
   superviseClearHistory: () => Promise<void>
   // period summary (weekly / monthly)
-  createPomodoroSession: (minutes: number) => Promise<boolean>
+  createPomodoroSession: (input: CreatePomodoroSessionInput | number) => Promise<PomodoroSession | null>
+  updatePomodoroSession: (id: string, patch: UpdatePomodoroSessionPatch) => Promise<PomodoroSession | null>
+  listPomodoroSessions: () => Promise<PomodoroSession[]>
   getBlogPeriodStats: (start: string, end: string) => Promise<{
     checkins: number
     blogEntries: number

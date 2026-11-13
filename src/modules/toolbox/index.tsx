@@ -95,7 +95,7 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
 
   const handleActivateTool = (toolId: string) => {
     if (toolId === 'pomodoro') {
-      window.dispatchEvent(new CustomEvent('pomodoro:activate', { detail: { preset: 0 } }))
+      window.dispatchEvent(new CustomEvent('pomodoro:activate'))
       return
     }
     setActiveTool(toolId)
