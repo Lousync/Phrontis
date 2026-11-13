@@ -26,6 +26,8 @@ scripts/node-path.local.txt
 .agents/
 .trae/
 .workbuddy/
+# 代理工具的会话计划文件（zcode），不进版本控制
+.zcode/
 .mcp.json
 运行指令
 建议与要求/
