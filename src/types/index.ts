@@ -659,7 +659,7 @@ export interface KnowledgePage {
   createdAt: string; updatedAt: string
   tags?: KnowledgeTag[]
   backlinks?: KnowledgePage[]
-  /** 搜索命中摘录（仅 searchPages 结果携带） */
+  /** 搜索命中摘录（仅 searchPages 结果携带）；列表场景为正文前 120 字摘要 */
   excerpt?: string
   /** vault 读源模式：仓库内相对路径（「在编辑器中打开」跳转用，仅 vault 模式携带） */
   path?: string
@@ -670,8 +670,32 @@ export interface KnowledgePage {
   /** 文件大小（字节；元信息卡展示） */
   sizeBytes?: number
 }
-/** 反链条目（带引用上下文摘录） */
-export interface KnowledgeBacklinkItem {
+
+/** 主题调色板键（渲染层映射成主题感知 CSS 变量；不存 hex，亮/暗主题各自可读） */
+export type KnowledgeTopicColor = 'blue' | 'teal' | 'gold' | 'purple' | 'red' | 'sky'
+export interface KnowledgeTopicMember {
+  /** 稳定 pageId；`auto:<relPath>` 临时身份由主进程读取时修复为真 id */
+  pageId: string
+  /** auto 身份的兜底路径（仓库相对路径） */
+  path?: string
+  addedAt: string
+  source: 'manual' | 'ai'
+}
+/** 虚拟主题：跨空间 / 跨目录的笔记集合（只记成员，不移动文件） */
+export interface KnowledgeTopic {
+  id: string
+  name: string
+  desc: string
+  color: KnowledgeTopicColor
+  members: KnowledgeTopicMember[]
+  createdAt: string
+  updatedAt: string
+}
+export interface CreateKnowledgeTopicDTO { name: string; desc?: string; color?: KnowledgeTopicColor }
+export interface UpdateKnowledgeTopicDTO { name?: string; desc?: string; color?: KnowledgeTopicColor }
+export interface PatchKnowledgeTopicMembersDTO { add?: string[]; remove?: string[] }
+
+/** 反链条目（带引用上下文摘录） */export interface KnowledgeBacklinkItem {
   id: string; title: string; fileType: string
   updatedAt: string
   excerpt: string
@@ -2364,6 +2388,12 @@ export interface ElectronAPI {
   knowledgeFindByRel: (relPath: string) => Promise<{ id: string; title: string; path: string } | null>
   /** 知识索引 warnings（.ignore 坏行/规则未命中磁盘条目等）；空数组 = 无警告 */
   getKnowledgeIndexWarnings: () => Promise<string[]>
+  /** 虚拟主题列表（成员已修复身份、已剔除失效页） */
+  getKnowledgeTopics: () => Promise<KnowledgeTopic[]>
+  createKnowledgeTopic: (d: CreateKnowledgeTopicDTO) => Promise<KnowledgeTopic>
+  updateKnowledgeTopic: (id: string, d: UpdateKnowledgeTopicDTO) => Promise<KnowledgeTopic>
+  deleteKnowledgeTopic: (id: string) => Promise<void>
+  patchKnowledgeTopicMembers: (id: string, p: PatchKnowledgeTopicMembersDTO) => Promise<KnowledgeTopic>
   getKnowledgePageById: (id: string) => Promise<KnowledgePage | null>
   createKnowledgePage: (d: CreateKnowledgePageDTO) => Promise<KnowledgePage>
   updateKnowledgePage: (id: string, d: UpdateKnowledgePageDTO) => Promise<KnowledgePage>

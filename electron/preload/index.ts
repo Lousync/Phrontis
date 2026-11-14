@@ -151,6 +151,12 @@ const api = {
   knowledgeFindByRel: (relPath: string) => ipcRenderer.invoke('knowledge:findByRel', relPath),
   // 索引 warnings（.ignore 坏行/规则未命中）：知识库 UI 消费（2026-09-08 §10.1）
   getKnowledgeIndexWarnings: () => ipcRenderer.invoke('knowledge:getIndexWarnings'),
+  // 虚拟主题（2026-11-14）：只读写 topics.json，不碰页面文件
+  getKnowledgeTopics: () => ipcRenderer.invoke('knowledge:topics:list'),
+  createKnowledgeTopic: (data: unknown) => ipcRenderer.invoke('knowledge:topics:create', data),
+  updateKnowledgeTopic: (id: string, patch: unknown) => ipcRenderer.invoke('knowledge:topics:update', id, patch),
+  deleteKnowledgeTopic: (id: string) => ipcRenderer.invoke('knowledge:topics:delete', id),
+  patchKnowledgeTopicMembers: (id: string, patch: unknown) => ipcRenderer.invoke('knowledge:topics:members', id, patch),
   getKnowledgePageById: (id: string) => ipcRenderer.invoke('knowledge:getPageById', id),
   createKnowledgePage: (data: unknown) => ipcRenderer.invoke('knowledge:createPage', data),
   updateKnowledgePage: (id: string, data: unknown) => ipcRenderer.invoke('knowledge:updatePage', id, data),

@@ -233,7 +233,7 @@ export function ScopePane({ rootId, scope, scopeAll = false, onChange, onScopeAl
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="搜索文件名…"
-            className="min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+            className="kb-field-control min-w-0 flex-1 text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           {filter && (
             <button

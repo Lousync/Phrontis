@@ -104,6 +104,7 @@ src/
 ### 交互
 
 25. **中央模态弹窗只留给严重 / 不可逆警告** —— 常规确认（AI 执行确认、普通二次确认、设置与表单、结果反馈）一律行内化：行内确认卡 / 滑出抽屉 / Toast / 角标脉动，替代模式与判定标准见 `docs/ui-interaction-patterns.md`。存量模态不强制回改，新代码与改到的代码一律遵守。
+26. **避免不必要的辅助标签和说明，让布局本身发挥解释作用** —— 层级、分组、间距、留白能说清的，不另加标签 / 角标 / 说明行；确需解释的文字按铁律 12 的披露口径处理（`docs/help-disclosure-pattern.md`），不上来就堆注解。
 
 ---
 
@@ -155,6 +156,7 @@ npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本�
 | 帮助披露规范 | `docs/help-disclosure-pattern.md` |
 | 交互确认与弹窗限制（行内化模式清单） | `docs/ui-interaction-patterns.md` |
 | 悬停提示（Tooltip）令牌 / 迁移口径 / 插件图案 | `docs/tooltip-design.md` |
+| 输入框 / 搜索框画法（单控件 vs 组合框、焦点 / 错误 / 禁用态） | `docs/input-field-pattern.md` |
 | 更新说明机制（触发规则 / 数据三层） | `docs/release-notes-design.md` |
 | 主题氛围特效（四季粒子 / 丁达尔，等看板） | `docs/theme-fx-design.md` |
 | 昼夜动态主题（daycycle：纯函数 / 引擎 / 契约） | `docs/daycycle-theme-plan.md` |

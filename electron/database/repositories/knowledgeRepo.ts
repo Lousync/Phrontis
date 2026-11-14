@@ -13,6 +13,11 @@ import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { emitPluginEvent } from '../../lib/pluginEvents'
 import { getGraphIndex } from 'phrontis-core/kbStore/graphIndex'
 import { getKnowledgeIndex, invalidateKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import {
+  vaultGetTopics, vaultCreateTopic, vaultUpdateTopic, vaultDeleteTopic, vaultPatchTopicMembers,
+  type TopicColor, type TopicMemberSource,
+} from 'phrontis-core/kbStore/knowledgeTopicsRepo'
+import { broadcastDataChanged } from '../../main/windowBus'
 
 type CategoryType = 'notebook' | 'folder' | 'space'
 
@@ -41,6 +46,9 @@ const VAULT_ALLOWED = new Set([
   'knowledge:updateCategory', 'knowledge:updatePage', 'knowledge:moveCategory', 'knowledge:movePage',
   // 2026-09-08 .ignore 规则对账提示：索引 warnings（坏行/未命中规则）透出给知识库 UI（§10.1）
   'knowledge:getIndexWarnings',
+  // 2026-11-14 虚拟主题（docs/knowledge-feed-topics-plan.md §3）：只写 .knowbase/modules/knowledge/topics.json
+  'knowledge:topics:list', 'knowledge:topics:create', 'knowledge:topics:update',
+  'knowledge:topics:delete', 'knowledge:topics:members',
 ])
 
 const VAULT_REJECT_MSG = '仓库读源模式下该操作暂不支持：请在编辑器模块中编辑内容'
@@ -61,6 +69,30 @@ export function registerKnowledgeHandlers(): void {
 
   // 索引 warnings（.ignore 坏行 / 规则未命中磁盘条目等）：只读，读索引走缓存不触发 rebuild
   kHandle('knowledge:getIndexWarnings', () => getKnowledgeIndex().warnings)
+
+  // ===== 虚拟主题（.knowbase/modules/knowledge/topics.json）=====
+  // 主题是虚拟集合：只记「主题 → pageId 成员」，不碰页面文件 / frontmatter / 目录。
+  // 写通道成功后广播 'knowledge'（铁律 1）；读通道不广播。
+  kHandle('knowledge:topics:list', () => vaultGetTopics())
+  kHandle('knowledge:topics:create', (_e, data: { name: string; desc?: string; color?: TopicColor }) => {
+    const topic = vaultCreateTopic(data)
+    broadcastDataChanged('knowledge')
+    return topic
+  })
+  kHandle('knowledge:topics:update', (_e, id: string, patch: { name?: string; desc?: string; color?: TopicColor }) => {
+    const topic = vaultUpdateTopic(id, patch)
+    broadcastDataChanged('knowledge')
+    return topic
+  })
+  kHandle('knowledge:topics:delete', (_e, id: string) => {
+    vaultDeleteTopic(id)
+    broadcastDataChanged('knowledge')
+  })
+  kHandle('knowledge:topics:members', (_e, id: string, patch: { add?: string[]; remove?: string[]; source?: TopicMemberSource }) => {
+    const topic = vaultPatchTopicMembers(id, patch)
+    broadcastDataChanged('knowledge')
+    return topic
+  })
 
   // 创建分类 — mkdir 仓库文件夹 + categories.json 追加条目（空间/笔记本=顶层，文件夹可挂父目录）
   kHandle('knowledge:createCategory', (_e, data: { name: string; parentId?: string | null; categoryType?: CategoryType }) => {

@@ -107,7 +107,7 @@ export function DiscoverView({ q, setQ, srcFilter, setSrcFilter, sources, loadin
             placeholder="搜书名或作者"
             autoComplete="off"
             spellCheck={false}
-            className="min-w-0 flex-1 select-text bg-transparent text-[14.5px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+            className="kb-field-control min-w-0 flex-1 select-text text-[14.5px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
           <select
             value={srcFilter}

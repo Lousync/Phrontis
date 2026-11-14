@@ -110,8 +110,7 @@ ok(/data-wb="treeDirSelected"/.test(SRC_TREE),
 }
 
 const iPlus = SRC_KNOW.indexOf('<TreeNewButton')
-const plusLine = iPlus >= 0 ? SRC_KNOW.slice(Math.max(0, iPlus - 400), iPlus) : ''
-ok(/sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode/.test(plusLine),
+ok(/sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal\([\s\S]{0,2200}?<TreeNewButton/.test(SRC_KNOW.slice(Math.max(0, iPlus - 2600), iPlus + 40)),
   'C7 ★ 「＋」与聚焦按钮同显隐口径（非知识库形态 / 选中空间 / 图谱态都不渲染）', '')
 ok(/data-wb="treeNewBtn"/.test(SRC_BTN) && /data-wb=\{`treeNewItem-\$\{it\.key\}`\}/.test(SRC_BTN),
   'C8 「＋」按钮与菜单项有探针锚点（新增按钮会进头部动作槽，探针需可断言）', '')

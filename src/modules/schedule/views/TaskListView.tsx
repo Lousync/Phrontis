@@ -93,7 +93,7 @@ export function TaskListView({ view, activeTag, today, tasks, tags, workflows, o
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') void addTask() }}
               placeholder={view === 'inbox' ? '添加到收集箱' : '添加任务'}
-              className="min-w-0 flex-1 bg-transparent text-[12.5px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)]"
+              className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
             />
             {input.trim() && <button onClick={() => void addTask()} disabled={busy} className="rounded bg-[var(--accent)] px-2 py-0.5 text-[11px] text-white disabled:opacity-40">添加</button>}
           </div>

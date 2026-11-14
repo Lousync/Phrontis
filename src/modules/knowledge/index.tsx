@@ -1,9 +1,9 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, Link2, ExternalLink, FolderSearch, FolderInput, House } from 'lucide-react'
+import { FileText, Folder, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, Link2, ExternalLink, FolderSearch, FolderInput, Clock, LayoutGrid, List, Crosshair, Search } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
-import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
+import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, KnowledgeTopic, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { WelcomeHtmlView } from './components/WelcomeHtmlView'
 import { FileMetaCard } from './components/FileMetaCard'
@@ -22,6 +22,7 @@ import {
   showExportSaveDialog, writeExportTextFile, writeExportPdf,
   getKnowledgeTags, pluginListViews, getKnowledgeGraph,
   getKnowledgeIndexWarnings,
+  getKnowledgeTopics, createKnowledgeTopic, updateKnowledgeTopic, deleteKnowledgeTopic, patchKnowledgeTopicMembers,
   workspaceRename, workspaceGetCurrent, workspaceTrash,
   workspaceListDir, workspaceCreateFile, workspaceMkdir,
   copyText, workspaceOpenInSystem,
@@ -64,6 +65,14 @@ import { FolderFocusButton } from '../../components/shared/FolderFocusButton'
 import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
 import { isRenderableImageExt } from '../../lib/imageFormats'
 import { TreeNewButton, type TreeNewMenuItem } from '../../components/shared/TreeNewButton'
+import { NoteFeed } from './components/NoteFeed'
+import { TopicWall } from './components/TopicWall'
+import { TopicDetail } from './components/TopicDetail'
+import { NoteHome } from './components/NoteHome'
+import {
+  filterFeedPages, resolveTopicPages,
+  topicColorOf, topDirOfPath, unfiledPages, type FeedSort,
+} from './topicsPure'
 import { isEditingInput } from '../../lib/shortcuts'
 import { getGlobalActiveTab } from '../../lib/activeTab'
 import { useSettings } from '../../lib/SettingsContext'
@@ -84,6 +93,13 @@ interface PageInfo {
     键必须带 rootId —— 换库（整窗 reload）后各存各的，互不串。 */
 const kbPagesKey = (rootId: string) => `kb.knowledge.pages.${rootId}`
 
+/** 总览固定标签 id（不参与 openPageIds 持久化，仅 PageTabStrip 展示用） */
+const HOME_TAB_ID = '__kb_home__'
+/** 主题详情临时标签 id 前缀（同时只开一个主题） */
+const topicTabId = (id: string) => `topic:${id}`
+/** 「未归类」虚拟主题 id：不是真主题，不能改名/删除，也不落 topics.json */
+const UNFILED_TOPIC_ID = '__unfiled__'
+
 export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench, onMigratePageTab }: { sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void; onMigratePageTab?: (oldId: string, newId: string) => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
@@ -98,18 +114,12 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   const [openPageInfos, setOpenPageInfos] = useState<Record<string, PageInfo>>({})
   /** R4-G1：图谱全幅视图开关（入口在左侧目录树底部；Esc/返回按钮退出） */
   const [graphMode, setGraphMode] = useState(false)
-  // 左栏「文件 | 大纲」切换（2026-09-19 反馈恢复旧版）：大纲仅 md 页面可用（非 md 激活时自动回落文件树）
-  const [sidebarTab, setSidebarTab] = useState<'files' | 'outline'>('files')
   /**
    * 沉浸阅读期的左栏覆盖（2026-09-27 需求：「纯净阅读模式读 md 时左栏应有大纲」）。
    *
-   * **刻意不写 `sidebarTab`** —— 那是**用户的选择**，覆写会让「退出沉浸后回不到原来那一栏」。
-   * 故另立覆盖位：非 null 时左栏按它渲染，null 时回落 `sidebarTab`。
+   * **刻意不写常规三视图状态** —— 那是**用户的选择**，覆写会让「退出沉浸后回不到原来那一栏」。
+   * 故另立覆盖位：非 null 时左栏按它渲染，null 时回落常规侧栏。
    * 进出沉浸只改覆盖位 ⇒ 退出即天然还原（拍板②），无需记住/写回旧值。
-   *
-   * 拍板③「尊重用户手动切换」在本形态下**自动成立**：沉浸态左栏刻意**不渲染**
-   * 「文件 | 大纲」切换行（拍板①，纯净），用户无从手动切走。
-   * ⚠️ 若将来在沉浸态加回切换行，必须补一个 userOverrideRef 闸门，否则本注释描述的行为会失效。
    */
   const [immersiveTabOverride, setImmersiveTabOverride] = useState<'files' | 'outline' | null>(null)
   /** 沉浸态正文滚动区（左栏大纲点标题时按 id 定位到这里的标题元素） */
@@ -197,6 +207,40 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   const [activePluginView, setActivePluginView] = useState<PluginViewContribution | null>(null)
   // 知识库侧边栏条目大小（紧凑/标准/宽松）→ CSS 变量，树行密度随之缩放
   const { s: settings, update: updateSettings } = useSettings()
+
+  // ===== 笔记流 + 虚拟主题（v3.27.0，docs/knowledge-feed-topics-plan.md §4）=====
+  /** 左栏三视图：最近 / 主题 / 结构。默认值读设置（持久化用户上次选择） */
+  const [feedView, setFeedView] = useState<'recent' | 'topics' | 'tree'>(() => {
+    const v = settings.knowledgeFeedView
+    return v === 'topics' || v === 'tree' ? v : 'recent'
+  })
+  /** 「最近」视图排序：最近修改 / 标题 */
+  const [feedSort, setFeedSort] = useState<FeedSort>(() => (settings.knowledgeFeedSort === 'title' ? 'title' : 'mtime'))
+  const [feedQuery, setFeedQuery] = useState('')
+  /** 笔记流聚焦：按活动页顶层目录过滤（null = 不聚焦） */
+  const [feedFocusDir, setFeedFocusDir] = useState<string | null>(null)
+  /**
+   * 用户在阅读态手动要求「看列表」：true = 暂停自动大纲，显示三视图。
+   * 切页会复位（换一篇又进入阅读态，自动大纲重新接管）。
+   */
+  const [manualFeed, setManualFeed] = useState(false)
+  /** 主栏 PageEditor 当前是否阅读态（onPreviewChange 上报；阅读态左栏自动大纲） */
+  const [activePreview, setActivePreview] = useState(true)
+  /** 总览是否激活。与 activePageId 并行存在：点总览标签不清空已开页面 */
+  const [homeActive, setHomeActive] = useState(true)
+  /** 主题详情是临时标签：同时只开一个，不持久化、不参与分屏/固定 */
+  const [openTopicId, setOpenTopicId] = useState<string | null>(null)
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null)
+  const [topics, setTopics] = useState<KnowledgeTopic[]>([])
+  /** 主题视图内联新建卡是否展开（头部 ＋ → 新建主题也走这条） */
+  const [topicCreating, setTopicCreating] = useState(false)
+  /** 「新建主题并加入…」：记住待加入的 pageId，创建成功后一次性加成员 */
+  const [topicPendingAdd, setTopicPendingAdd] = useState<string | null>(null)
+  /** 笔记右键菜单（最近视图 / 主题卡 / 总览共用） */
+  const [pageMenu, setPageMenu] = useState<{ x: number; y: number; page: KnowledgePage } | null>(null)
+  /** 笔记流排序菜单（与树排序菜单分开：两套选项语义不同） */
+  const [feedSortMenuPos, setFeedSortMenuPos] = useState<{ x: number; y: number } | null>(null)
+
   /** 数据形态 = vault：知识库为只读导航，一切写收口到编辑器模块（后端也已白名单拒绝，这里给前端护栏+明确提示） */
   const vaultReadonly = true // R6 D9 后恒 vault：知识库只读导航，写收口编辑器（sqlite 读源已退役）
   const writeBlocked = (action: string): boolean => {
@@ -343,12 +387,174 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     try { setAllKnowledgeTags(await getKnowledgeTags()) } catch (e) { console.error(e) }
   }, [])
 
+  const refreshTopics = useCallback(async () => {
+    try { setTopics(await getKnowledgeTopics()) } catch (e) { console.error(e) }
+  }, [])
+
   useEffect(() => {
     setLoading(true)
-    Promise.all([refreshCategories(), refreshAllPages(), refreshStarred(), refreshTags()])
+    Promise.all([refreshCategories(), refreshAllPages(), refreshStarred(), refreshTags(), refreshTopics()])
       .finally(() => setLoading(false))
     console.log('[Knowledge] module mounted · net-v2（手动关联/注解/沉浸阅读已启用）')
   }, [])
+
+  // ===== 笔记流 / 虚拟主题：派生与动作 =====
+  const pagesById = useMemo(() => new Map(allPages.map((p) => [p.id, p])), [allPages])
+  const unfiledList = useMemo(() => unfiledPages(allPages, topics), [allPages, topics])
+  const activeTopic = useMemo(() => topics.find((t) => t.id === activeTopicId) ?? null, [topics, activeTopicId])
+  const openTopic = useMemo(() => topics.find((t) => t.id === openTopicId) ?? null, [topics, openTopicId])
+  const activeTopicPages = useMemo(
+    () => (activeTopicId === UNFILED_TOPIC_ID ? unfiledList : resolveTopicPages(activeTopic, allPages)),
+    [activeTopicId, unfiledList, activeTopic, allPages],
+  )
+  /** 笔记流聚焦候选 = 活动页顶层目录（根层页 = ''，视为不可聚焦） */
+  const focusDirCandidate = useMemo(() => {
+    const p = activePageId ? pagesById.get(activePageId) : undefined
+    return p ? topDirOfPath(p.path) : ''
+  }, [activePageId, pagesById])
+  const feedBase = useMemo(
+    () => (feedFocusDir ? allPages.filter((p) => topDirOfPath(p.path) === feedFocusDir) : allPages),
+    [allPages, feedFocusDir],
+  )
+  const feedPages = useMemo(() => filterFeedPages(feedBase, feedQuery), [feedBase, feedQuery])
+  const treeRootCount = useMemo(() => new Set(allPages.map((p) => topDirOfPath(p.path))).size, [allPages])
+
+  /** 切视图：写设置（持久化）+ 退出自动大纲 */
+  const changeFeedView = useCallback((view: 'recent' | 'topics' | 'tree') => {
+    setFeedView(view)
+    setManualFeed(true)
+    setTopicCreating(false)
+    // 聚焦只属于「最近」视图：切走后清掉，避免出现看着已聚焦、列表却没过滤的假开关
+    if (view !== 'recent') setFeedFocusDir(null)
+    updateSettings('knowledgeFeedView', view)
+  }, [updateSettings])
+
+  const openTopicCreate = useCallback(() => {
+    changeFeedView('topics')
+    setTopicPendingAdd(null)
+    setTopicCreating(true)
+  }, [changeFeedView])
+
+  const openTopicTab = useCallback((topic: KnowledgeTopic) => {
+    setOpenTopicId(topic.id)
+    setActiveTopicId(topic.id)
+    setHomeActive(false)
+    setManualFeed(true)
+  }, [])
+
+  const openUnfiledTab = useCallback(() => {
+    setOpenTopicId(UNFILED_TOPIC_ID)
+    setActiveTopicId(UNFILED_TOPIC_ID)
+    setHomeActive(false)
+    setManualFeed(true)
+  }, [])
+
+  const closeTopicTab = useCallback(() => {
+    setOpenTopicId(null)
+    setActiveTopicId(null)
+    setHomeActive(true)
+  }, [])
+
+  /** 主题创建（内联卡 / 右键「新建主题并加入…」共用）。返回错误文案供内联卡就地显示 */
+  const handleCreateTopic = useCallback(async (name: string): Promise<string | null> => {
+    try {
+      let topic = await createKnowledgeTopic({ name })
+      if (topicPendingAdd) {
+        try { topic = await patchKnowledgeTopicMembers(topic.id, { add: [topicPendingAdd] }) } catch { /* 页已消失：主题仍保留 */ }
+        setTopicPendingAdd(null)
+      }
+      setTopics((prev) => [...prev, topic])
+      showToast({ type: 'success', message: `已创建主题「${topic.name}」` })
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : '创建主题失败'
+    }
+  }, [topicPendingAdd])
+
+  const handleRenameTopic = useCallback(async (name: string): Promise<string | null> => {
+    if (!activeTopic) return '主题不存在'
+    try {
+      const t = await updateKnowledgeTopic(activeTopic.id, { name })
+      setTopics((prev) => prev.map((x) => (x.id === t.id ? t : x)))
+      showToast({ type: 'success', message: '主题已重命名' })
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : '重命名失败'
+    }
+  }, [activeTopic])
+
+  const handleDeleteTopic = useCallback(async () => {
+    if (!activeTopic) return
+    const name = activeTopic.name
+    try {
+      await deleteKnowledgeTopic(activeTopic.id)
+      setTopics((prev) => prev.filter((t) => t.id !== activeTopic.id))
+      closeTopicTab()
+      showToast({ type: 'success', message: `已删除主题「${name}」，笔记全部保留` })
+    } catch (e) {
+      showToast({ type: 'error', message: e instanceof Error ? e.message : '删除主题失败' })
+    }
+  }, [activeTopic, closeTopicTab])
+
+  const handleAddMember = useCallback(async (topicId: string, pageId: string) => {
+    const topic = topics.find((t) => t.id === topicId)
+    const page = pagesById.get(pageId)
+    if (!topic) return
+    if (topic.members.some((m) => m.pageId === pageId)) {
+      showToast({ type: 'info', message: `《${page?.title ?? '这篇笔记'}》已经在这个主题里了` })
+      return
+    }
+    try {
+      const t = await patchKnowledgeTopicMembers(topicId, { add: [pageId] })
+      setTopics((prev) => prev.map((x) => (x.id === t.id ? t : x)))
+      showToast({ type: 'success', message: `已把《${page?.title ?? '这篇笔记'}》加入「${t.name}」` })
+    } catch (e) {
+      showToast({ type: 'error', message: e instanceof Error ? e.message : '加入主题失败' })
+    }
+  }, [topics, pagesById])
+
+  const handleRemoveMember = useCallback(async (topicId: string, pageId: string) => {
+    const topic = topics.find((t) => t.id === topicId)
+    const page = pagesById.get(pageId)
+    if (!topic) return
+    try {
+      const t = await patchKnowledgeTopicMembers(topicId, { remove: [pageId] })
+      setTopics((prev) => prev.map((x) => (x.id === t.id ? t : x)))
+      showToast({
+        type: 'info',
+        message: `已把《${page?.title ?? '这篇笔记'}》移出「${t.name}」`,
+        action: {
+          label: '撤销',
+          onClick: () => {
+            void patchKnowledgeTopicMembers(topicId, { add: [pageId] })
+              .then((nt) => setTopics((prev) => prev.map((x) => (x.id === nt.id ? nt : x))))
+              .catch(() => { /* 撤销失败静默：下一条广播会给出真实状态 */ })
+          },
+        },
+      })
+    } catch (e) {
+      showToast({ type: 'error', message: e instanceof Error ? e.message : '移出主题失败' })
+    }
+  }, [topics, pagesById])
+
+  const handlePageContextMenu = useCallback((e: React.MouseEvent, page: KnowledgePage) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setPageMenu({ x: e.clientX, y: e.clientY, page })
+  }, [])
+
+  // 主题被删除 / 刷新后消失：临时标签自动关闭并回总览
+  useEffect(() => {
+    if (activeTopicId && activeTopicId !== UNFILED_TOPIC_ID && !topics.some((t) => t.id === activeTopicId)) {
+      setOpenTopicId(null)
+      setActiveTopicId(null)
+      setHomeActive(true)
+    }
+    if (openTopicId && openTopicId !== UNFILED_TOPIC_ID && !topics.some((t) => t.id === openTopicId)) {
+      setOpenTopicId(null)
+    }
+  }, [topics, activeTopicId, openTopicId])
+
 
   // ---- 打开页签内容指针持久化（2026-11-07 分屏留存轮）----
   // 冷重启后页签全丢，是因为只有外壳（分屏比例/副栏页 id）落了盘而主栏这半边是内存态。
@@ -374,6 +580,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     setOpenPageInfos((prev) => ({ ...prev, ...infos }))
     // 激活页若正被挪在副栏，主栏让位交给上方既有 effect（secondaryPageIds 协调），这里照存档直设
     setActivePageId(typeof saved.active === 'string' && ids.includes(saved.active) ? saved.active : ids[0])
+    // 有恢复出来的页签 → 不落总览（总览标签仍常驻，只是不激活）
+    setHomeActive(false)
   }, [kbRootId, loading, allPages, secondaryPageIds, onRemoveSecondary])
   // 写回：恢复完成后页签增删/激活变化即落 localStorage。守 pagesRestoredRef —— 加载期空数组不得清掉存档
   useEffect(() => {
@@ -386,7 +594,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   useEffect(() => {
     if (!isActive) return
     if (!activatedOnceRef.current) { activatedOnceRef.current = true; return }
-    refreshCategories(); refreshAllPages(); refreshStarred(); refreshTags()
+    refreshCategories(); refreshAllPages(); refreshStarred(); refreshTags(); refreshTopics()
     // A8：图谱视图挂载中时同步刷新（编辑器保存/删除/重命名后切回知识 Tab）
     window.dispatchEvent(new Event('kb-graph-refresh'))
     // 阅读详情页也是 keep-alive：编辑器改过磁盘后必须重读（2026-09-09 修复"回知识库看不到修改"）
@@ -418,7 +626,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   /** 主进程侧写操作（AI 工具建页面/写文件等）→ 广播后重读（2026-09-10 修）。
    *  与 kb-fs-op-changed 同一套刷新动作；不限 isActive —— 保活时也要把数据更新到位，回来即是最新。 */
   useDataChanged('knowledge', () => {
-    refreshCategories(); refreshAllPages(); refreshStarred(); refreshTags()
+    refreshCategories(); refreshAllPages(); refreshStarred(); refreshTags(); refreshTopics()
     if (selectedChapterId) refreshChapterPages()
     // 外部 fs 变化（资源管理器增删改名 → fsWatcher 广播）→ 文件树已加载目录重扫
     //（2026-09-19 反馈：此前只重读知识页索引，树一直停留在旧缓存）
@@ -686,7 +894,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   const exitReading = useCallback(() => {
     setReadingMode(false)
     setReadingPage(null)
-    // 覆盖位归 null ⇒ 左栏回落用户自己的 sidebarTab（拍板②：还原进入前的选择）
+    // 覆盖位归 null ⇒ 左栏回落常规三视图（拍板②：还原进入前的选择）
     setImmersiveTabOverride(null)
   }, [])
 
@@ -801,6 +1009,10 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     // activePageId，视图盖着什么都看不见 = 「点了没反应」。任何页面打开/切换先收错题本视图
     // （QUIZ_VIEW_TOGGLED {open:false} 回流 → App 收页面条错题本条目 + 左栏回笔记态）。
     if (showQuizCollectionRef.current) toggleQuizCollection(false)
+    // 打开页面 = 离开总览 / 主题详情；并复位「手动看列表」覆盖（阅读态自动大纲重新接管）
+    setHomeActive(false)
+    setActiveTopicId(null)
+    setManualFeed(false)
     // 入栈（拍板 D3）：打开新页、以及**切到已开页签**都算一次访问；从历史回退/前进时跳过
     // （opts.fromHistory）—— 否则「后退」自己会再压一条，形成原地打转。
     if (!opts?.fromHistory) setNav((s) => pushNav(s, pageId))
@@ -897,7 +1109,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
         setActivePageId(landing)
       } else {
         setActivePageId(null)
-        // All tabs closed — just close outline, keep sidebar state unchanged
+        // 最后一个页面关闭 → 回总览（总览是常驻固定标签，v3.27.0）
+        setHomeActive(true)
         setShowOutline(false)
       }
     }
@@ -945,7 +1158,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     })
     setPinnedPageIds(prev => new Set([...prev].filter(id => keep.includes(id))))
     if (!keep.includes(activePageIdRef.current ?? '')) {
-      if (keep.length === 0) { setActivePageId(null); setShowOutline(false) }
+      if (keep.length === 0) { setActivePageId(null); setHomeActive(true); setShowOutline(false) }
       else setActivePageId(keep[keep.length - 1])
     }
   }, [])
@@ -1166,28 +1379,30 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
    *  读 ref 而非 state：恒等稳定的 useCallback（deps 为空）才能被模块级快捷键 effect 安全依赖。 */
   const treeLandDir = useCallback(() => selectedDirRelRef.current ?? '', [])
 
-  /** 头部「＋」菜单项（B-7 拍板：就三项，不含「新建空文件」——那个仍在左栏右键菜单里）。
-   *  「新建分类目录」恒落仓库根（分类 = 顶层容器，handleCommitCategory 是 parentId:null + 顶层 mkdir），
-   *  所以选中子目录时补一个「根层」小字说明，而不是置灰（置灰会先被当成 bug）。 */
+  /** 头部「＋」菜单项（v3.27.0 笔记流：三项 = 新建笔记 / 新建主题 / 新建目录）。
+   *  「新建分类目录」仍在文件树右键菜单里；「新建目录」落点跟随选中目录。 */
   const treeNewItems = useMemo<TreeNewMenuItem[]>(() => {
     const ic = 'shrink-0 text-[var(--text-muted)]'
-    const atSubDir = !!selectedDirRel
     return [
-      { key: 'knowledge', label: '新建知识页', icon: <FileText size={13} className={ic} /> },
+      { key: 'knowledge', label: '新建笔记', icon: <FileText size={13} className={ic} /> },
+      { key: 'topic', label: '新建主题', icon: <LayoutGrid size={13} className={ic} /> },
       { key: 'dir', label: '新建目录', icon: <Folder size={13} className={ic} /> },
-      { key: 'category', label: '新建分类目录', icon: <FolderTree size={13} className={ic} />, ...(atSubDir ? { note: '根层' } : {}) },
     ]
-  }, [selectedDirRel])
+  }, [])
 
   /** 「＋」选中类型 → 进既有内联输入，不新写创建逻辑（B-13 起分类目录也走这条路）。
    *  先确保落点目录展开：内联输入行渲染在目录子级里，目录收着的话输入框根本不可见（表现为"点＋没反应"）。 */
   const handleTreeNewPick = useCallback((key: string) => {
+    // 新建主题：切到主题视图并展开内联命名卡（不落盘占位）
+    if (key === 'topic') { openTopicCreate(); return }
     // 分类目录恒落仓库根层（顶层 mkdir + categories.json 登记），落点不跟随选中目录
     if (key === 'category') { setTreeCreating({ dirRel: '', type: 'category' }); return }
     const dirRel = treeLandDir()
     if (dirRel) setExpandedDirs((prev) => (prev.has(dirRel) ? prev : new Set(prev).add(dirRel)))
+    setFeedView('tree')
+    setManualFeed(true)
     setTreeCreating({ dirRel, type: key as 'knowledge' | 'dir' })
-  }, [treeLandDir])
+  }, [treeLandDir, openTopicCreate])
 
   /**
    * 「新建知识页」的**跨模块入口**（2026-10-13）：桌面「新建」与命令面板都派发 `kb-editor-new-page`。
@@ -1316,7 +1531,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
    *  ★ 找不到就给一句提示 —— 不静默（可能是 .ignore 规则收起了这一条）。 */
   const handleLocateInTree = useCallback((rel: string) => {
     if (!rel) return
-    setSidebarTab('files')
+    setFeedView('tree')
+    setManualFeed(true)
     const parts = rel.split('/')
     const dirs = ['']
     for (let i = 1; i < parts.length; i++) dirs.push(parts.slice(0, i).join('/'))
@@ -1943,16 +2159,21 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     const md = liveContent || (readingPage && readingPage.id === activePageId ? readingPage.contentMd : '') || ''
     return parseHeadings(md)
   }, [liveContent, readingPage, activePageId])
-  // 左栏停在大纲页时，激活页面切到非 md（或无页面）→ 自动回落文件树
+  /** 当前主栏页是否 md（大纲可用性的唯一判据；openPageInfos 首载即知类型） */
+  const activeIsMd = !!activePageId && (openPageInfos[activePageId]?.fileType ?? '').toLowerCase() === 'md'
+  /** 阅读态左栏自动大纲：md + 阅读态 + 用户没有手动要列表 + 没有停在总览/主题页 */
+  const outlineMode = !readingMode && !!activePageId && !homeActive && !activeTopicId && activeIsMd && activePreview && !manualFeed
+  // 换页复位（v3.27.0）：手动「返回列表」覆盖只对当前页面有效；换一篇重新按阅读态自动判定
   useEffect(() => {
-    if (sidebarTab !== 'outline') return
-    const ft = activePageId ? openPageInfos[activePageId]?.fileType : undefined
-    if (ft !== 'md') setSidebarTab('files')
-  }, [sidebarTab, activePageId, openPageInfos])
-  /** 页面条可见性上报（2026-09-19，App 全关判定用）：有停靠页面才可见；quiz 条目由 App 侧 quizViewOpen 单独判 */
+    setManualFeed(false)
+    setActivePreview(true)
+    setFeedFocusDir(null)
+  }, [activePageId])
+  /** 页面条可见性上报（v3.27.0）：总览是常驻固定标签 ⇒ 知识库页面条恒可见。
+   *  quiz 条目由 App 侧 quizViewOpen 单独判。 */
   const onStripVisibleRef = useRef(onStripVisibleChange)
   onStripVisibleRef.current = onStripVisibleChange
-  useEffect(() => { onStripVisibleRef.current?.(openPageIds.length > 0) }, [openPageIds.length])
+  useEffect(() => { onStripVisibleRef.current?.(true) }, [])
 
   // 搜索定位到分类/笔记本（展开树并滚动到目标）
   const handleLocateCategory = useCallback((categoryId: string) => {
@@ -2298,40 +2519,73 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
         {/* v3.4.0 页面条置顶（2026-09-18）：知识库页签条搬进中间栏页面条（portal 到 App 槽位）；
             图谱模式不渲染。托管但槽未就绪 → 渲染 null，绝不回落内嵌（否则同屏两条）。 */}
         {!graphMode && (() => {
+          const topicTabItem = openTopicId
+            ? {
+                id: topicTabId(openTopicId),
+                title: openTopicId === UNFILED_TOPIC_ID ? '未归类' : (openTopic?.name ?? '主题'),
+                kind: 'topic' as const,
+                accent: openTopic ? topicColorOf(openTopic.color) : undefined,
+                closable: true,
+              }
+            : null
+          const stripItems = [
+            { id: HOME_TAB_ID, title: '总览', kind: 'home' as const, closable: false },
+            ...openPageIds.filter((pid) => !secondaryPageIds.includes(pid)).map((id) => {
+              const info = openPageInfos[id]
+              const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)
+              return {
+                id,
+                title: info?.title || '加载中…',
+                preview: !pinned,
+                pinned,
+                badge: info?.fileType ? getFileTypeInfo(info.fileType).badge : undefined,
+              }
+            }),
+            ...(topicTabItem ? [topicTabItem] : []),
+          ]
           const strip = (
             <PageTabStrip
               owner="knowledge"
               itemAttr="data-tab-id"
-              items={openPageIds.filter((pid) => !secondaryPageIds.includes(pid)).map((id) => {
-                const info = openPageInfos[id]
-                const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)
-                return {
-                  id,
-                  title: info?.title || '加载中…',
-                  preview: !pinned,
-                  pinned,
-                  badge: info?.fileType ? getFileTypeInfo(info.fileType).badge : undefined,
-                }
-              })}
+              items={stripItems}
               /* 单激活（2026-09-20 深层修复）：错题本视图打开时本模块当前视图是错题本，
                  页签条目全部转非激活——激活态只落在页面条「错题本」条目上（App quizEntryActive）。
-                 此前页签照常高亮 + 错题本条目也高亮 = 双激活，看起来像同时开了两个页面。
-                 ★ 2026-09-26 F-8 二修：再并入「模块是不是前台标签」。**activePageId 是模块内部
-                 概念**（当前打开的是哪一页），不表达「知识库是不是前台」——人在别的标签页时
-                 页签组仍按 activePageId 高亮，零散页面看着像打开状态（用户报障）。
-                 判据用模块已有的 isActive prop（App 传 `on = t === activeTab`），不新造通道。 */
-              activeId={!isActive || showQuizCollection ? null : activePageId}
+                 ★ 2026-09-26 F-8 二修：再并入「模块是不是前台标签」。activePageId 是模块内部
+                 概念，不表达「知识库是不是前台」——人在别的标签页时页签组仍按 activePageId 高亮，
+                 零散页面看着像打开状态（用户报障）。判据用模块已有的 isActive prop。
+                 ★ v3.27.0：总览 / 主题详情加入激活判定（总览优先于页面）。 */
+              activeId={!isActive || showQuizCollection
+                ? null
+                : activeTopicId
+                  ? topicTabId(activeTopicId)
+                  : (homeActive || !activePageId) ? HOME_TAB_ID : activePageId}
               onSelect={(id) => {
+                if (id === HOME_TAB_ID) {
+                  setHomeActive(true)
+                  setActiveTopicId(null)
+                  onPageTabActivate?.()
+                  return
+                }
+                if (id.startsWith('topic:')) {
+                  setActiveTopicId(id.slice('topic:'.length))
+                  setHomeActive(false)
+                  onPageTabActivate?.()
+                  return
+                }
                 void handleOpenPage(id)
                 // 页签组恒挂在页面条上（其他模块激活时也可见），点击 = 要看那个页面：
-                // 通知 App 把 knowledge 标签带到前台 + 左栏跟随（状态在模块、激活在 App，
-                // 同 onPageTabActivate 这类「模块内事件 → App 收口」的回调范式；2026-09-20 反馈「点笔记页签不跳笔记区」）
+                // 通知 App 把 knowledge 标签带到前台 + 左栏跟随（状态在模块、激活在 App）。
                 onPageTabActivate?.()
               }}
-              onClose={handleCloseTab}
-              onReorder={handleReorderTabs}
-              onTogglePin={handleTogglePin}
-              onContextMenu={(e, id) => handleTabContextMenu(e, id)}
+              onClose={(id) => {
+                if (id === HOME_TAB_ID) return
+                if (id.startsWith('topic:')) { closeTopicTab(); return }
+                handleCloseTab(id)
+              }}
+              /* 重排只对页面标签生效：总览恒第一位、主题标签固定末尾（都不参与拖拽） */
+              onReorder={(ids) => handleReorderTabs(ids.filter((id) => id !== HOME_TAB_ID && !id.startsWith('topic:')))}
+              onTogglePin={(id) => { if (id !== HOME_TAB_ID && !id.startsWith('topic:')) handleTogglePin(id) }}
+              onContextMenu={(e, id) => { if (id !== HOME_TAB_ID && !id.startsWith('topic:')) handleTabContextMenu(e, id) }}
               onExternalDrop={(id) => onRemoveSecondary?.(id)}
             />
           )
@@ -2368,49 +2622,81 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
             而非复制渲染，全部状态留在本组件（方案 §7 风险2）。否则回落原位 ResizablePanel。
             两形态显隐一致：portal 传 null ⇔ ResizablePanel visible=false 不渲染 children；
             且 sidebarEl 形态下 ResizablePanel 整体不渲染，模块中间区不再残留收起边条。 */}
-        {/* 头部「＋」新建（B-7）：同槽 portal，且**排在聚焦按钮之前**——portal 目标同一容器时
-            DOM 顺序 = 渲染顺序，于是「＋」在聚焦按钮左侧（动作在前、开关在后）。
-            显隐口径与聚焦按钮完全一致（非知识库形态 / 选中空间 / 图谱态均不渲染）。 */}
+        {/* 头部动作（v3.27.0 笔记流）：＋ / 排序 / 展开收起 / 聚焦；阅读态自动大纲时只留「返回列表」。
+            house / lock 由工作台头部提供，本模块不重复造。 */}
         {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
-          <TreeNewButton items={treeNewItems} onPick={handleTreeNewPick} title="新建知识页 / 目录 / 分类目录" />,
-          modActionsEl,
-        )}
-        {/* 排序 + 全部展开/关闭（2026-10-11）：同槽 portal，排在「＋」之后、聚焦按钮之前；
-            显隐口径与聚焦按钮完全一致（非知识库形态 / 选中空间 / 图谱态不渲染） */}
-        {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
-          <button
-            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenuPos({ x: r.left, y: r.bottom + 6 }) }}
-            data-tip="排序方式"
-            aria-label="排序方式"
-            data-wb="kbTreeSortBtn"
-            className={`rounded p-1 transition-colors ${sortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
-          >
-            {(treeSort === 'name-desc' || treeSort === 'mtime-desc')
-              ? <ArrowDownNarrowWide {...SIDEBAR_HEADER_ICON} />
-              : <ArrowUpNarrowWide {...SIDEBAR_HEADER_ICON} />}
-          </button>,
-          modActionsEl,
-        )}
-        {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
-          <TreeExpandButton
-            expanded={treeSubtreeExpanded}
-            onClick={toggleTreeSubtree}
-            dataWb="kbTreeSubtreeBtn"
-            title={treeSubtreeExpanded
-              ? (selectedDirRel ? '收起此目录（含子目录）' : '全部关闭')
-              : (selectedDirRel ? '展开此目录（含子目录）' : '展开全部（含子目录）')}
-          />,
-          modActionsEl,
-        )}
-        {/* 聚焦按钮上移（2026-09-19 反馈）：portal 到左栏模块态头部动作槽；2026-10-11 起排在**最后＝最右**。
-            与侧栏同显隐口径：非知识库形态（quiz）/选中空间（行原本就不显示）/图谱态不渲染 */}
-        {modActionsEl && createPortal(
-          sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode ? (
-            <FolderFocusButton
-              on={!!settings.knowledgeFolderFocus}
-              onToggle={() => updateSettings('knowledgeFolderFocus', !settings.knowledgeFolderFocus)}
-            />
-          ) : null,
+          outlineMode ? (
+            <button
+              onClick={() => setManualFeed(true)}
+              data-tip="返回笔记列表" aria-label="返回笔记列表"
+              data-wb="kbFeedBackBtn"
+              className="shrink-0 rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              <List {...SIDEBAR_HEADER_ICON} />
+            </button>
+          ) : (
+            <>
+              <TreeNewButton items={treeNewItems} onPick={handleTreeNewPick} title="新建笔记 / 主题 / 目录" />
+              <button
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  if (feedView === 'tree') setSortMenuPos({ x: r.left, y: r.bottom + 6 })
+                  else setFeedSortMenuPos({ x: r.left, y: r.bottom + 6 })
+                }}
+                data-tip="排序方式"
+                aria-label="排序方式"
+                data-wb="kbTreeSortBtn"
+                className={`rounded p-1 transition-colors ${sortMenuPos || feedSortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+              >
+                {(feedView === 'tree'
+                  ? (treeSort === 'name-desc' || treeSort === 'mtime-desc')
+                  : feedSort === 'title')
+                  ? <ArrowDownNarrowWide {...SIDEBAR_HEADER_ICON} />
+                  : <ArrowUpNarrowWide {...SIDEBAR_HEADER_ICON} />}
+              </button>
+              {feedView === 'tree' ? (
+                <TreeExpandButton
+                  expanded={treeSubtreeExpanded}
+                  onClick={toggleTreeSubtree}
+                  dataWb="kbTreeSubtreeBtn"
+                  title={treeSubtreeExpanded
+                    ? (selectedDirRel ? '收起此目录（含子目录）' : '全部关闭')
+                    : (selectedDirRel ? '展开此目录（含子目录）' : '展开全部（含子目录）')}
+                />
+              ) : (
+                <button
+                  onClick={() => { changeFeedView('tree'); if (!treeSubtreeExpanded) toggleTreeSubtree() }}
+                  data-tip="在结构视图中展开全部" aria-label="在结构视图中展开全部"
+                  data-wb="kbTreeSubtreeBtn"
+                  className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <ChevronsUpDown {...SIDEBAR_HEADER_ICON} />
+                </button>
+              )}
+              {feedView === 'tree' ? (
+                <FolderFocusButton
+                  on={!!settings.knowledgeFolderFocus}
+                  onToggle={() => updateSettings('knowledgeFolderFocus', !settings.knowledgeFolderFocus)}
+                />
+              ) : feedView === 'recent' ? (
+                <button
+                  onClick={() => {
+                    if (!focusDirCandidate) {
+                      showToast({ type: 'info', message: '先打开一篇笔记，再按它所在目录聚焦' })
+                      return
+                    }
+                    setFeedFocusDir((prev) => (prev ? null : focusDirCandidate))
+                  }}
+                  data-tip={feedFocusDir ? '取消聚焦' : '聚焦当前笔记所在目录'}
+                  aria-label={feedFocusDir ? '取消聚焦' : '聚焦当前笔记所在目录'}
+                  data-wb="kbFeedFocusBtn"
+                  className={`rounded p-1 transition-colors ${feedFocusDir ? 'bg-[var(--accent)]/[0.11] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                >
+                  <Crosshair {...SIDEBAR_HEADER_ICON} />
+                </button>
+              ) : null}
+            </>
+          ),
           modActionsEl,
         )}
         {sortMenuPos && (
@@ -2426,38 +2712,146 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
             }))}
           />
         )}
+        {feedSortMenuPos && (
+          <FileContextMenu
+            x={feedSortMenuPos.x}
+            y={feedSortMenuPos.y}
+            onClose={() => setFeedSortMenuPos(null)}
+            items={([
+              { key: 'mtime', label: '最近修改' },
+              { key: 'title', label: '标题' },
+            ] as const).map((o) => ({
+              key: o.key,
+              label: o.label,
+              icon: feedSort === o.key ? <Check size={15} /> : <span className="inline-block w-[15px]" />,
+              onSelect: () => {
+                setFeedSort(o.key)
+                updateSettings('knowledgeFeedSort', o.key)
+              },
+            }))}
+          />
+        )}
         {(() => {
           const sidebarInner = (
-          <div className="flex flex-col h-full" style={sidebarItemVars as unknown as React.CSSProperties}>
-            {/* 「笔记」标题行已删（2026-09-19 反馈）：聚焦按钮上移到左栏模块态头部最右（modActionsEl portal），
-                侧栏直接从文件树开始，少占一行 */}
-
-            {/* 文件 | 大纲 切换行（2026-09-19 反馈恢复旧版）：md 页面才有大纲，非 md 激活时禁用并自动回落文件树 */}
-            {(() => {
-              const activeIsMd = !!activePageId && openPageInfos[activePageId]?.fileType === 'md'
-              const tabCls = (on: boolean) =>
-                `flex flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition-colors ${
-                  on ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-                }`
-              return (
-                <div className="mx-1.5 mt-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] p-0.5">
-                  <button onClick={() => setSidebarTab('files')} className={tabCls(sidebarTab === 'files')} data-tip="文件" aria-label="文件">
-                    <FolderTree size={12} /><span>文件</span>
-                  </button>
+          <div
+            className="flex flex-col h-full"
+            style={sidebarItemVars as unknown as React.CSSProperties}
+            data-wb="kbFeedSidebar"
+            data-kb-sidebar-view={outlineMode ? 'outline' : feedView}
+          >
+            {/* 左栏两种形态（v3.27.0，docs/knowledge-feed-topics-plan.md §4.1/§4.4）：
+                · 阅读态自动大纲（md + preview + 用户没手动要列表）；
+                · 否则三视图：最近（笔记流）/ 主题（虚拟集合）/ 结构（复用 VaultTree）。 */}
+            {outlineMode ? (
+              <div className="kb-view-in flex min-h-0 flex-1 flex-col" data-wb="kbOutlineMode">
+                <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] px-2.5 py-1.5">
                   <button
-                    onClick={() => { if (activeIsMd) setSidebarTab('outline') }}
-                    disabled={!activeIsMd}
-                    className={`${tabCls(sidebarTab === 'outline')} ${activeIsMd ? '' : 'cursor-default opacity-40 hover:bg-transparent'}`}
-                    data-tip={activeIsMd ? '大纲' : '大纲（仅 md 页面可用）'} aria-label={activeIsMd ? '大纲' : '大纲（仅 md 页面可用）'}
+                    type="button"
+                    onClick={() => setManualFeed(true)}
+                    data-tip="返回笔记列表" aria-label="返回笔记列表"
+                    className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   >
-                    <ListTree size={12} /><span>大纲</span>
+                    <List size={13} /><span>返回列表</span>
                   </button>
+                  <span className="ml-auto min-w-0 truncate text-[10.5px] text-[var(--text-muted)]">{activePageForOutline?.title || '无标题'}</span>
                 </div>
-              )
-            })()}
-            {/* 文件视图（Phase 2 批次 1，B 方案）：VaultTree = 与编辑区同一份实现；草稿/非 md 暂由编辑器模块兜底打开。
-                2026-09-19：包进「文件 | 大纲」切换——大纲页 = OutlinePanel（embedded），数据走 outlineHeadings（liveContent） */}
-            {sidebarTab === 'files' ? (
+                <OutlinePanel
+                  pageTitle={activePageForOutline?.title || '无标题'}
+                  headings={outlineHeadings}
+                  onBackToFile={() => setManualFeed(true)}
+                  embedded
+                />
+              </div>
+            ) : (
+              <>
+                {/* 搜索（结构视图不渲染：树没有查询入口，不给点了没反应的控件） */}
+                {feedView !== 'tree' && (
+                  <div className="shrink-0 px-2.5 pb-2 pt-2">
+                    <div className="kb-field flex h-[30px] items-center gap-1.5 rounded-lg px-2">
+                      <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
+                      <input
+                        value={feedQuery}
+                        onChange={(e) => setFeedQuery(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Escape') setFeedQuery('') }}
+                        placeholder="搜索笔记"
+                        className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
+                      />
+                      {feedQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setFeedQuery('')}
+                          data-tip="清除" aria-label="清除"
+                          className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {/* 三视图分段（最近 / 主题 / 结构） */}
+                <div className="mx-2.5 mb-2 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-0.5">
+                  {([
+                    { id: 'recent' as const, icon: <Clock size={12} />, label: '最近', n: allPages.length, tip: '按最近修改排序' },
+                    { id: 'topics' as const, icon: <LayoutGrid size={12} />, label: '主题', n: topics.length, tip: '虚拟主题集合（不绑定目录）' },
+                    { id: 'tree' as const, icon: <FolderTree size={12} />, label: '结构', n: treeRootCount, tip: '保留层级的目录结构' },
+                  ]).map((v) => {
+                    const on = feedView === v.id
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => changeFeedView(v.id)}
+                        data-tip={v.tip} aria-label={v.tip}
+                        data-wb={`kbFeedView-${v.id}`}
+                        className={`flex flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition-colors ${
+                          on ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        {v.icon}<span>{v.label}</span>
+                        <span className={`text-[9.5px] tabular-nums ${on ? 'text-[var(--accent)] opacity-70' : 'text-[var(--text-disabled)]'}`}>{v.n}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                {feedFocusDir && feedView === 'recent' && (
+                  <div className="mx-2.5 mb-2 flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--accent)]/30 bg-[var(--accent)]/[0.08] px-2 py-1 text-[10.5px] text-[var(--accent)]">
+                    <Crosshair size={12} />
+                    <span className="min-w-0 flex-1 truncate">聚焦 · {feedFocusDir}</span>
+                    <button type="button" onClick={() => setFeedFocusDir(null)} data-tip="取消聚焦" aria-label="取消聚焦" className="shrink-0 rounded p-0.5 transition-colors hover:bg-[var(--accent)]/10">
+                      <X size={11} />
+                    </button>
+                  </div>
+                )}
+                {feedView === 'recent' ? (
+                  <div className="kb-view-in min-h-0 flex-1 overflow-y-auto">
+                    <NoteFeed
+                      pages={feedPages}
+                      activePageId={homeActive || !!activeTopicId ? null : activePageId}
+                      sort={feedSort}
+                      onOpen={(p) => void handleOpenPage(p.id, { title: p.title, fileType: p.fileType || '' })}
+                      onContextMenu={handlePageContextMenu}
+                    />
+                  </div>
+                ) : feedView === 'topics' ? (
+                  <div className="kb-view-in min-h-0 flex-1 overflow-y-auto">
+                    <TopicWall
+                      topics={topics}
+                      pages={allPages}
+                      unfiled={unfiledList}
+                      creating={topicCreating}
+                      onStartCreate={() => { setTopicPendingAdd(null); setTopicCreating(true) }}
+                      onCancelCreate={() => { setTopicCreating(false); setTopicPendingAdd(null) }}
+                      onCreate={handleCreateTopic}
+                      onOpenTopic={openTopicTab}
+                      onOpenUnfiled={openUnfiledTab}
+                      onOpenPage={(p) => void handleOpenPage(p.id, { title: p.title, fileType: p.fileType || '' })}
+                      onContextMenu={handlePageContextMenu}
+                      onAddMember={handleAddMember}
+                      onRemoveMember={handleRemoveMember}
+                    />
+                  </div>
+                ) : (
               <div className="kb-view-in relative flex flex-1 min-h-0 flex-col">
                 <VaultTree
                   rootRef={treeRef}
@@ -2591,17 +2985,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                   />
                 )}
               </div>
-            ) : (
-              /* 大纲页：OutlinePanel embedded（标题搜索 + 跳转走 outline:go-to-heading，PageEditor 消费） */
-              <div className="kb-view-in flex min-h-0 flex-1 flex-col">
-                <OutlinePanel
-                  pageTitle={activePageForOutline?.title || '无标题'}
-                  headings={outlineHeadings}
-                  onBackToFile={() => setSidebarTab('files')}
-                  embedded
-                />
-              </div>
-            )}
+                )}
             {/* 侧边栏底部：错题本 / 收藏 + 插件视图入口（Phase 2 批次 1 收尾：文件视图下常驻）。
                 ⚠️ 必须整体受控（2026-09-21 反馈「左侧栏底部有两根短横线」）：本块是无条件渲染的，
                 而它的两个子项当前都为空（QUIZ_ENTRY_ENABLED=false 收起错题本入口；无插件声明
@@ -2654,6 +3038,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                 </button>
               </div>
             )}
+              </>
+            )}
           </div>
           )
           return sidebarEl
@@ -2669,7 +3055,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
             : sidebarHosted
               ? null // Workbench 托管但槽未就绪（左栏收起/翻转瞬间）：渲染 null 等槽重挂后 portal，绝不回落内嵌列（同 editor 口径）
               : (
-                <ResizablePanel storageKey="sidebarWidth_knowledgeCat" defaultWidth={240} minWidth={180} maxWidth={400} visible={!graphMode && panelsVisible && showCategoryPanel} initialWidth={sidebarWidths.sidebarWidth_knowledgeCat} onSnapClose={() => setShowCategoryPanel(false)} onSnapOpen={() => { setShowCategoryPanel(true); onSnapOpenSidebar?.() }}>
+                <ResizablePanel storageKey="sidebarWidth_knowledgeCat" defaultWidth={280} minWidth={220} maxWidth={420} visible={!graphMode && panelsVisible && showCategoryPanel} initialWidth={sidebarWidths.sidebarWidth_knowledgeCat} onSnapClose={() => setShowCategoryPanel(false)} onSnapOpen={() => { setShowCategoryPanel(true); onSnapOpenSidebar?.() }}>
                   {sidebarInner}
                 </ResizablePanel>
               )
@@ -2687,12 +3073,42 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
               onOpenInReader={(id) => void openPageInReader(id)}
               sidebarEl={sidebarEl}
             />
+          ) : activeTopicId ? (
+            <TopicDetail
+              topic={activeTopic}
+              pages={activeTopicPages}
+              onOpenPage={(p) => void handleOpenPage(p.id, { title: p.title, fileType: p.fileType || '' })}
+              onContextMenu={handlePageContextMenu}
+              onRemoveMember={(pageId) => { if (activeTopic) void handleRemoveMember(activeTopic.id, pageId) }}
+              onRename={handleRenameTopic}
+              onDelete={handleDeleteTopic}
+              onGoTopics={() => changeFeedView('topics')}
+            />
+          ) : (homeActive || !activePageId) ? (
+            <NoteHome
+              pages={allPages}
+              topics={topics}
+              lastPageId={activePageId}
+              onOpenPage={(p) => void handleOpenPage(p.id, { title: p.title, fileType: p.fileType || '' })}
+              onOpenTopic={openTopicTab}
+              onOpenUnfiled={openUnfiledTab}
+              onSetView={(view) => changeFeedView(view)}
+              onNewNote={() => handleTreeNewPick('knowledge')}
+              onNewTopic={() => openTopicCreate()}
+              onContextMenu={handlePageContextMenu}
+              onBackToWorkbench={onBackToWorkbench}
+            />
           ) : activePageId ? (
             <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载编辑器…</div>}>
               <PageEditor
                 pageId={activePageId}
                 categories={categories}
                 allPages={allPages}
+                topics={topics}
+                onOpenTopic={(id) => {
+                  const t = topics.find((x) => x.id === id)
+                  if (t) openTopicTab(t)
+                }}
                 onBack={handleBackToList}
                 onDeleted={() => handlePageDeleted(activePageId)}
                 onNavigate={handleOpenPage}
@@ -2704,6 +3120,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                 onMarkDirty={handleMarkDirty}
                 onClearDirty={handleClearDirty}
                 onRequestReading={enterReading}
+                /* v3.27.0：阅读态上报 → 左栏自动切大纲 */
+                onPreviewChange={(v) => setActivePreview((prev) => (prev === v ? prev : v))}
                 vaultMode={true} // R6 D9 后恒 vault
                 onOpenInEditor={() => handleOpenInEditor(activePageId)}
                 draftRelPath={activePageId.startsWith('draft:') ? activePageId.slice(6) : undefined}
@@ -2727,28 +3145,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                 onExportPdfRequest={exportActivePdf}
               />
             </Suspense>
-          ) : (
-            /* 无活动页面的空态（2026-09-19 反馈：只留图标，不要文字说明）。
-               2026-10-13 补「回工作台」入口：本模块是 PAGE_OWNED（无页面时**页面条上不出现条目**），
-               于是「关掉最后一个页面」之后页面条为空、左上角「工作台」按钮在工作台内模块态又是幂等
-               no-op（ActivityBar 的 `if (!inWorkbench)`）⇒ **这个状态没有任何鼠标路径回总空态**
-               （实测于 devbridge：点「工作台」画面零变化）。那三条快捷指令在总空态里，用户却到不了。
-               按钮即该缺口的唯一出口；不加说明文字（口径不变，只加一个动作）。 */
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[var(--text-muted)]">
-              <FileText size={48} className="opacity-25" />
-              {onBackToWorkbench && (
-                <button
-                  type="button"
-                  onClick={onBackToWorkbench}
-                  data-tip="回到工作台（中间空态，带命令面板 / 快速打开文件 / AI 助手三条快捷指令）" aria-label="回到工作台（中间空态，带命令面板 / 快速打开文件 / AI 助手三条快捷指令）"
-                  className="kb-item-in flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                >
-                  <House size={14} />
-                  <span>回工作台</span>
-                </button>
-              )}
-            </div>
-          )}
+          ) : null}
         </div>
         </div>
         </>
@@ -2788,6 +3185,72 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
           />
         </Suspense>,
         secondaryContentEl,
+      )}
+
+      {/* 笔记右键菜单（v3.27.0）：最近视图 / 主题卡 / 总览共用。核心新增 = 「加入主题…」——
+          这是跨视图整理笔记的唯一入口；拖动只在主题视图内（卡片之间）。 */}
+      {pageMenu && (
+        <FileContextMenu
+          x={pageMenu.x}
+          y={pageMenu.y}
+          onClose={() => setPageMenu(null)}
+          items={(() => {
+            const page = pageMenu.page
+            const inTopic = (topicId: string) =>
+              !!topics.find((t) => t.id === topicId)?.members.some((m) => m.pageId === page.id)
+            const items: FileMenuEntry[] = []
+            items.push({
+              key: 'open', label: '打开', icon: <FileText size={15} />,
+              onSelect: () => { void handleOpenPage(page.id, { title: page.title, fileType: page.fileType || '' }) },
+            })
+            items.push({ separator: true })
+            items.push({
+              key: 'addTopic',
+              label: '加入主题…',
+              icon: <LayoutGrid size={15} />,
+              ...(topics.length
+                ? {
+                    submenu: topics.map((t) => ({
+                      label: `${inTopic(t.id) ? '✓ ' : '　'}${t.name}${inTopic(t.id) ? '（移出）' : ''}`,
+                      onSelect: () => {
+                        if (inTopic(t.id)) void handleRemoveMember(t.id, page.id)
+                        else void handleAddMember(t.id, page.id)
+                      },
+                    })),
+                  }
+                : { disabled: true, note: '还没有主题' }),
+            })
+            items.push({
+              key: 'newTopicAdd', label: '新建主题并加入…', icon: <LayoutGrid size={15} />,
+              onSelect: () => {
+                setTopicPendingAdd(page.id)
+                changeFeedView('topics')
+                setTopicCreating(true)
+              },
+            })
+            items.push({
+              key: 'locate', label: '在结构树中定位', icon: <FolderTree size={15} />,
+              disabled: !page.path,
+              onSelect: () => { if (page.path) handleLocateInTree(page.path) },
+            })
+            items.push({ separator: true })
+            items.push({
+              key: 'delete', label: '删除', icon: <Trash2 size={15} />, danger: true,
+              disabled: !page.path,
+              onSelect: () => {
+                if (!page.path) return
+                void handleTreeDelete({
+                  name: page.title || page.path.split('/').pop() || page.path,
+                  type: 'file',
+                  size: page.sizeBytes ?? 0,
+                  mtime: 0,
+                  relPath: page.path,
+                })
+              },
+            })
+            return items
+          })()}
+        />
       )}
 
       {/* 页签右键菜单：固定/取消固定 + 关闭族。

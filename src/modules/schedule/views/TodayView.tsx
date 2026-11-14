@@ -195,7 +195,7 @@ export function TodayView({ today, tasks, tags, workflows, focusSignal, onOpenTa
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') void addTask() }}
             placeholder="添加任务，支持 #标签、1h、截止 18:00"
-            className="min-w-0 flex-1 bg-transparent text-[12.5px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)]"
+            className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
           />
           {input.trim() && (
             <button onClick={() => void addTask()} disabled={busy} className="shrink-0 rounded bg-[var(--accent)] px-2 py-0.5 text-[11px] text-white disabled:opacity-40">

@@ -85,7 +85,7 @@ export function NumberField({
             }}
             onFocus={e => e.target.select()}
             spellCheck={false}
-            className="w-14 px-1 py-1 text-center text-[13px] tabular-nums bg-transparent outline-none text-[var(--text-primary)]"
+            className="kb-field-control w-14 px-1 py-1 text-center text-[13px] tabular-nums text-[var(--text-primary)]"
             aria-label="数值输入"
           />
           <button

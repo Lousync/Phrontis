@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react'
-import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop, Tag, Download, AlertTriangle } from 'lucide-react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop, Tag, Download, AlertTriangle, LayoutGrid } from 'lucide-react'
+import { topicColorOf, topicsOfPage } from '../topicsPure'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -8,7 +9,7 @@ import { extractQuizzes, duplicateQuizNos, type QuizItem } from '../../../compon
 import { QuizRecordContext, useQuizRecordStore, useQuizSummary, type QuizRecordStore } from '../../../components/shared/QuizRecordStore'
 import { QuizSheetBar } from '../../../components/shared/QuizSheetBar'
 import { QuizReviewPane } from '../../../components/shared/QuizReviewPane'
-import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem } from '../../../types'
+import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem, KnowledgeTopic } from '../../../types'
 import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, resolveAttachmentRel, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem, quizRecordMigratePageId } from '../../../lib/ipc'
 import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId, bumpFrontmatterUpdated } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
@@ -190,6 +191,12 @@ interface Props {
   onClearDirty?: (pageId?: string) => void
   /** 请求进入沉浸阅读模式（由父级切换布局） */
   onRequestReading?: () => void
+  /** 阅读态变化（v3.27.0 笔记流）：模块层据此把左栏自动切到大纲。
+   *  只在**主栏实例**传 —— 副栏阅读态不该左右主栏的左栏。 */
+  onPreviewChange?: (preview: boolean) => void
+  /** v3.27.0：本页所属的虚拟主题（阅读态标题下显示 chip；点击打开主题详情） */
+  topics?: KnowledgeTopic[]
+  onOpenTopic?: (topicId: string) => void
   /** 仓库读源模式：正文走就地编辑（vault 写路径，Phase 1）；「在编辑器模块中打开」保留为次入口 */
   vaultMode?: boolean
   onOpenInEditor?: () => void
@@ -261,7 +268,7 @@ function WrongRedoMenuItem({ quizzes, store, onReview }: {
   )
 }
 
-export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false, onExportPdfRequest }: Props) {
+export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, onPreviewChange, topics, onOpenTopic, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false, onExportPdfRequest }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
@@ -334,6 +341,11 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
   useEffect(() => { setShowRename(false); setShowMove(false); setShowProps(false); setLoadMiss(null) }, [pageId])
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
+  // 阅读态上报（v3.27.0 笔记流）：模块层据此把左栏自动切成大纲。
+  // 用 ref 存回调、只依赖 preview —— 父级传内联箭头也不会让本 effect 每次渲染重跑。
+  const onPreviewChangeRef = useRef(onPreviewChange)
+  onPreviewChangeRef.current = onPreviewChange
+  useEffect(() => { onPreviewChangeRef.current?.(preview) }, [preview])
   // startInEdit 的 ref 镜像：loadPage（useCallback 依赖不含该 prop）在 effect 里读最新值
   const startInEditRef = useRef(startInEdit)
   startInEditRef.current = startInEdit
@@ -1132,6 +1144,8 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
 
   /** 已知页面标题集合（供预览区分空链接） */
   const knownWikiTitles = useMemo(() => new Set(allPages.map(p => p.title)), [allPages])
+  /** 本页所属虚拟主题（v3.27.0）：阅读态标题下显示 chip，点击打开主题详情 */
+  const pageTopics = useMemo(() => (topics ? topicsOfPage(pageId, topics) : []), [topics, pageId])
 
   /** 引用（出链）：从当前页正文解析 `[[…]]`（去重保序），按 allPages 标题 resolve → 可跳 / 未解析 */
   const outgoing = useMemo(() => {
@@ -2302,6 +2316,23 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
           <div ref={previewRef} className="flex-1 overflow-y-auto px-6 pb-6 pt-14">
             <QuizRecordContext.Provider value={quizStore}>
             <h1 className="text-xl font-bold text-[var(--text-primary)] mb-3">{title}</h1>
+            {pageTopics.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-1.5" data-wb="peTopicChips">
+                {pageTopics.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => onOpenTopic?.(t.id)}
+                    data-tip={`打开主题「${t.name}」`}
+                    aria-label={`打开主题「${t.name}」`}
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
+                  >
+                    <LayoutGrid size={10} style={{ color: topicColorOf(t.color) }} />
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            )}
             {quizReview ? (
               <QuizReviewPane quizzes={reviewQuizzes} onExit={() => setQuizReview(false)} />
             ) : (

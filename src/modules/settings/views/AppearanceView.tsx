@@ -329,8 +329,8 @@ export function AppearanceView() {
       </div>
 
       <div className="mb-8" data-setting-anchor="appearance.knowledgeSidebarItemSize">
-        <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">知识库侧边栏条目</h3>
-        <p className="text-[11px] text-[var(--text-muted)] mb-3">知识库侧边栏树形条目（空间/笔记本/章节/页面）的行高与字号；标准档保持默认外观。</p>
+        <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">笔记侧栏条目</h3>
+        <p className="text-[11px] text-[var(--text-muted)] mb-3">最近 / 主题 / 结构三个视图通用的行高与字号；标准档保持默认外观。</p>
         <div className="flex gap-1.5 max-w-xs">
           {KNOWLEDGE_SIDEBAR_SIZE_OPTIONS.map(ks => (
             <button

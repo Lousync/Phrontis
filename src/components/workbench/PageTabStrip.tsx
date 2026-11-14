@@ -1,5 +1,5 @@
 import { Fragment, useState, useCallback } from 'react'
-import { X, Pin, PenLine, BookOpen } from 'lucide-react'
+import { X, Pin, PenLine, BookOpen, House, LayoutGrid } from 'lucide-react'
 import { getFileTypeInfo } from '../../lib/fileTypes'
 import { useStripScroll, StripEdges } from './useStripScroll'
 
@@ -32,6 +32,17 @@ export interface StripItem {
   pinned?: boolean
   /** 类型角标（如 PAGE / MD） */
   badge?: string
+  /**
+   * 条目种类（v3.27.0 笔记流）：
+   *  - page（缺省）= 普通页面标签，行为与历史一致；
+   *  - home = 总览固定标签（恒第一位、不可关闭、不可拖拽、不参与重排）；
+   *  - topic = 主题详情临时标签（不可固定、不参与分屏）。
+   */
+  kind?: 'page' | 'home' | 'topic'
+  /** false = 不渲染关闭/固定按钮（home 用） */
+  closable?: boolean
+  /** 主题色（kind='topic' 时给图标上色；CSS 颜色值） */
+  accent?: string
 }
 
 interface Props {
@@ -169,11 +180,11 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
               data-pb-owner={owner}
               data-wb-active={isActive ? '1' : '0'}
               {...{ [itemAttr]: it.id }}
-              draggable={canDrag}
+              draggable={canDrag && it.closable !== false}
               onClick={() => onSelect(it.id)}
-              onDoubleClick={onTogglePin ? () => onTogglePin(it.id) : undefined}
+              onDoubleClick={onTogglePin && it.closable !== false ? () => onTogglePin(it.id) : undefined}
               onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
-              onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(it.id) } }}
+              onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); if (it.closable !== false) onClose(it.id) } }}
               onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, it.id) } : undefined}
               onDragStart={canDrag ? (e) => handleDragStart(e, it.id) : undefined}
               onDragEnd={canDrag ? handleDragEnd : undefined}
@@ -189,8 +200,12 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
                   : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
               }`}
             >
-              <span className="shrink-0" style={{ color: OWNER_COLOR[owner] }}>
-                {owner === 'editor' ? <PenLine size={13} /> : <BookOpen size={13} />}
+              <span className="shrink-0" style={{ color: it.kind === 'topic' ? (it.accent || OWNER_COLOR[owner]) : OWNER_COLOR[owner] }}>
+                {it.kind === 'home'
+                  ? <House size={13} />
+                  : it.kind === 'topic'
+                    ? <LayoutGrid size={13} />
+                    : owner === 'editor' ? <PenLine size={13} /> : <BookOpen size={13} />}
               </span>
               <span className={`truncate ${it.preview ? 'italic' : ''} ${it.missing ? 'line-through' : ''}`}>{it.title}</span>
               {it.dirty && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
@@ -199,7 +214,7 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
                   {fi.badge}
                 </span>
               )}
-              {onTogglePin && (
+              {onTogglePin && it.closable !== false && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onTogglePin(it.id) }}
                   onDoubleClick={(e) => e.stopPropagation()}
@@ -214,17 +229,19 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
                   <Pin size={11} className={it.pinned ? 'fill-current' : undefined} />
                 </button>
               )}
-              <button
-                onClick={(e) => { e.stopPropagation(); onClose(it.id) }}
-                onDoubleClick={(e) => e.stopPropagation()}
-                className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
-                  isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                }`}
-                data-tip="关闭（中键点击也可）"
-                aria-label="关闭（中键点击也可）"
-              >
-                <X size={13} />
-              </button>
+              {it.closable !== false && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onClose(it.id) }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
+                    isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                  data-tip="关闭（中键点击也可）"
+                  aria-label="关闭（中键点击也可）"
+                >
+                  <X size={13} />
+                </button>
+              )}
             </div>
             </Fragment>
           )

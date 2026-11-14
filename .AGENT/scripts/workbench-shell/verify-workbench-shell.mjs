@@ -506,8 +506,8 @@ ok(/data-wb-active=\{isActive \? '1' : '0'\}/.test(srcStrip),
 ok(/data-wb-active=\{isActive \? '1' : '0'\}/.test(srcPageBar)
   && /data-wb-active=\{quizEntryActive \? '1' : '0'\}/.test(srcPageBar),
   'F13b WorkbenchPageBar 两个渲染点都写 data-wb-active（模块条目 + 错题本合成条目）')
-ok(/activeId=\{!isActive \|\| showQuizCollection \? null : activePageId\}/.test(srcKnowledge),
-  'F14 知识库页签组激活态并入「模块是否前台」（切走后归零，不再让零散页面看着像打开）')
+ok(/activeId=\{!isActive \|\| showQuizCollection[\s\S]{0,260}?topicTabId\(activeTopicId\)[\s\S]{0,160}?HOME_TAB_ID : activePageId\}/.test(srcKnowledge),
+  'F14 知识库页签组激活态并入「模块是否前台」（切走后归零）+ v3.27.0 总览 / 主题标签激活判定')
 ok(!/activeId=\{showQuizCollection \? null : activePageId\}/.test(srcKnowledge),
   'F14b 负向：旧的「只看模块内部 activePageId」写法已移除')
 
@@ -691,8 +691,8 @@ ok(!/deletionClearRef/.test(srcKnowledge) && !/prevPageCountRef/.test(srcKnowled
   'L1 知识库不再持有「清零即关模块标签」机制（deletionClearRef / prevPageCountRef / onRequestCloseTab 全无）')
 ok(!/onRequestCloseTab/.test(srcApp),
   'L2 App 不再向知识库传 onRequestCloseTab（负向：自动关标签通道已断）')
-ok(/activePageId \? \(/.test(srcKnowledge) && /<FileText size=\{48\}/.test(srcKnowledge),
-  'L3 无活动页时仍走空态占位（模块标签与左栏保留，中间显空态，可继续从树开文件）')
+ok(/activeTopicId \? \(/.test(srcKnowledge) && /<NoteHome/.test(srcKnowledge),
+  'L3 无活动页 / 总览态渲染 NoteHome（固定总览标签，模块标签与左栏保留，可继续从树开文件）')
 
 // ===== M. 看板「返回」落顶层（看板方案 §5 反馈 1，2026-09-27）=====
 // 缺陷面：onBack 写死 setRailModule('knowledge') + handleTabChange('knowledge') —— 回工作台落在

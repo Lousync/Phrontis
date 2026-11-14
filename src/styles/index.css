@@ -389,6 +389,29 @@ input:focus, textarea:focus, select:focus {
   border-color: var(--accent);
 }
 
+/* ===== 组合输入框：外壳画框，内部控件不画（docs/input-field-pattern.md）=====
+   典型形态 = 图标 / 前缀 + 输入控件 + 清除按钮。全局 `input` 自带 1px 边框，
+   若外壳已经有边框，内部控件必须用 `.kb-field-control` 把边框 / 背景 / 圆角归零，
+   否则就会出现「框中框」细线（2026-11-14 用户报障）。
+   ★ 焦点态只画在外壳上（:focus-within），内部控件不允许再有自己的 focus 边框。 */
+.kb-field {
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  transition: border-color var(--dur-std) var(--ease-kb), box-shadow var(--dur-std) var(--ease-kb);
+}
+.kb-field:focus-within {
+  border-color: var(--accent);
+}
+.kb-field-control,
+.kb-field-control:focus,
+.kb-field-control:hover {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
 /* 允许文本选中的区域 */
 .monaco-editor,
 .monaco-editor *,

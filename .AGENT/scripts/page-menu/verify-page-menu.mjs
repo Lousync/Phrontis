@@ -129,7 +129,7 @@ check('rootId 传本组件手里的仓库 id（拿不到时由 DirPicker 自己�
 
 console.log('\n§5 在文件列表中显示当前文件')
 
-check('切到文件视图（左栏还停在大纲页时否则什么也看不到）', /setSidebarTab\('files'\)/.test(MOD))
+check('切到结构视图（左栏还停在大纲 / 笔记流时否则什么也看不到）', /setFeedView\('tree'\)/.test(MOD))
 check('展开全部祖先目录', /const dirs = \[''\]/.test(MOD) && /setExpandedDirs\(prev => new Set\(\[\.\.\.prev, \.\.\.dirs\]\)\)/.test(MOD))
 check('按行锚点滚进视野（树组件本身不改）',
   /querySelector<HTMLElement>\(`\[data-wb-tree-path="\$\{CSS\.escape\(rel\)\}"\]`\)/.test(MOD)
