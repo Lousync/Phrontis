@@ -68,7 +68,7 @@ function PermRow({ icon, label, hint, ctl, active }: {
 export function AiPermissionsTab() {
   const { s, update } = useSettings()
   const perms = parsePerms(s.aiModulePermissions ?? '{}')
-  // v3.17.0 背单词暂不开放：权限行一并收起；MODULES 仍保留，3.18.0 由总闸恢复
+  // v3.17.0 背单词暂不开放：权限行一并收起；MODULES 仍保留，适配完成后由总闸恢复
   const visibleModules = VOCAB_ENTRY_ENABLED ? MODULES : MODULES.filter(m => m.id !== 'vocab')
   const anyWrite = MODULES.some(m => perms[m.id] === 'write') || s.aiVaultFilePerm === 'write'
   const vaultPerm: Perm = s.aiVaultFilePerm === 'off' || s.aiVaultFilePerm === 'read' || s.aiVaultFilePerm === 'write' ? s.aiVaultFilePerm : 'read'
