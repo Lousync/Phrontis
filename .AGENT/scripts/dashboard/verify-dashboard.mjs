@@ -1,15 +1,13 @@
-// 契约验证：看板模块（P7，2026-09-27）
+// 契约验证：看板首页「今日纸」（2026-11-14 重做）
 //
 // 为什么需要它：这条链路上有三处**会静默出错**的地方 ——
-//   ① 热力图「周一起排」的补位数算错 → 星期标签与格子错行（原型里真踩过：
-//      标签写「一」的那行其实是周日）。不报错，只有人眼能看出来。
-//   ② 卡片注册表（cards.tsx）与 settings.ts 里 `dashboardCards` 的默认值各写一份 →
-//      改了注册表忘了改默认值，表现为「新卡片默认不显示」或「关掉的卡片又回来了」。
-//   ③ 过渡编排的延迟只写在注释里没接上线 → 两侧栏根本不会延迟弹出，
-//      而这条**纯静态看不出来**（要运行期才判得出），所以这里至少钉住「接线在」。
+//   ① 时间线「现在」插在哪一行、逾期怎么判 —— 差一行只有人眼能看出来，不报错；
+//   ② 月历 42 格的周一起排补位、热力图 52 列的区间对齐 —— 差一天就是「日期和格子对不上」；
+//   ③ 结构重做最容易漏的接线：图标条顶部三枚 / 启动落看板 / 看板吃 openTabs / 书签里撤掉看板。
+//      漏一处不报错，表象只是「某个入口点了没反应」。
 //
-// 所以本脚本**切片真实实现**（src/modules/dashboard/heatmapModel.ts，零依赖纯函数），
-// 不照抄算法；其余用源码探针断言（负向一律先剥注释）。
+// 所以本脚本**切片真实实现**（summary.ts / heatmapModel.ts，都是零依赖纯函数），
+// 不照抄算法；接线部分用源码探针断言（负向一律先剥注释）。
 //
 // 运行（项目根目录）：
 //   node --experimental-strip-types --no-warnings .AGENT/scripts/dashboard/verify-dashboard.mjs
@@ -22,6 +20,10 @@ import { stripComments } from '../shared/strip-comments.mjs'
 import {
   buildHeatmap, levelOf, dayNo, keyOfNo, fmtMinutes, LEVEL_MIN,
 } from '../../../src/modules/dashboard/heatmapModel.ts'
+import {
+  verdictParts, verdictText, orderTimeline, buildMonthGrid, heatRange, dateLine, monthHead,
+} from '../../../src/modules/dashboard/summary.ts'
+
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..', '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf-8')
@@ -36,285 +38,196 @@ function eq(name, actual, expected) {
   ok(name, a === e, a === e ? '' : `实际 ${a} ≠ 期望 ${e}`)
 }
 
-/* ================= A. 热力图纯函数 ================= */
+/* ================= A. 热力图区间与分档（沿用 2026-09-27 的纯函数） ================= */
 
 eq('A1 无记录 → 0 档', levelOf(0), 0)
-eq('A2 负数 / NaN 一律 0 档（不抛错）', [levelOf(-5), levelOf(NaN)], [0, 0])
-ok('A3 分档单调不减', (() => {
+eq('A2 阈值边界：刚好到第 2 档下界', levelOf(LEVEL_MIN[2]), 2)
+eq('A3 阈值边界：差一分钟仍在第 1 档', levelOf(LEVEL_MIN[2] - 1), 1)
+ok('A4 分档单调不减', (() => {
   let prev = -1
   for (let m = 0; m <= 600; m += 5) { const l = levelOf(m); if (l < prev) return false; prev = l }
   return true
 })())
-eq('A4 阈值边界：刚好到第 2 档下界', levelOf(LEVEL_MIN[2]), 2)
-eq('A5 阈值边界：差一分钟仍在第 1 档', levelOf(LEVEL_MIN[2] - 1), 1)
+eq('A5 dayNo / keyOfNo 往返', keyOfNo(dayNo('2026-06-01')), '2026-06-01')
+eq('A6 周一起始 → 不补位', buildHeatmap({}, '2026-06-01', '2026-06-07').pad, 0)
+eq('A7 fmtMinutes 口径参数', fmtMinutes(45, '专注'), '专注 45 分钟')
 
-eq('A6 dayNo 相邻差 1', dayNo('2026-06-02') - dayNo('2026-06-01'), 1)
-ok('A7 dayNo 畸形返回 NaN', Number.isNaN(dayNo('2026-6-1')))
-eq('A8 keyOfNo 往返一致', keyOfNo(dayNo('2026-06-01')), '2026-06-01')
+/* ================= B. 一句话结论 ================= */
 
-// 2026-06-01 是周一（算过：2026-01-01 周四，6/1 是年内第 152 天）
+eq('B1 0 件 → 「都做完了」整句替换', verdictText({ openCount: 0, lateCount: 0, nextAt: null }), '今天的事都做完了，只剩打卡。')
+eq('B2 有逾期 + 下一件', verdictText({ openCount: 3, lateCount: 1, nextAt: '14:00' }), '还有 3 件事，其中 1 件已经过了时间，最近一件 14:00。')
+eq('B3 没有逾期时不提「过了时间」', verdictText({ openCount: 2, lateCount: 0, nextAt: '09:30' }), '还有 2 件事，最近一件 09:30。')
+eq('B4 没排时间的任务不提时刻', verdictText({ openCount: 1, lateCount: 0, nextAt: null }), '还有 1 件事。')
+ok('B5 数字片段带 strong（渲染加重）', verdictParts({ openCount: 3, lateCount: 1, nextAt: null }).filter((p) => p.strong).map((p) => p.text).join(',') === '3,1')
+
+/* ================= C. 今天的时间线 ================= */
+
+const T = (id, time, done = false) => ({ id, title: id, time, done })
 {
-  const m = buildHeatmap({}, '2026-06-01', '2026-06-07')
-  eq('A9 周一起始 → 不补位', m.pad, 0)
-  eq('A10 整一周 → 1 列', m.weeks, 1)
-  eq('A11 格子数 = 补位 + 天数', m.cells.length, 7)
-  eq('A12 首格就是起始日', m.cells[0]?.key, '2026-06-01')
+  const m = orderTimeline([T('a', '09:30'), T('b', '14:00'), T('c', null), T('d', '11:00')], '12:00')
+  eq('C1 有时间的按时刻升序、没时间的排最后', m.rows.map((r) => r.id), ['a', 'd', 'b', 'c'])
+  eq('C2 「现在」插在第一个未到时刻之前', m.nowIndex, 2)
+  eq('C3 未完成件数含无时间的', m.openCount, 4)
+  eq('C4 已过时间只算未完成', m.lateCount, 2)
+  eq('C5 下一件 = 第一个未到时刻', m.nextAt, '14:00')
 }
 {
-  const m = buildHeatmap({}, '2026-06-02', '2026-06-07') // 周二起
-  eq('A13 周二起始 → 补 1 位（周一起排的关键）', m.pad, 1)
-  eq('A14 补位处是空格（null）', m.cells[0], null)
-  eq('A15 补位后第一格才是起始日', m.cells[1]?.key, '2026-06-02')
+  const m = orderTimeline([T('a', '09:30', true), T('b', '10:00')], '12:00')
+  eq('C6 已完成的条目保留在列表里（画划线态）', m.rows.length, 2)
+  eq('C7 已完成不计入「还有几件」', m.openCount, 1)
+  eq('C8 已完成不判逾期', m.rows[0].late, false)
+  eq('C9 全部过了时间 → 「现在」落到末尾', m.nowIndex, 2)
 }
 {
-  const m = buildHeatmap({}, '2026-06-07', '2026-06-07') // 周日单天
-  eq('A16 周日起始 → 补 6 位', m.pad, 6)
-  eq('A17 单天也占满 1 列', m.weeks, 1)
+  const m = orderTimeline([], '08:00')
+  eq('C10 空列表 → 0 件 / 现在在首个位置', [m.rows.length, m.nowIndex, m.openCount], [0, 0, 0])
 }
 {
-  const days = { '2026-06-01': 120, '2026-06-02': 0, '2026-06-03': 400 }
-  const m = buildHeatmap(days, '2026-06-01', '2026-06-07')
-  eq('A18 分钟数原样带出（分档在渲染层，模型只给事实）', m.cells.map((c) => c?.minutes), [120, 0, 400, 0, 0, 0, 0])
-  eq('A19 分档由模型算好', m.cells.map((c) => c?.level), [2, 0, 4, 0, 0, 0, 0])
-  eq('A20 有记录天数只数 >0 的', m.activeDays, 2)
-  eq('A21 总分钟数求和', m.totalMinutes, 520)
-}
-{
-  const m = buildHeatmap({}, '2026-06-07', '2026-06-01') // 逆序
-  eq('A22 逆序区间 → 空模型（不抛错）', [m.weeks, m.cells.length], [0, 0])
-}
-eq('A23 fmtMinutes 不足一小时', fmtMinutes(45), '使用 45 分钟')
-eq('A24 fmtMinutes 跨小时', fmtMinutes(135), '使用 2 小时 15 分')
-eq('A25 fmtMinutes 零', fmtMinutes(0), '没有记录')
-
-// 跨月：月份标签必须有两条，且列号递增
-{
-  const m = buildHeatmap({}, '2026-06-29', '2026-07-05') // 周一 6/29 → 周日 7/5
-  eq('A26 跨月产生两个月标签', m.months.map((x) => x.label), ['6 月', '7 月'])
-  ok('A27 月份标签列号递增且不越界',
-    m.months[0].start <= m.months[1].start && m.months.every((x) => x.start >= 1 && x.start + x.span - 1 <= m.weeks))
+  const m = orderTimeline([T('a', '12:00')], '12:00')
+  eq('C11 时刻正好等于现在 → 不算逾期、插在它之前', [m.rows[0].late, m.nowIndex], [false, 0])
 }
 
-/* ================= B. 卡片注册表 ↔ settings 默认值同源 ================= */
+/* ================= D. 月历 42 格 ================= */
 
 {
-  const cards = read('src/modules/dashboard/cards.tsx')
-  const settings = stripComments(read('src/lib/settings.ts'))
-  // 抠注册表里的 id 与 defaultOn。注意图标名带数字（CalendarCheck2），字符类别漏数字
-  const entries = [...cards.matchAll(/id:\s*'([a-zA-Z]+)',\s*label:\s*'[^']*',\s*group:\s*'[a-z]+',\s*Icon:\s*[A-Za-z][A-Za-z0-9]*,\s*defaultOn:\s*(true|false)/g)]
-    .map((m) => ({ id: m[1], on: m[2] === 'true' }))
-  ok('B1 能抠到卡片注册表条目（结构变了脚本要跟着改）', entries.length > 0, `实得 ${entries.length} 条`)
-  const ids = entries.map((e) => e.id)
-  eq('B2 卡片 id 无重复', new Set(ids).size, ids.length)
-  const onIds = entries.filter((e) => e.on).map((e) => e.id)
+  // 2026-11-01 是周日 → 周一起排要空 6 格
+  const g = buildMonthGrid('2026-11')
+  eq('D1 固定 42 格', g.length, 42)
+  eq('D2 2026-11 前 6 格为月外（1 日是周日）', g.slice(0, 7), [null, null, null, null, null, null, '2026-11-01'])
+  eq('D3 月内日期连续到 30 号', [g[6], g[35], g[36]], ['2026-11-01', '2026-11-30', null])
+  eq('D4 2026-02（28 天）不越界', buildMonthGrid('2026-02').filter(Boolean).length, 28)
+  eq('D5 2028-02（闰年）29 天', buildMonthGrid('2028-02').filter(Boolean).length, 29)
+  eq('D6 畸形输入 → 空数组（不抛错）', buildMonthGrid('2026-13'), [])
+}
+eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月', year: '2026' })
 
-  const def = settings.match(/dashboardCards:\s*\{\s*default:\s*'([^']*)'/)
-  ok('B3 settings.dashboardCards 存在且有默认值', !!def)
-  if (def) {
-    let parsed = null
-    try { parsed = JSON.parse(def[1].replace(/\\"/g, '"')) } catch { /* 交给下面的断言报错 */ }
-    eq('B4 settings 默认值 = 注册表里 defaultOn 的集合（改一处忘另一处会在这里红）', parsed, onIds)
-  }
+/* ================= E. 热力图区间 ================= */
 
-  // B5（看板方案 §5 反馈 4①，2026-09-27 改口径）：错题卡移除，首批默认 6 → 5 张
-  ok('B5 首批默认 5 张（反馈 4① 删错题卡后的量）', onIds.length === 5, `实得 ${onIds.length}`)
-  ok('B5b 负向：错题卡已从注册表移除（快照不再为其取数）', !ids.includes('quiz'))
-  ok('B6 卡片总数 ≥ 首批数', ids.length >= onIds.length)
-  ok('B7 dashboardBg 默认值在 CARD_BG_OPTIONS 里', (() => {
-    const bg = settings.match(/dashboardBg:\s*\{\s*default:\s*'([a-z]+)'/)
-    const opts = [...cards.matchAll(/\{\s*id:\s*'(none|tint|mark|glow)',\s*label:/g)].map((m) => m[1])
-    return !!bg && opts.includes(bg[1])
-  })())
+{
+  // 2026-11-14 是周六（今天）
+  const r = heatRange('2026-11-14')
+  eq('E1 起点是「今天所在周的周一」往回 51 周', r.from, '2025-11-17')
+  eq('E2 终点 = 今天', r.to, '2026-11-14')
+  const m = buildHeatmap({}, r.from, r.to)
+  eq('E3 区间正好 52 列（首列从周一开始，不补位）', m.weeks, 52)
+  eq('E4 补位 0', m.pad, 0)
+  ok('E5 列数恒为 52（换一个今天也一样）', buildHeatmap({}, ...Object.values(heatRange('2026-03-02'))).weeks === 52)
+  // 去重键必须是「年 + 月」：只按月份号去重时，2025-11 会吃掉 2026-11（刻度少一格、上一月被拉长）
+  eq('E6 52 周里 11 月出现两次（跨年不合并）', m.months.filter((x) => x.label === '11 月').length, 2)
+  eq('E7 月份刻度总数 = 13（含首尾不完整月）', m.months.length, 13)
+  ok('E8 刻度列号递增且不越界', m.months.every((x, i) => (i === 0 || x.start > m.months[i - 1].start) && x.start + x.span - 1 <= m.weeks))
 }
 
-/* ================= C. 接线探针（整链贯通） ================= */
+/* ================= F. 快照与主进程聚合 ================= */
 
 {
-  const types = read('src/types/index.ts')
-  const appModules = stripComments(read('src/lib/appModules.ts'))
-  const layout = stripComments(read('src/lib/workbenchLayout.ts'))
-  const leftPanel = stripComments(read('src/components/workbench/WorkbenchLeftPanel.tsx'))
-  const app = stripComments(read('src/App.tsx'))
-  const preload = stripComments(read('electron/preload/index.ts'))
-  const ipc = stripComments(read('src/lib/ipc.ts'))
   const repo = stripComments(read('electron/database/repositories/dashboardRepo.ts'))
+  const types = read('src/types/index.ts')
+  const ipc = stripComments(read('src/lib/ipc.ts'))
+  const preload = stripComments(read('electron/preload/index.ts'))
   const main = stripComments(read('electron/main/index.ts'))
 
-  ok('C1 TabName 含 dashboard', /export type TabName = [^\n]*'dashboard'/.test(types))
-  ok('C2 APP_MODULES 有 dashboard 且三 flag 全 false（入口只在书签）',
-    /id:\s*'dashboard',\s*label:\s*'看板',\s*bar:\s*false,\s*tile:\s*false,\s*palette:\s*false/.test(appModules))
-  ok('C3 dashboard 在 WORKBENCH_TABBAR_EXCLUDED（整窗 + 不产生标签页）',
-    /WORKBENCH_TABBAR_EXCLUDED[^\n]*\[[^\]]*'dashboard'/.test(layout))
-  ok('C4 书签首项是 dashboard', /WORKBENCH_BOOKMARKS[\s\S]{0,260}key:\s*'dashboard'/.test(layout))
-  ok('C5 BOOKMARK_ICONS / BOOKMARK_COLORS 覆盖 dashboard',
-    /BOOKMARK_ICONS[\s\S]*?dashboard:\s*\(s\)/.test(leftPanel) && /dashboard:\s*\{\s*fg:/.test(layout))
-  ok('C6 App.tsx 有 dashboard 渲染分支', /case\s*'dashboard':/.test(app))
-  // C7（看板方案 §5 反馈 1，2026-09-27 改口径）：返回落**顶层（总览态）**，不再写死笔记区 ——
-  // 对齐 closeTab 关激活标签收尾（三态一并落 null）+ handleBackToOverview 的锁定态解锁。
-  ok('C7 返回 = 总览态收尾（activeToolTab / activeTab / railModule 落 null，不落笔记区）',
-    /case\s*'dashboard':[\s\S]{0,400}setActiveTab\(null\)/.test(app)
-    && /case\s*'dashboard':[\s\S]{0,400}setRailModule\(null\)/.test(app)
-    && !/case\s*'dashboard':[\s\S]{0,400}setRailModule\('knowledge'\)/.test(app)
-    && !/case\s*'dashboard':[\s\S]{0,400}handleTabChange\('knowledge'\)/.test(app))
-  ok('C8 preload 暴露 dashboardGetSnapshot', /dashboardGetSnapshot:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('dashboard:getSnapshot'\)/.test(preload))
-  ok('C9 ipc.ts 有 wrapper', /export const dashboardGetSnapshot\s*=/.test(ipc))
-  ok('C10 ElectronAPI 有声明', /dashboardGetSnapshot:\s*\(\)\s*=>\s*Promise<DashboardSnapshot>/.test(types))
-  ok('C11 主进程注册了 handler', /registerDashboardHandlers\(\)/.test(main) && /ipcMain\.handle\('dashboard:getSnapshot'/.test(repo))
+  ok('F1 热力图跨度 = 近一年 364 天', /heatmapDays:\s*364/.test(repo))
+  ok('F2 快照带本月日历（month + days 计数）', /calendar:\s*\{\s*month:\s*string[\s\S]{0,160}days:\s*Record<string,\s*\{\s*total:\s*number;\s*done:\s*number\s*\}>/.test(repo))
+  ok('F3 日历走月视图同一实现（vaultMonthTodos）', /vaultMonthTodos\(month\)/.test(repo))
+  ok('F4 日历只按当月过滤（计划类无日期的行不落任何一天）', /date\.slice\(0,\s*7\) !== month/.test(repo))
+  ok('F4b 日历不计已取消（与「今天 2/6 件」同一口径）', /if \(t\.status === 'canceled'\) continue/.test(repo))
+  ok('F5 课程快照取最近工作区（listWorkspaces 的 lastWorkspaceId）', /listWorkspaces\(getSetting\)/.test(repo) && /lastWorkspaceId/.test(repo))
+  ok('F6 课程快照复用 getCourseState（不新开存储）', /getCourseState\(/.test(repo))
+  ok('F7 课程进度 = 已收尾知识点 / 总数', /done \/ total/.test(repo))
+  ok('F8 今日任务含已完成（时间线要画划线态）', /vaultTodosForDate\(today\)\.filter\(\(t\) => t\.status !== 'canceled'\)/.test(repo))
+  ok('F17 已完成数只数 status=done（已取消既不画也不计入分母）',
+    /doneToday:\s*rows\.filter\(\(t\) => t\.status === 'done'\)\.length/.test(repo)
+    && /totalToday:\s*rows\.length/.test(repo))
+  ok('F9 时间列优先排期时段、其次截止时刻', /scheduled_start/.test(repo) && /T\(\\d\{2\}:\\d\{2\}\)/.test(repo))
+  ok('F10 逐块 try 兜底（一块失败不该让看板打不开）',
+    (repo.match(/catch\s*\(e\)\s*\{\s*console\.warn\('\[dashboard\]/g) || []).length >= 6)
+  ok('F11 快照上限逐个被消费', (() => {
+    const limits = [...repo.matchAll(/^\s{2}([a-zA-Z]+):\s*(\d+),/gm)].map((m) => m[1])
+    return limits.length >= 3 && limits.every((k) => new RegExp(`DASHBOARD_LIMITS\\.${k}`).test(repo))
+  })())
+  ok('F12 类型侧双区同步（DashboardSnapshot 有 calendar / course）',
+    /export interface DashboardSnapshot[\s\S]{0,1600}calendar:\s*\{/.test(types) && /export interface DashboardSnapshot[\s\S]{0,2400}course:\s*null\s*\|/.test(types))
+  ok('F13 主进程注入设置读取器（课程快照要用 getSetting）',
+    /registerDashboardHandlers\(\{\s*getSettingValue:/.test(main) && /registerDashboardHandlers\(deps:/.test(repo))
+  ok('F14 IPC 三处仍在（preload / ipc.ts / handler）',
+    /dashboardGetSnapshot:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('dashboard:getSnapshot'\)/.test(preload)
+    && /export const dashboardGetSnapshot\s*=/.test(ipc)
+    && /ipcMain\.handle\('dashboard:getSnapshot'/.test(repo))
+  ok('F15 负向：快照不再取错题（拿得少）', !/quizRecordStats/.test(repo))
+  ok('F16 负向：跨天逾期不塞进首页时间线（逾期去日程看）', !/vaultOverdueTodos/.test(repo))
 }
 
-/* ================= D. 快照上限真的被消费 ================= */
+/* ================= G. 结构接线（顶层视图） ================= */
 
 {
-  const repo = stripComments(read('electron/database/repositories/dashboardRepo.ts'))
-  const limits = [...repo.matchAll(/^\s{2}([a-zA-Z]+):\s*(\d+),/gm)]
-    .map((m) => ({ key: m[1], val: Number(m[2]) }))
-  ok('D1 能抠到 DASHBOARD_LIMITS（结构变了脚本要跟着改）', limits.length >= 4, `实得 ${limits.length}`)
-  for (const l of limits) {
-    // 每个上限都必须被 slice(0, DASHBOARD_LIMITS.x) 真的用上 —— 防「定义了但没消费」
-    const used = new RegExp(`slice\\(0,\\s*DASHBOARD_LIMITS\\.${l.key}\\)`).test(repo)
-    const usedInRange = new RegExp(`DASHBOARD_LIMITS\\.${l.key}`).test(repo)
-    ok(`D2 上限 ${l.key} 被消费`, used || usedInRange)
-  }
-  ok('D3 热力图跨度是半年（183 天）', /heatmapDays:\s*183/.test(repo))
-  ok('D4 逐块 try 兜底（一张卡失败不该让看板打不开）',
-    (repo.match(/catch\s*\(e\)\s*\{\s*console\.warn\('\[dashboard\]/g) || []).length >= 5)
-  ok('D5 最近编辑走索引而不是全量正文（别把全库 markdown 拉进内存）',
-    /getKnowledgeIndex\(\)\.pages/.test(repo) && !/vaultGetPages/.test(repo))
-  ok('D6 在读书复用 listBooksImpl（与书架同一实现）', /listBooksImpl\(\)/.test(repo))
-}
-
-/* ================= E. 落地后反馈批次接线（看板方案 §5，2026-09-27） ================= */
-
-{
-  const index = stripComments(read('src/modules/dashboard/index.tsx'))
-  const cards = stripComments(read('src/modules/dashboard/cards.tsx'))
-  const repo = stripComments(read('electron/database/repositories/dashboardRepo.ts'))
   const app = stripComments(read('src/App.tsx'))
+  const bar = stripComments(read('src/components/shared/ActivityBar.tsx'))
+  const dash = stripComments(read('src/modules/dashboard/index.tsx'))
+  const layout = stripComments(read('src/lib/workbenchLayout.ts'))
+  const appModules = stripComments(read('src/lib/appModules.ts'))
   const settings = stripComments(read('src/lib/settings.ts'))
-  const css = read('src/styles/index.css')
-  const animPlan = read('docs/ui-animation-plan.md')
 
-  // --- 反馈 4②：今日打卡列表 ---
-  ok('E1 打卡卡消费逐项 items 并可勾选（onToggleHabit 接线在）',
-    /const h = snap\.habit/.test(cards) && /h\.items\.map/.test(cards) && /onToggleHabit\?\.\(it\.id\)/.test(cards))
-  ok('E2 勾选走 toggleHabitCheck + notifyDataChanged(habit)（写完广播，hero 同批刷新）',
-    /toggleHabitCheck\(/.test(index) && /notifyDataChanged\('habit'\)/.test(index))
-  ok('E3 卡内滚动挂 .kb-thin-scroll（悬停才现形）', /kb-thin-scroll/.test(cards))
-  ok('E4 .kb-thin-scroll 基建在场：悬停显 thumb（index.css）+ 文档登记（ui-animation-plan §I）',
-    /\.kb-thin-scroll:hover[^{]*::-webkit-scrollbar-thumb[^{]*\{[^}]*background/.test(css.replace(/\r/g, '')) && /kb-thin-scroll/.test(animPlan))
-  ok('E5 负向：打卡卡不再有 14 日小格 / streak 大数字（hero pill 已有）',
-    !/days14/.test(cards) && !/天连续/.test(cards))
-
-  // --- 反馈 4①：错题卡移除 ---
-  ok('E6 负向：注册表 / 分发 / 组件三处 quiz 已清除',
-    !/id:\s*'quiz'/.test(cards) && !/case 'quiz'/.test(cards) && !/QuizCard/.test(cards))
-  ok('E7 负向：快照不再取错题（拿得少）', !/quizRecordStats/.test(repo) && !/\bquiz:/.test(repo))
-
-  // --- 反馈 4③：「其余」分隔行删除 ---
-  ok('E8 负向：「其余」分隔行已移除', !/其余/.test(index))
-
-  // --- 反馈 2：称呼 ---
-  ok('E9 设置键 dashboardUserName 在场（默认空 = 不带称呼）',
-    /dashboardUserName:\s*\{\s*default:\s*''/.test(settings))
-  ok('E10 问候语消费设置且名字不再写死',
-    /s\.dashboardUserName/.test(index) && !/志岩/.test(index))
-  ok('E11 hero 行内编辑在位（Enter 提交 / Esc 放弃 / 失焦提交）',
-    /commitUserName/.test(index) && /onBlur=\{commitUserName\}/.test(index) && /'Escape'\) setNameEdit\(null\)/.test(index))
-
-  // --- 反馈 5：两个跳转 ---
-  ok('E12 最近编辑走 kb-open-note 统一通道且带 from:\'dashboard\'（返回 chip 白捡 N-4）',
-    /kb-open-note',\s*\{\s*detail:\s*\{\s*relPath,\s*from:\s*'dashboard'\s*\}/.test(index))
-  ok('E13 在读书跳转由 App 接线（onOpenBook），kind 磁盘推导（不信历史数据）',
-    /onOpenBook=\{\(relPath\)/.test(app) && /bookKindOf\(relPath\)/.test(app))
-  ok('E14 负向：书架跳转不做返回看板（拍板：单向）',
-    !/onOpenBook[\s\S]{0,200}noteJumpFrom/.test(app))
-
-  // --- 反馈 3：紧凑档 ---
-  ok('E15 紧凑档钩子在位（视口 <1000 → compact；resize 只翻布尔）',
-    /function useCompactTier[\s\S]{0,400}window\.innerHeight < 1000/.test(index))
-  ok('E16 紧凑档待办限 4 条 + 「去日程」收口（2026-09-28 主卡降维磁贴：逻辑移入 cards.tsx，index 留跳转接线）',
-    /openTodos\.slice\(0, 4\)/.test(cards) && /onJumpSchedule/.test(index))
-  ok('E17 App 侧跳日程接线', /onJumpSchedule=\{\(\) => handleTabChange\('schedule'\)\}/.test(app))
-  ok('E18 紧凑档收口覆盖三卡（打卡 max-h / 使用柱高 / 最近编辑条数）',
-    /compact \? 'max-h-\[111px\]' : 'max-h-\[148px\]'/.test(cards)
-    && /compact \? 'h-\[38px\]' : 'h-\[50px\]'/.test(cards)
-    && /compact \? snap\.recentNotes\.slice\(0, 4\) : snap\.recentNotes/.test(cards))
-
-  // --- 反馈 7：打卡勾选反馈特效（与打卡列表 TodayView 同款） ---
-  ok('E19 勾选炸彩纸（burstConfetti 在勾选圈坐标、习惯色随快照透出）',
-    /burstConfetti\(pos\.x, pos\.y\)/.test(index) && /color:\s*h\.color/.test(repo)
-    && /it\.color \|\| 'var\(--accent\)'/.test(cards))
-  ok('E20 圈体 ck-pop 弹跳 + key 强制重挂（动画可重播）；样式懒注入在挂载时保证',
-    /key=\{it\.done \? 'd' : 'u'\}/.test(cards) && /it\.done \? 'ck-pop' : ''/.test(cards)
-    && /ensureFeedbackStyles\(\)/.test(index))
-
-  // --- 反馈 8：首跳冷挂载竞态（事件改 state+props + openByRelPath 冷态补拉） ---
-  const knowledge = stripComments(read('src/modules/knowledge/index.tsx'))
-  ok('E21 负向：App 不再同步派发 kb-open-note-rel（冷挂载无监听器必丢），改投 pendingOpenRel',
-    !/kb-open-note-rel/.test(app) && /setPendingOpenRel\(\{\s*relPath/.test(app))
-  // 2026-09-29 放宽字面串：`openByRelPath` 后来加了 `{ startInEdit }` 选项（dashboard 首跳带编辑态），
-  // 原断言把它写成 `void openByRelPath(pendingRel.relPath)` 整句匹配 → 加了参数就永远不命中。
-  // 这里改判「消费调用出现在打开调用之前」，保住原意（先消费再打开，防 effect 重跑二次打开）。
-  const consumeAt = knowledge.indexOf('onPendingRelConsumed?.()')
-  const openAt = knowledge.indexOf('openByRelPath(pendingRel.relPath')
-  ok('E22 消费接线：case knowledge 传 pendingRelPath/onPendingRelConsumed，模块侧先消费再打开',
-    /pendingRelPath=\{pendingOpenRel\}/.test(app) && /onPendingRelConsumed=\{consumePendingOpenRel\}/.test(app)
-    && consumeAt >= 0 && openAt >= 0 && consumeAt < openAt)
-  ok('E23 openByRelPath 冷态补拉（allPages 未装载时真实笔记不再误落 draft）',
-    /const fresh = await getKnowledgePages\(\)/.test(knowledge) && /setAllPages\(fresh\)/.test(knowledge))
+  ok('G1 图标条顶部固定三枚：看板 / 工作台 / AI 教学',
+    /data-tip="看板"/.test(bar) && /data-tip="工作台"/.test(bar) && /data-tip="AI 教学"/.test(bar))
+  ok('G2 顶部三枚不参与拖拽排序（渲染在 data-rail-btn 列表之前）',
+    bar.indexOf('data-tip="AI 教学"') < bar.lastIndexOf('{visible.map('))
+  ok('G3 ActivityBar 收 onBoard 回调（回看板只此一枚）', /onBoard\?:/.test(bar) && /onBoard\?\.\(\)/.test(bar))
+  ok('G4 AI 教学已从可拖拽图标条成员移出', /RAIL_MODULE_IDS: TabName\[\] = \['recycle'/.test(appModules))
+  ok('G5 appModules 顶部固定组 = 看板 + AI 教学', /RAIL_PINNED_IDS[^\n]*\['dashboard', 'aiTeaching'\]/.test(appModules))
+  ok('G6 看板不再是工作台书签', !/key:\s*'dashboard'/.test(layout))
+  ok('G7 RailModule 类型不再含 dashboard', !/export type RailModule =[^\n]*'dashboard'/.test(layout))
+  ok('G8 看板仍在 EXCLUDED（整窗 + 不产生标签页）', /WORKBENCH_TABBAR_EXCLUDED[^\n]*\[[^\]]*'dashboard'/.test(layout))
+  ok('G9 启动落看板（恢复 openTabs，但不把 lastActiveTab 当可见标签）',
+    /setActiveTab\('dashboard'\)/.test(app) && /if \(tabs\.length\) setOpenTabs\(tabs\)/.test(app))
+  ok('G10 看板吃工作台标签（openTabs / lastTab / onOpenTab / onOpenWorkbench）',
+    /openTabs=\{openTabs\.filter/.test(app) && /lastTab=\{lastWorkbenchTab\}/.test(app)
+    && /onOpenTab=\{handleTabChange\}/.test(app) && /onOpenWorkbench=\{goWorkbench\}/.test(app))
+  ok('G11 「回工作台」判定收口一处（图标条与看板窗口共用 goWorkbench）',
+    /const goWorkbench = useCallback/.test(app) && (app.match(/goWorkbench/g) || []).length >= 3)
+  ok('G12 负向：看板不再有 onBack 参数 / 返回箭头',
+    !/onBack/.test(dash) && !/ArrowLeft/.test(dash))
+  ok('G13 负向：工作台左栏没有「回看板」行 / AI 教学头部没有「看板」面包屑',
+    !/data-wb="bookToBoard"/.test(read('src/components/workbench/WorkbenchLeftPanel.tsx'))
+    && !/回看板/.test(read('src/modules/ai-teaching/index.tsx')))
+  ok('G14 railOrder 默认值不含 aiTeaching（它是固定枚）',
+    /railOrder:\s*\{\s*default:\s*'\["recycle","plugins","moments","bookMarket","usage"\]'/.test(settings))
 }
 
-/* ================= E. 过渡编排接线 ================= */
+/* ================= H. 版面与动效 ================= */
 
 {
-  const panel = stripComments(read('src/components/shared/ResizablePanel.tsx'))
-  const shell = stripComments(read('src/components/workbench/WorkbenchShell.tsx'))
-  const app = stripComments(read('src/App.tsx'))
-  const dash = read('src/modules/dashboard/index.tsx')
+  const dash = stripComments(read('src/modules/dashboard/index.tsx'))
+  const cal = read('src/modules/dashboard/MonthCalendar.tsx')
+  const tl = read('src/modules/dashboard/DayTimeline.tsx')
+  const heat = read('src/modules/dashboard/UsageHeatmap.tsx')
+  const win = read('src/modules/dashboard/ModuleWindow.tsx')
 
-  ok('E1 ResizablePanel 有 openDelayMs 且只作用于展开',
-    /openDelayMs\?:\s*number/.test(panel) && /visible\s*&&\s*openDelayMs\s*>\s*0/.test(panel))
-  // 2026-09-29 同步实现形态：`ResizablePanel` 把这里从 `!dragging && visible && openDelayMs`
-  // 重构成三元（`dragging ? 'none' : \`…${visible && openDelayMs > 0 ? …}\``）。语义不变 ——
-  // 拖拽即时、只有「展开（visible）」才加延迟，收起仍立刻响应。断言按当前形态写。
-  ok('E2 收起不加延迟（收起要立刻响应）',
-    /dragging\s*\?\s*'none'/.test(panel) && /visible\s*&&\s*openDelayMs\s*>\s*0/.test(panel))
-  ok('E3 WorkbenchShell 把延迟透传给左右两栏',
-    (shell.match(/openDelayMs=\{sidesOpenDelayMs\}/g) || []).length === 2)
-  ok('E4 App 只在「刚从看板返回」时给延迟',
-    /backFromDashboard\s*\?\s*130\s*:\s*0/.test(app) && /prevTabRef\.current\s*===\s*'dashboard'/.test(app))
-  ok('E5 看板入场有延迟（让「两侧先收」看得见）', /animationDelay:\s*'130ms'/.test(dash))
-  ok('E6 看板动效复用现有令牌而不是另造过渡',
-    /kb-view-in/.test(dash) && /kb-item-in|kb-pop/.test(read('src/modules/dashboard/cards.tsx')))
-}
-
-/* ================= F. 专注时长指标（热力图第二指标，2026-09-27 接入） ================= */
-
-{
-  const repo = stripComments(read('electron/database/repositories/dashboardRepo.ts'))
-  const types = read('src/types/index.ts')
-  const cards = read('src/modules/dashboard/cards.tsx')
-  const srcIndex = read('src/modules/dashboard/index.tsx')
-  const heat = read('src/modules/dashboard/Heatmap.tsx')
-
-  eq('F1 fmtMinutes 支持口径参数（专注）', fmtMinutes(45, '专注'), '专注 45 分钟')
-  eq('F2 fmtMinutes 默认口径仍是「使用」（老用例不回归）', fmtMinutes(135), '使用 2 小时 15 分')
-  eq('F3 fmtMinutes 零值不出口径', fmtMinutes(0, '专注'), '没有记录')
-
-  ok('F4 快照类型有 pomodoro.days', /pomodoro:\s*\{\s*days:\s*Record<string,\s*number>\s*\}/.test(types))
-  ok('F5 repo 消费 pomoSessionsAll（番茄场次是专注指标的唯一数据源）', /pomoSessionsAll\(\)/.test(repo))
-  ok('F6 repo 聚合出 pomodoro.days（按日累加场次分钟）',
-    /const days: Record<string, number> = \{\}/.test(repo) && /pomodoro = \{ days \}/.test(repo))
-  ok('F7 聚合有跨度与今日边界（不把全历史拉进快照）', /s\.date >= from && s\.date <= today/.test(repo))
-  ok('F8 cards.tsx 占位文案已移除（专注指标真的接上了）', !/还没有接入/.test(cards))
-  // F9/F10 修订（2026-09-28）：热力图指标切换器已撤（用户拍板只留「使用时长」），
-  // 改断言负向：cards.tsx 不得再有 focus 指标分支 / HEAT_METRICS 切换清单。
-  // pomodoro.days 聚合（F4-F7）保留 —— 数据侧口径不变，仅 UI 消费面收窄。
-  ok('F9 热力图只吃 usage.days（专注时长指标已撤，无 focus 分支）',
-    !/metric === 'focus'/.test(cards) && /snap\.usage\.days/.test(cards))
-  ok('F10 切换清单已拔线（HEAT_METRICS / HeatMetric 不复存在）',
-    !/HEAT_METRICS/.test(cards) && !/HeatMetric/.test(cards) && !/HEAT_METRICS/.test(srcIndex))
-  ok('F11 Heatmap 接收 unit 并传入 fmtMinutes', /unit\??:\s*string/.test(heat) && /fmtMinutes\(minutes, unit\)/.test(heat))
+  ok('H1 日期文案走快照的 today（两端不会算出不同的今天）', /dateLine\(snap\.today\)/.test(dash))
+  ok('H2 一句话结论来自纯函数（不在组件里拼句子）', /verdictParts\(\{ openCount: timeline\.openCount/.test(dash))
+  ok('H3 时间线用纯函数模型', /orderTimeline\(/.test(dash))
+  ok('H4 热力图区间 52 列、格子随宽度自适应', /heatRange\(/.test(heat) && /minmax\(9px, 1fr\)/.test(heat))
+  ok('H5 热力图宽度不够时从左边裁（最近的数据贴右边）',
+    /justify-end/.test(heat) && /overflow-hidden/.test(heat) && /minWidth/.test(heat))
+  ok('H6 热力图有月份刻度且跳过首个不完整月', /m\.start > 1/.test(heat))
+  ok('H7 时间线宽度封顶 760（状态标签不会被推远）', /max-w-\[760px\]/.test(dash))
+  ok('H8 宽窗打卡转右列（容器查询，不按视口写死）', /@min-\[660px\]:col-start-2/.test(dash))
+  ok('H9 月历行高随可用高度收缩（矮窗不滚动）', /repeat\(6,minmax\(0,1fr\)\)/.test(cal))
+  ok('H10 两个模块窗口共用外壳（标题栏 + 内容 + 底部入口）', /function WindowShell/.test(win) && /打开工作台/.test(win))
+  ok('H11 工作台窗口点一行直达对应标签', /onOpenTab\(tab\)/.test(win))
+  ok('H12 动效全部复用既有令牌（kb-view-in / kb-item-in / kb-pop）',
+    /kb-view-in/.test(dash) && /kb-item-in/.test(win) && /kb-pop/.test(heat))
+  ok('H13 打卡勾选仍走 toggleHabitCheck + 广播（写完别处也刷新）',
+    /toggleHabitCheck\(/.test(dash) && /notifyDataChanged\('habit'\)/.test(dash))
+  ok('H14 称呼仍在 hero 行内编辑（Enter 提交 / Esc 放弃 / 失焦提交）',
+    /commitUserName/.test(dash) && /onBlur=\{commitUserName\}/.test(dash) && /'Escape'\) setNameEdit\(null\)/.test(dash))
+  ok('H15 主题特效画布只在看板根挂一次', /<ThemeFxLayer \/>/.test(dash))
+  ok('H17 专注 KPI 吃番茄钟分钟（pomodoro.days），不是 app 使用时长',
+    /snap\.pomodoro\.days\[snap\.today\]/.test(dash) && /label="分钟专注"/.test(dash))
+  ok('H18 打卡分母用快照真实习惯数（不是被 20 条上限截断的 items.length）',
+    /snap\.habit\.doneToday}\/\{snap\.habit\.habits/.test(dash))
+  ok('H16 负向：旧磁贴引擎 / 插件控件 / 底部入口条已从看板移除',
+    !/dashboardTileLayout/.test(dash) && !/CARD_REGISTRY/.test(dash) && !/PluginFrame/.test(dash))
 }
 
 /* ================= 结果 ================= */

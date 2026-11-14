@@ -54,7 +54,9 @@ export const APP_MODULES = [
   { id: 'blog', label: '博客', bar: false, tile: true, palette: true },
   { id: 'schedule', label: '日程', bar: false, tile: true, palette: true },
   { id: 'moments', label: '动态', bar: true, tile: true, palette: true },
-  { id: 'aiTeaching', label: 'AI教学', bar: true, tile: true, palette: true },
+  // 2026-11-14 看板首页重做：AI 教学从「可拖拽的图标条模块」升为**顶部固定三枚**之一
+  // （看板 / 工作台 / AI 教学），因此 bar:false —— 它不再参与 railOrder 排序与右键显隐。
+  { id: 'aiTeaching', label: 'AI教学', bar: false, tile: true, palette: true },
   // v3.9.0 AI助手（仓库整理）：工作台内模块（左栏书签进，同笔记/日程形态）。
   // 入口形态 = bar:false / tile:true / palette:false（拍板：只靠书签 + 桌面磁贴进，不开命令面板）。
   { id: 'aiAssistant', label: 'AI助手', bar: false, tile: true, palette: false },
@@ -65,7 +67,7 @@ export const APP_MODULES = [
   { id: 'accounting', label: '记账', bar: false, tile: true, palette: true },
   // v3.17.0 背单词：工作台内模块（左栏书签进），嵌入 qwerty-learner。
   // 本版入口由 `featureFlags.ts` 的 VOCAB_ENTRY_ENABLED 关闭（书签 / 磁贴 / 权限行在消费处过滤）；
-  // 这里保留 tile/palette 标记，3.18.0 置 true 后自动恢复。
+  // 这里保留 tile/palette 标记，适配完成后置 true 自动恢复。
   { id: 'vocab', label: '背单词', bar: false, tile: true, palette: true },
   // v3.12.0 情报：工作台内模块（左栏书签进，同笔记/日程形态；docs/intel-module-plan.md §6.1）
   { id: 'intel', label: '情报', bar: false, tile: true, palette: true },
@@ -76,9 +78,8 @@ export const APP_MODULES = [
   { id: 'bookMarket', label: '书市', bar: true, tile: true, palette: true },
   // v3.9.0 用量：图标条最左窄列整窗模块（用户拍板）——全 app AI token 用量 + 账户额度。
   { id: 'usage', label: '用量', bar: true, tile: true, palette: true },
-  // 2026-09-27 看板：入口只在**左栏书签**（WORKBENCH_BOOKMARKS），不在图标条、不做磁贴、
-  // 不进命令面板 —— 所以三个 flag 全 false。它同时进 WORKBENCH_TABBAR_EXCLUDED，
-  // 效果 = 点开整窗铺满且**不产生标签页**。
+  // 2026-09-27 看板：2026-11-14 起升为**应用顶层视图**（图标条最上面固定那枚），
+  // 不再挂在书签里；仍不做磁贴、不进命令面板 —— tile / palette 保持 false。
   { id: 'dashboard', label: '看板', bar: false, tile: false, palette: false },
   // 回收站：**在图标条上**（RAIL_MODULE_IDS 成员），但刻意不做磁贴之外的其他入口
   // （「刻意去才会去的目的地」——不进命令面板的是「帮助」那类，回收站保留面板入口）
@@ -142,15 +143,23 @@ function parseIdList(raw: string | undefined, fallback: TabName[]): string[] {
 /**
  * **图标条（最左窄列）**的成员与规范顺序。
  *
- * ⚠️ 这不是 `bar: true` 那 8 个：图标条只放「整窗独占」的入口，笔记 / 博客 / 日程 / 工具箱
+ * ⚠️ 这不是 `bar: true` 那几个：图标条只放「整窗独占」的入口，笔记 / 博客 / 日程 / 工具箱
  * 现在是左栏书签的形态、不在图标条上（`recycle` 反过来是 `bar: false` 却在条上）。
- * 顶部「工作台」按钮与底部「设置」按钮由组件固定，不参与排序与显隐。
+ * 顶部「看板 / 工作台 / AI 教学」三枚固定（看板与 AI 教学见 `RAIL_PINNED_IDS`，工作台由组件写死）
+ * 与底部「设置」按钮不参与排序与显隐。
  *
  * 顺序与显隐走 settings 的 `railOrder` / `railHidden`（2026-09-26 起图标条是顺序/显隐的
  * 唯一承载 —— 旧 `activityBarOrder` / `activityBarHidden` 已随旧八模块图标条退役删除）。
  * `ActivityBar` 的图标表按 id 取，成员与顺序一律来自这里。
  */
-export const RAIL_MODULE_IDS: TabName[] = ['aiTeaching', 'recycle', 'plugins', 'moments', 'bookMarket', 'usage']
+export const RAIL_MODULE_IDS: TabName[] = ['recycle', 'plugins', 'moments', 'bookMarket', 'usage']
+
+/**
+ * 图标条顶部固定组（2026-11-14 看板首页重做）：看板 → 工作台 → AI 教学，与下面的
+ * 功能面板用一条分隔线断开。工作台不是 TabName（它 = activeTab 为空 / 非整窗模块），
+ * 由 `ActivityBar` 直接渲染；这里只列两枚真模块。
+ */
+export const RAIL_PINNED_IDS: readonly TabName[] = ['dashboard', 'aiTeaching']
 
 /** 图标条归一化顺序（含被隐藏的项）—— 拖拽后写回 `railOrder` 用的就是它 */
 export function railOrder(rawOrder?: string): TabName[] {

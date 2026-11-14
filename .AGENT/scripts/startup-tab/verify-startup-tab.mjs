@@ -170,8 +170,10 @@ if (railIds === null) {
 } else {
   // 2026-09-22 书市：4 → 5 项（bookMarket **追加在末尾**，现四项位置不动）
   // 2026-10-16 用量 v3.9.0：5 → 6 项（usage **追加在末尾**）
-  ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket,usage',
-    'C1 ActivityBar RAIL_BUTTONS 覆盖 6 项（AI 教学入口 + 回收站/插件市场/动态 + 书市 + 用量）', `实际 ${railIds.join(',')}`)
+  // 2026-11-14 看板首页重做：AI 教学升为图标条**顶部固定三枚**之一（看板 / 工作台 / AI 教学），
+  // 不再参与可拖拽面板 —— RAIL_BUTTONS 只剩功能面板 5 项。
+  ok(railIds.join(',') === 'recycle,plugins,moments,bookMarket,usage',
+    'C1 ActivityBar RAIL_BUTTONS 覆盖 5 项（回收站/插件市场/动态 + 书市 + 用量；看板与 AI 教学在顶部固定组）', `实际 ${railIds.join(',')}`)
 }
 ok(/data-tip="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
 checkCover('C3 tiles.tsx TILE_META 覆盖全部可作磁贴模块', keysOfRecord(srcTiles, 'TILE_META'), TILE_MODULE_IDS)

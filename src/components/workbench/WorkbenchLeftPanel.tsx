@@ -4,8 +4,7 @@ import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
   LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, ChevronRight,
   CopyPlus, Link2, ArrowUpNarrowWide, ArrowDownNarrowWide,
-  LayoutGrid, Plus, SquareTerminal, Wallet, Radar, Languages,
-} from 'lucide-react'
+  Plus, SquareTerminal, Wallet, Radar, Languages,} from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
 import { AiAssistantIcon } from '../shared/AiAssistantIcon'
@@ -47,8 +46,6 @@ const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
   bookshelf: (s) => <BookOpen size={s} />,
   blog: (s) => <NotebookPen size={s} />,
   quiz: (s) => <FileQuestion size={s} />,
-  // 2026-09-27 看板：四格栅格，与其它五项的形状语言区分开
-  dashboard: (s) => <LayoutGrid size={s} />,
   // aiChat 不是书签，此条目仅满足 Record 全量约束，不被书签区渲染消费
   aiChat: (s) => <Bot size={s} />,
   // v3.5.0 终端：工作台内模块书签（docs/terminal-module-design.md）

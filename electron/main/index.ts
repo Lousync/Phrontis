@@ -1448,7 +1448,7 @@ app.whenReady().then(async () => {
   registerPdfReaderHandlers()
   // 阅读状态（书架升级全格式阅读器一期）：txt 进度两通道
   registerReaderStateHandlers()
-  registerDashboardHandlers()
+  registerDashboardHandlers({ getSettingValue: (key) => settingsCache[key] })
   // 用量模块（v3.9.0）：账户级远程额度查询（llm:quota:get）
   registerUsageHandlers()
   // 摘录（阅读器 · 摘录先行批次）：四通道

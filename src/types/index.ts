@@ -406,7 +406,7 @@ export interface Habit {
 export interface HabitRecord { id: string; habitId: string; date: string; source?: 'manual' | 'auto' }
 /**
  * 周 / 月 / 年总结面板的「每习惯打卡明细」（v3.2.0 条目 13）。
- * 判定策略（统计谁、按什么分母算）在主进程纯函数 `electron/lib/kbStore/habitStats.ts`，
+ * 判定策略（统计谁、按什么分母算）在主进程纯函数 `phrontis-core/src/kbStore/habitStats.ts`，
  * 这里只作跨线共享的形状声明 —— 两边改字段必须同步。
  */
 export interface HabitPeriodStat {
@@ -1948,7 +1948,7 @@ export interface BookListItem {
   size: number
   /** 文件 mtimeMs（PDF 封面缓存失效判据） */
   mtime: number
-  /** 书籍种类（pdf / txt / epub / fb2 / fbz）——唯一真相源 = electron/lib/kbStore/bookFormats.ts 的 BOOK_EXTS，
+  /** 书籍种类（pdf / txt / epub / fb2 / fbz）——唯一真相源 = phrontis-core/src/kbStore/bookFormats.ts 的 BOOK_EXTS，
    *  渲染层侧此字面量由契约脚本 verify-epub-formats.mjs 双向断言同步（tsconfig.web
    *  只含 src/**，不能直接复导出主进程文件） */
   kind: BookKind
@@ -1963,12 +1963,12 @@ export interface BookListItem {
   scan?: BookScanMode
 }
 
-/** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，
+/** 书籍种类（渲染层侧镜像；与 phrontis-core/src/kbStore/bookFormats.ts 保持同步，
  *  由 `.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 双向断言 BOOK_EXTS ↔ 本联合）
  *  B 段加 'epub'；阶段 2a 加 'fb2' / 'fbz'（同为 foliate 引擎）。 */
 export type BookKind = 'pdf' | 'txt' | 'epub' | 'fb2' | 'fbz' | 'cbz'
 
-/** 摘录色板 id（渲染层侧镜像；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
+/** 摘录色板 id（渲染层侧镜像；真源 = phrontis-core/src/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
 export const EXCERPT_COLOR_IDS = ['y', 'g', 'b', 'p', 'v'] as const
 export type ExcerptColor = (typeof EXCERPT_COLOR_IDS)[number]
 /** 条目类型（注意：不是 kind —— kind 已被书籍格式 pdf/txt 占用） */
@@ -1976,11 +1976,11 @@ export type ExcerptType = 'highlight' | 'excerpt' | 'idea'
 /** 色 id → 中文名（浮条 tooltip / 调试用） */
 export const EXCERPT_COLOR_NAMES: Record<ExcerptColor, string> = { y: '黄', g: '绿', b: '蓝', p: '粉', v: '紫' }
 
-/** 扫描版探测结论（渲染层侧镜像；真源 = electron/lib/kbStore/scanDetect.ts，缺省 = full） */
+/** 扫描版探测结论（渲染层侧镜像；真源 = phrontis-core/src/kbStore/scanDetect.ts，缺省 = full） */
 export type BookScanMode = 'full' | 'partial' | 'no'
 
 /**
- * 书签（一套结构 + 按 kind 分支的定位字段；真源 = `electron/lib/kbStore/readerStateSchema.ts` 的
+ * 书签（一套结构 + 按 kind 分支的定位字段；真源 = `phrontis-core/src/kbStore/readerStateSchema.ts` 的
  * `BookBookmark`，此处镜像 —— 改那边记得同步这里）。
  * - txt → `paraIndex`（+ 可选 `start`/`end`）；
  * - epub/fb2/fbz → `cfi`（+ 可选 `chapter`）；
@@ -2025,7 +2025,7 @@ export interface ReaderBookState {
   paper?: ReaderPaper
 }
 
-/** 归一化选区矩形（相对文本层容器的百分比 0..1，zoom 无关；真源 = electron/lib/kbStore/excerptSchema.ts） */
+/** 归一化选区矩形（相对文本层容器的百分比 0..1，zoom 无关；真源 = phrontis-core/src/kbStore/excerptSchema.ts） */
 export interface ExcerptRect {
   l: number
   t: number
@@ -2052,7 +2052,7 @@ export interface ExcerptItem {
   chapter?: string
   text: string
   note: string
-  /** 高亮颜色（色板 id；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
+  /** 高亮颜色（色板 id；真源 = phrontis-core/src/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
   color: ExcerptColor
   /** 条目类型：highlight 高亮 / excerpt 摘录 / idea 想法（注意：不是 kind —— kind 已被书籍格式占用） */
   type: ExcerptType
@@ -2184,8 +2184,8 @@ export interface DashboardSnapshot {
   /** 本地日 'YYYY-MM-DD'（由主进程给，避免两端算出不同的「今天」） */
   today: string
   todos: {
-    overdue: Array<{ id: string; title: string; time: string | null }>
-    today: Array<{ id: string; title: string; time: string | null }>
+    /** 今日任务（含已完成 —— 时间线要画划线态） */
+    today: Array<{ id: string; title: string; time: string | null; done: boolean }>
     doneToday: number
     totalToday: number
   }
@@ -2195,6 +2195,33 @@ export interface DashboardSnapshot {
     habits: number
     /** 今日打卡项逐条（反馈 4②：卡列打卡项、可勾选），sort_order 序；color = 习惯色（勾选庆祝用） */
     items: Array<{ id: string; name: string; done: boolean; color: string }>
+  }
+  /**
+   * 本月日历（2026-11-14 看板首页重做）：只传**计数**，不传标题 ——
+   * 月历格子只需要「这天有没有事 / 做完几件」，正文留在日程模块里。
+   */
+  calendar: {
+    /** 当月 'YYYY-MM'（主进程给，避免两端算出不同月份） */
+    month: string
+    /** 'YYYY-MM-DD' → 当日任务总数 / 已完成数 */
+    days: Record<string, { total: number; done: number }>
+  }
+  /**
+   * AI 教学「当前这一段」：取最近工作区课程大纲里第一个未收尾的知识点。
+   * 没有工作区 / 没建课程时为 null，窗口退化成「打开 AI 教学」入口。
+   */
+  course: null | {
+    wsId: string
+    wsName: string
+    chapterTitle: string
+    unitTitle: string
+    /** 知识点目标（大纲里的一行说明；没有就空串） */
+    unitGoal: string
+    /** 已收尾知识点 / 总知识点，0–100 */
+    pct: number
+    /** 当前知识点所在章（1 起） */
+    chapterIndex: number
+    chapterCount: number
   }
   usage: {
     todayMinutes: number
@@ -3105,7 +3132,7 @@ export interface DevtoolsAPI {
 }
 
 // ===== 书市（book market）=====
-// ★ 镜像声明：主进程侧的真相源在 electron/lib/kbStore/bookMarketSchema.ts（数据形状）与
+// ★ 镜像声明：主进程侧的真相源在 phrontis-core/src/kbStore/bookMarketSchema.ts（数据形状）与
 //   bookSourceVaultRepo.ts（BookSourceInfo）；这里保持同形，改一处必须改两处。
 //   （主进程不 import src/types —— 与其他模块同惯例，见 electron/lib/releaseNotes/types.ts 头注。）
 // ★★ 安全不变量：跨 IPC 的书源描述**永不含凭据本体** —— 只有 `hasCredential: boolean`。

@@ -190,19 +190,19 @@ export const SETTINGS = {
   // ⚠️ 2026-09-26：旧八模块活动栏的 `activityBarOrder` / `activityBarHidden` 两键已随
   // v3.4.0 三栏外壳退役删除（运行时早已零消费，只剩引导空写）。图标条是顺序/显隐的唯一承载。
   // 成员清单唯一真源是 `appModules.RAIL_MODULE_IDS`。
-  railOrder: { default: '["aiTeaching","recycle","plugins","moments","bookMarket"]', type: 'json', label: '图标条顺序', group: '活动栏', desc: '图标条按钮顺序（JSON）', keywords: ['图标条', '顺序', 'activitybar', 'rail', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  railOrder: { default: '["recycle","plugins","moments","bookMarket","usage"]', type: 'json', label: '图标条顺序', group: '活动栏', desc: '图标条功能面板的顺序（JSON；顶部看板 / 工作台 / AI 教学三枚固定，不在此列）', keywords: ['图标条', '顺序', 'activitybar', 'rail', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   railHidden: { default: '[]', type: 'json', label: '图标条隐藏按钮', group: '活动栏', desc: '图标条上被隐藏的按钮（JSON）', keywords: ['图标条', '隐藏', 'activitybar', 'rail', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // 布局：整条活动栏显隐。本键关的是「活动栏这个容器本身」，入口只有命令面板
   // 「布局：隐藏/显示活动栏」一个（标题栏「自定义布局」下拉已于 2026-09-17 整条删除）。
   // ui:false 与同组两键一致：入口在命令面板，不在设置页（避免与「显示/隐藏模块」混淆）
   activityBarVisible: { default: true, type: 'toggle', label: '显示活动栏', group: '活动栏', desc: '关闭后隐藏最左侧模块活动栏（命令面板「布局：显示活动栏」可随时调回）', keywords: ['活动栏', '布局', '隐藏', '侧边栏', 'activitybar', 'visible', 'layout'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   toolboxHiddenTools: { default: '[]', type: 'json', label: '工具箱隐藏工具', group: '工具箱', desc: '工具箱画廊中隐藏的工具 id 列表（JSON，内置工具用 id，插件工具用 pluginId:toolId）', keywords: ['工具箱', '隐藏', '工具', '显示', 'toolbox', 'hidden'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  // 看板（2026-09-27）：两项都 ui:false —— 入口是看板自己的「编辑卡片」弹层，不进设置页搜索。
-  // dashboardCards 的成员 id 唯一真源是 src/modules/dashboard/cards.tsx 的 CARD_REGISTRY。
-  dashboardCards: { default: '["habit","usage","notes","book","heatmap"]', type: 'json', label: '看板显示的卡片', group: '看板', desc: '看板上显示哪些卡片（JSON 数组；主卡「今天该做的」常驻，不在此列）', keywords: ['看板', '卡片', '显隐', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  dashboardBg: { default: 'mark', type: 'select', label: '看板卡片背景', group: '看板', desc: '看板卡片的美化档位：素色 / 渐变 / 渐变+水印 / 角光', keywords: ['看板', '背景', '美化', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  // 磁贴栅格化（2026-09-28）：布局序 + 格子尺寸，编辑态拖拽/拉角/托盘写入。归一化真源 = tileGrid.ts
-  dashboardTileLayout: { default: '[]', type: 'json', label: '看板磁贴布局', group: '看板', desc: '磁贴的布局顺序与格子尺寸（JSON 数组 [{id,w,h}]）；缺的卡按注册表序自动补齐', keywords: ['看板', '磁贴', '布局', '格子', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 看板（2026-09-27）。2026-11-14 首页重做后，磁贴编辑态整体退役：
+  // dashboardCards / dashboardBg / dashboardTileLayout 三个键**保留但不再读取**
+  // （回滚旧版看板时数据还在），新界面只消费 dashboardUserName。
+  dashboardCards: { default: '["habit","usage","notes","book","heatmap"]', type: 'json', label: '看板显示的卡片', group: '看板', desc: '旧版磁贴看板的卡片显隐（已退役，保留仅为回滚）', keywords: ['看板', '卡片', '显隐', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  dashboardBg: { default: 'mark', type: 'select', label: '看板卡片背景', group: '看板', desc: '旧版磁贴看板的卡片背景档位（已退役，保留仅为回滚）', keywords: ['看板', '背景', '美化', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  dashboardTileLayout: { default: '[]', type: 'json', label: '看板磁贴布局', group: '看板', desc: '旧版磁贴看板的布局序与格子尺寸（已退役，保留仅为回滚）', keywords: ['看板', '磁贴', '布局', '格子', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   dashboardUserName: { default: '', type: 'text', label: '看板称呼', group: '看板', desc: '看板问候语里的称呼（「晚上好，志岩」的「志岩」）；空 = 不带称呼。入口在看板 hero：点名字行内改', keywords: ['看板', '称呼', '名字', '问候', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // 分享卡片（右栏第三态，2026-09-29）：模板 + 当前卡片配置同一键。
   // 存**全局**而非按库 —— 卡片是「我用软件的方式」，换仓库应跟着走（同 workbenchLayout 口径）。

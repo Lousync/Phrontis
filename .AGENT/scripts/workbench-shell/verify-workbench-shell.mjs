@@ -18,7 +18,7 @@ import {
   WORKBENCH_BOOKMARKS, RAIL_FOLLOW_MAP, WORKBENCH_TABBAR_EXCLUDED,
   parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT, RIGHT_PANEL_WIDGET_IDS,
 } from '../../../src/lib/workbenchLayout.ts'
-import { isTabName, RAIL_MODULE_IDS, railOrder, railVisibleOrder, railHiddenIds, APP_MODULES } from '../../../src/lib/appModules.ts'
+import { isTabName, RAIL_MODULE_IDS, RAIL_PINNED_IDS, railOrder, railVisibleOrder, railHiddenIds, APP_MODULES } from '../../../src/lib/appModules.ts'
 
 // ★ 仓库根按**脚本自身位置**解析，不写死绝对路径（2026-09-22 修正，同 verify-perception 的口径）：
 //   写死会把「在 worktree 里跑」变成「静默校验主仓」——脚本全绿而实际改的是另一棵树，
@@ -60,9 +60,10 @@ function stripComments(src) {
 /* ================= A. 书签 ↔ 模块映射（唯一真相源双向断言） ================= */
 console.log('\n=== A. 书签映射双向断言（方案 §3.3 / 原型 v15 六书签） ===')
 const keys = WORKBENCH_BOOKMARKS.map((b) => b.key)
-ok(keys.length === 11, 'A1 内置书签固定 11 项（看板 + 笔记/日程/书架/博客总结/记账 + 背单词 2026-11-02 + 错题本 + 终端 2026-10-05 + AI助手 2026-10-15 + 情报 2026-10-25）', `实际 ${keys.length}`)
+ok(keys.length === 10, 'A1 内置书签固定 10 项（2026-11-14 看板升为顶层视图、撤出书签区：笔记/日程/书架/博客总结/记账 + 背单词 2026-11-02 + 错题本 + 终端 2026-10-05 + AI助手 2026-10-15 + 情报 2026-10-25）', `实际 ${keys.length}`)
 ok(new Set(keys).size === keys.length, 'A2 书签 key 无重复')
-ok(keys.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog,accounting,vocab,quiz,terminal,aiAssistant,intel', 'A3 书签集合与顺序（2026-09-27 看板排首位 —— 它是「打开第一眼该看什么」的落点；2026-10-05 终端 v3.5.0 入列；2026-10-15 AI助手 v3.9.0 入列末位；v3.12.0 情报 2026-10-25 入列末位；v3.17.0 背单词 2026-11-02 排在记账后、错题本前）', `实际 ${keys.join(',')}`)
+ok(keys.join(',') === 'knowledge,schedule,bookshelf,blog,accounting,vocab,quiz,terminal,aiAssistant,intel', 'A3 书签集合与顺序（2026-11-14 看板撤出书签区、改写图标条顶部固定枚；2026-10-05 终端 v3.5.0 入列；2026-10-15 AI助手 v3.9.0 入列末位；v3.12.0 情报 2026-10-25 入列末位；v3.17.0 背单词 2026-11-02 排在记账后、错题本前）', `实际 ${keys.join(',')}`)
+ok(!keys.includes('dashboard'), 'A3b 负向：看板不再是书签（入口在图标条顶部固定组）', keys.join(','))
 ok(WORKBENCH_BOOKMARKS.every((b) => isTabName(b.tab)), 'A4 每个书签的 tab 都是合法 TabName',
   WORKBENCH_BOOKMARKS.filter((b) => !isTabName(b.tab)).map((b) => b.key).join(','))
 const quiz = WORKBENCH_BOOKMARKS.find((b) => b.key === 'quiz')
@@ -119,7 +120,11 @@ const srcBlog = stripComments(read('src/modules/blog/index.tsx'))
 // 工具箱入口移右栏上部，与 startup-tab 契约 C1 互为镜像）
 const railM = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
 const railIds = railM ? [...railM[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
-ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket,usage', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态/书市/用量', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
+ok(railIds?.join(',') === 'recycle,plugins,moments,bookMarket,usage', 'C1 图标条 RAIL_BUTTONS = 回收站/插件市场/动态/书市/用量（2026-11-14 AI 教学升为顶部固定枚）', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
+ok(/data-tip="看板"/.test(srcBar) && /data-tip="工作台"/.test(srcBar) && /data-tip="AI 教学"/.test(srcBar),
+  'C1a0 顶部固定三枚在场：看板 / 工作台 / AI 教学（应用级容器，不参与拖拽与显隐）')
+ok(RAIL_PINNED_IDS.join(',') === 'dashboard,aiTeaching', 'C1a1 appModules.RAIL_PINNED_IDS = 看板 + AI 教学（工作台由组件写死）', RAIL_PINNED_IDS.join(','))
+ok(srcBar.indexOf('data-tip="AI 教学"') < srcBar.lastIndexOf('{visible.map('), 'C1a2 三枚固定项渲染在功能面板之前（分隔线之后才是回收站那排）')
 ok(!/id:\s*'toolbox'/.test(railM ? railM[1] : ''), 'C1b 图标条不再含工具箱按钮（入口语义移 ToolLauncherZone）')
 ok(/data-tip="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
 
@@ -157,11 +162,11 @@ ok(/railDragGuard/.test(srcBar), 'C1h3 手势结束补发 click 的 250ms 兜底
 ok(/onContextMenu=/.test(srcBar), 'C1i 右键菜单入口在场')
 ok(railOrder(undefined).join(',') === RAIL_MODULE_IDS.join(','),
   'C1j railOrder 缺省 = RAIL_MODULE_IDS 全量且同序')
-ok(railOrder('["bookMarket","plugins"]').join(',') === 'bookMarket,plugins,aiTeaching,recycle,moments,usage',
+ok(railOrder('["bookMarket","plugins"]').join(',') === 'bookMarket,plugins,recycle,moments,usage',
   'C1k railOrder 尊重存量顺序并补齐缺项', railOrder('["bookMarket","plugins"]').join(','))
 ok(!railOrder('["desktop","editor"]').includes('desktop'),
   'C1l railOrder 丢弃非图标条成员（desktop / editor 等陈年 id）')
-ok(railVisibleOrder(undefined, '["moments","plugins"]').join(',') === 'aiTeaching,recycle,bookMarket,usage',
+ok(railVisibleOrder(undefined, '["moments","plugins"]').join(',') === 'recycle,bookMarket,usage',
   'C1m railVisibleOrder 按 railHidden 剔除', railVisibleOrder(undefined, '["moments","plugins"]').join(','))
 ok(railHiddenIds('["moments"]').length === 1 && railHiddenIds('坏JSON').length === 0,
   'C1n railHiddenIds 坏 JSON 落空数组')
@@ -699,13 +704,14 @@ ok(/activeTopicId \? \(/.test(srcKnowledge) && /<NoteHome/.test(srcKnowledge),
 // 笔记区模块态。正确语义 = 总览态（对齐 closeTab 关激活标签收尾 + handleBackToOverview 解锁）。
 // 只切 dashboard case 的窗口比对（handleBackToOverview 自身也含同款收尾，不能全文件搜）。
 const dashCaseAt = srcApp.indexOf("case 'dashboard'")
-const dashCase = dashCaseAt === -1 ? '' : srcApp.slice(dashCaseAt, dashCaseAt + 800)
-ok(dashCase.includes('setActiveToolTab(null)') && dashCase.includes('setActiveTab(null)') && dashCase.includes('setRailModule(null)'),
-  'M1 看板 onBack = 总览态收尾（activeToolTab / activeTab / railModule 一并落 null）')
+const dashCase = dashCaseAt === -1 ? '' : srcApp.slice(dashCaseAt, dashCaseAt + 1400)
+// 2026-11-14 首页重做：看板是顶层视图，**没有 onBack** —— 回看板只走图标条最上面那枚。
+ok(!/onBack=/.test(dashCase) && !/ArrowLeft/.test(dashCase),
+  'M1 负向：看板不再有 onBack / 返回箭头（回看板只走图标条「看板」枚）')
 ok(!/setRailModule\('knowledge'\)/.test(dashCase) && !/handleTabChange\('knowledge'\)/.test(dashCase),
-  'M2 负向：onBack 不再写死落笔记区（setRailModule(\'knowledge\') / handleTabChange(\'knowledge\') 已移除）')
-ok(/leftLocked/.test(dashCase) && /leftLocked: false/.test(dashCase),
-  'M3 onBack 含锁定态顺带解锁（对齐 handleBackToOverview 的「回总览」语义）')
+  'M2 负向：dashboard case 不做任何「落地到某个模块」的跳转')
+ok(/openTabs=/.test(dashCase) && /onOpenTab=/.test(dashCase) && /onOpenWorkbench=/.test(dashCase),
+  'M3 看板吃工作台标签（openTabs / onOpenTab / onOpenWorkbench 三处接线）')
 
 // ===== M4-M6. 工作台特效垫底 + 半透明薄纱（看板方案 §5 反馈 9，2026-09-27）=====
 // 缺陷面：设计文档旧版把工作台画布挂在 desktop 模块根 —— 那是死代码（从未被 import），

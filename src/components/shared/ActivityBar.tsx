@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { TabName } from '../../types'
-import { Trash2, FlaskConical, LayoutPanelLeft, GraduationCap, Check } from 'lucide-react'
+import { Trash2, FlaskConical, LayoutPanelLeft, LayoutGrid, GraduationCap, Check } from 'lucide-react'
 import { MomentsIcon, SettingsIcon, PluginIcon, BookMarketIcon, UsageIcon } from './ModuleIcons'
 import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
 import { railHiddenIds, railOrder, railVisibleOrder } from '../../lib/appModules'
@@ -13,8 +13,14 @@ import { useDataChanged } from '../../lib/dataChanged'
 /**
  * 图标条（v3.4.0 工作台三栏外壳，方案 §3.4 / §10；2026-09-17 拍板变化：工具箱按钮撤掉，5 → 4；
  * 同日 bug 修复轮：顶部补「工作台」按钮；批次5 反馈轮（21:xx 拍板）：**AI 教学入口回归图标条**
- * （用户侧边 tab 上没有 AI 教学区入口）——排在工作台之下第一位，整窗独占语义不变）。
+ * （用户侧边 tab 上没有 AI 教学区入口））。
  *
+ * **2026-11-14 看板首页重做**：最上面三枚固定成「看板 / 工作台 / AI 教学」——
+ * 三者是应用级容器（看板是顶层，工作台与 AI 教学是它下面平级的两个区域），
+ * 不参与 railOrder 拖拽、不进 railHidden 右键显隐，与下面的功能面板用一条分隔线断开。
+ * 回看板**只走最上面这一枚**：工作台左栏与 AI 教学头部都不再有「↑ 看板」按钮。
+ *
+ * - **顶部看板按钮**：看板态高亮 + 点击无操作（入口幂等）；
  * - **顶部工作台按钮**：工作台态（activeTab 为空或非整窗模块）高亮且点击无操作（入口幂等）；
  *   整窗模块态点击 = 回工作台（反馈 10，2026-09-27：一律回**总览态** —— 页面条保留各标签，点击即恢复；
  *   旧的「落最后文档标签 ?? knowledge」会落到没开任何页面的知识库模块，左栏被错误拉成笔记区）；
@@ -50,7 +56,6 @@ const DRAG_THRESHOLD = 4
  *  两包形状同构、画法有别 —— 切设置时看得出来变了，又不会认成另一个模块。
  *  同源的还有桌面磁贴的「插件」卡片与设置→外观的图标预览（都经 moduleId 'plugins'）。 */
 const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.ReactNode }[] = [
-  { id: 'aiTeaching', label: 'AI 教学', icon: (s) => <GraduationCap size={s} /> },
   { id: 'recycle', label: '回收站', icon: (s) => <Trash2 size={s} /> },
   { id: 'plugins', label: '插件市场', icon: (s) => <PluginIcon size={s} /> },
   { id: 'moments', label: '动态', icon: (s) => <MomentsIcon size={s} /> },
@@ -85,11 +90,13 @@ interface Props {
   /** 点「工作台」按钮时回调（仅整窗模块态触发；工作台态按钮幂等无操作）。
       目标标签由 App 决定——与被删除的右上角浮动按钮同一份语义（openTabs 最后文档标签 ?? editor） */
   onWorkbench?: () => void
+  /** 点「看板」按钮时回调（2026-11-14 首页重做：看板是顶层视图，入口只此一枚，不再有"返回"按钮） */
+  onBoard?: () => void
   /** UI 优化条目1：最大化时图标条卡去留白/圆角/边框阴影，贴满屏幕边缘 */
   flush?: boolean
 }
 
-export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
+export function ActivityBar({ active, onChange, onWorkbench, onBoard, flush }: Props) {
   const { s, update } = useSettings()
   const [dragId, setDragId] = useState<TabName | null>(null)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
@@ -216,7 +223,20 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
       className={`kb-activitybar w-11 flex flex-col items-center py-2 gap-0.5 shrink-0 select-none transition-all duration-300 ease-out bg-[color-mix(in_srgb,var(--activitybar-bg)_85%,transparent)] ${flush ? 'rounded-none' : 'mx-1.5 my-1.5 rounded-xl border border-[var(--border-color)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}
       onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY }) }}
     >
-      {/* 工作台 —— 顶部第一按钮（VS Code 惯例：主视图入口在最上）。
+      {/* 顶部固定三枚（2026-11-14 看板首页重做）：看板 / 工作台 / AI 教学。
+          三者是「应用级容器」，永远在本条最上面、不参与拖拽排序与右键显隐；
+          下面用一条分隔线与功能面板断开。回看板只走最上面这一枚 —— 工作台与 AI 教学里
+          不再有自己的「返回看板」按钮。 */}
+      <button
+        onClick={() => { if (active !== 'dashboard') onBoard?.() }}
+        data-tip="看板" aria-label="看板"
+        className={railCls(active === 'dashboard')}
+      >
+        {active === 'dashboard' && railMark}
+        <LayoutGrid size={22} />
+      </button>
+
+      {/* 工作台 —— VS Code 惯例：主视图入口紧挨看板。
           工作台态高亮 + 点击无操作（入口幂等）；整窗模块态 = 唯一的「回工作台」入口 */}
       <button
         onClick={() => { if (!inWorkbench) onWorkbench?.() }}
@@ -227,6 +247,17 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
         {inWorkbench && railMark}
         <LayoutPanelLeft size={22} />
       </button>
+
+      <button
+        onClick={() => { if (active !== 'aiTeaching') onChange('aiTeaching') }}
+        data-tip="AI 教学" aria-label="AI 教学"
+        className={railCls(active === 'aiTeaching')}
+      >
+        {active === 'aiTeaching' && railMark}
+        <GraduationCap size={22} />
+      </button>
+
+      <div className="my-1.5 h-px w-6 flex-none rounded-full bg-[var(--border-color)]" aria-hidden />
 
       {visible.map((id, i) => {
         const b = RAIL_BY_ID.get(id)

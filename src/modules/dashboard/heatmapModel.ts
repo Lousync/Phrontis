@@ -1,7 +1,7 @@
 /**
  * 使用热力图的**纯计算层**（零依赖，2026-09-27）。
  *
- * 抽出来的理由和 `electron/lib/kbStore/habitStats.ts` 同源：周一起排的补位、
+ * 抽出来的理由和 `phrontis-core/src/kbStore/habitStats.ts` 同源：周一起排的补位、
  * 月份标签落在第几列、四档色阶的阈值 —— 这些判定错一格就是「日期和格子对不上」，
  * 而且**不报错**（原型里真踩过：星期标签与数据错了一行）。做成零依赖纯函数后，
  * 契约脚本可以用 `node --experimental-strip-types` 直接装载真实实现来验。
@@ -76,7 +76,9 @@ export function buildHeatmap(
 
   const cells: Array<HeatmapCell | null> = Array.from({ length: pad }, () => null)
   const months: Array<{ m: number; col: number }> = []
-  const seen = new Set<number>()
+  // 去重键必须是「年 + 月」：跨一年的区间里 2025-11 与 2026-11 是同一个 m，
+  // 只按月份号去重会让最后这个月整段缺失（表现 = 月份刻度少一格、上一月被拉长）。2026-11-14 实测踩到。
+  const seen = new Set<string>()
   let activeDays = 0
   let totalMinutes = 0
 
@@ -87,7 +89,8 @@ export function buildHeatmap(
     if (level > 0) activeDays++
     totalMinutes += minutes
     const m = Number(key.slice(5, 7)) - 1
-    if (!seen.has(m)) { seen.add(m); months.push({ m, col: Math.floor((i + pad) / 7) }) }
+    const stamp = key.slice(0, 7)
+    if (!seen.has(stamp)) { seen.add(stamp); months.push({ m, col: Math.floor((i + pad) / 7) }) }
     cells.push({ key, level, minutes })
   }
 

@@ -121,6 +121,8 @@ export default function App() {
   // 初始 null = settings 恢复前的空窗（占位改 null 而非 'blog'：'blog' 会被 openTabs 登记
   // 成假标签——settings 在 mount 前往往已 ready，ready 判定拦不住；null 由 !activeTab 守卫天然拦住）。
   const [activeTab, setActiveTab] = useState<TabName | null>(null)
+  /** 最近停留过的工作台模块标签（看板右列的「上一次」标记；2026-11-14 首页重做） */
+  const [lastWorkbenchTab, setLastWorkbenchTab] = useState<TabName | null>(null)
   // v3.17.0 背单词暂不开放：入口全部收起；万一旧深链 / 小窗指令把它设进来，立即落回工作台
   useEffect(() => {
     if (activeTab === 'vocab' && !VOCAB_ENTRY_ENABLED) setActiveTab(null)
@@ -610,6 +612,9 @@ export default function App() {
   // 恢复一次 + 此后变化写回（结构对齐上面 pageSplit 两个 effect）。只收合法模块标签：
   // isTabName 校验 + 排除整窗/图标条面板（它们不进标签条）+ vocab 入口关闭时剔除；
   // 工具（tool:）/ 情报文章（intel-a:）页签是瞬态设计，不恢复。
+  //
+  // 2026-11-14 看板首页重做：**启动落看板**（顶层视图），但仍恢复 openTabs ——
+  // 看板右列的工作台窗口就是列这些标签，点一条直达。`lastActiveTab` 不再决定可见标签。
   const tabsRestoredRef = useRef(false)
   // 工具/情报页签激活时 activeTab=null（互斥共现），但用户上次所在的仍是那个模块标签——
   // 用 ref 记住最后一个非空模块标签，落盘时兜底，恢复才不会落空态
@@ -621,9 +626,10 @@ export default function App() {
     const tabs = wbLayout.lastOpenTabs.filter((t) => isTabName(t)
       && !WORKBENCH_TABBAR_EXCLUDED.includes(t)
       && (t !== 'vocab' || VOCAB_ENTRY_ENABLED))
-    const active = wbLayout.lastActiveTab && isTabName(wbLayout.lastActiveTab) ? wbLayout.lastActiveTab : null
+    const last = wbLayout.lastActiveTab && isTabName(wbLayout.lastActiveTab) ? wbLayout.lastActiveTab : null
     if (tabs.length) setOpenTabs(tabs)
-    if (active) setActiveTab(active)
+    if (last && tabs.includes(last)) setLastWorkbenchTab(last)
+    setActiveTab('dashboard')
   }, [settingsReady, wbLayout])
   useEffect(() => {
     if (!settingsReady || !tabsRestoredRef.current) return
@@ -1361,6 +1367,7 @@ export default function App() {
     // F-5（2026-09-30）：进「整窗模块」前记下当时的工作台标签，点活动栏「工作台」回来若它仍开着则恢复
     if (WORKBENCH_TABBAR_EXCLUDED.includes(tab) && activeTab && !WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)) {
       lastWorkbenchTabRef.current = activeTab
+      setLastWorkbenchTab(activeTab)
     }
     if (tab === activeTab) {
       // 工具箱专属（2026-09-10）：已在工具箱时再点活动栏图标 = 退出当前工具、回到工具箱主界面。
@@ -1371,6 +1378,21 @@ export default function App() {
     }
     setActiveTab(tab); setSidebarOpen(true); window.dispatchEvent(new CustomEvent('tab-switched'))
   }
+
+  /**
+   * 回工作台（2026-11-14 看板首页重做：从看板、或从任何整窗模块）。
+   *
+   * 唯一口子 —— 图标条「工作台」按钮与看板右列「打开工作台」都走这里，
+   * 避免两处各写一份「落哪个标签」的判定（反馈 10 / F-5 的口径）。
+   */
+  const goWorkbench = useCallback(() => {
+    setActiveToolTab(null)
+    setActiveIntelTab(null)
+    const back = lastWorkbenchTabRef.current
+    if (back && openTabs.includes(back)) { setActiveTab(back); return }
+    setActiveTab(null)
+    setRailModule(null)
+  }, [openTabs])
 
   // ---- 工具标签页（v3.4.0 批次4，方案 §10.2）----
   // 右栏工具入口点击 → 中间开对应工具标签页；重复点击同入口 = 激活已有标签（openTabs includes
@@ -1784,21 +1806,17 @@ export default function App() {
       case 'bookMarket': return <BookMarketModule onOpenShelf={() => handleTabChange('bookshelf')} />
       // 用量（v3.9.0）：图标条整窗模块，无模块侧栏，整窗铺满
       case 'usage': return <UsageModule />
-      // 看板（2026-09-27）：左栏书签入口 + 整窗。它在 WORKBENCH_TABBAR_EXCLUDED 里，
-      // 所以没有左右栏、没有页面条，整个中间栏归它；返回工作台靠看板自己的返回箭头。
-      // ⚠️ 返回时必须一并把 railModule 从 'dashboard' 复位 —— 书签点击会 setRailModule('dashboard')，
-      // 而 dashboard 没有模块侧栏，不复位的话左栏会是一片空白。
-      // 反馈 1（2026-09-27）：复位目标是**顶层（总览态）**，不落笔记区 —— 对齐 closeTab 关激活标签的
-      // 收尾（activeTab / railModule 落 null）+ handleBackToOverview 的锁定态顺带解锁语义。
-      // onOpenBook（反馈 5②）：在读的书卡点条目 → 直接进书架阅读态（与摘录「回到原文」同链；
+      // 看板（2026-09-27；2026-11-14 重做为「今日纸」首页）：**应用顶层视图**，
+      // 图标条最上面那枚进入，左右栏与页面条退场（WORKBENCH_TABBAR_EXCLUDED）。
+      // 回看板只走图标条；看板自己不再有返回箭头，工作台 / AI 教学里也没有「↑ 看板」按钮。
+      // 右列两个模块窗口：工作台窗口列 openTabs（点一条直达），AI 教学窗口吃快照里的 course。
+      // onOpenBook（反馈 5②）：在读的书点条目 → 直接进书架阅读态（与摘录「回到原文」同链；
       // kind 磁盘推导；单向跳转 —— 拍板不做「返回看板」）。
-      // onJumpSchedule（反馈 3 拍板①）：紧凑档主卡待办超出 4 条收「还有 N 件 → 去日程」——
-      // 原地展开会重新顶出滚动条、与「默认窗口无滚动」矛盾，故跳日程处理。
       case 'dashboard': return <DashboardModule
-        onBack={() => {
-          setActiveToolTab(null); setActiveTab(null); setRailModule(null)
-          if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
-        }}
+        openTabs={openTabs.filter((t): t is TabName => isTabName(t))}
+        lastTab={lastWorkbenchTab}
+        onOpenTab={handleTabChange}
+        onOpenWorkbench={goWorkbench}
         onOpenBook={(relPath) => {
           const kind = bookKindOf(relPath) ?? 'pdf'
           setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind })
@@ -1935,18 +1953,14 @@ export default function App() {
             <ActivityBar
               active={activeTab}
               onChange={handleTabChange}
+              // 2026-11-14 看板首页重做：看板是顶层视图，入口只此一枚（工作台 / AI 教学里都没有「返回」按钮）
+              onBoard={() => handleTabChange('dashboard')}
               // 反馈 10（2026-09-27）：「回工作台」= 回**总览态**，不再落「最后文档标签 ?? knowledge」——
               // 旧兜底会落到一个没开任何页面的知识库模块（中间无页面、左栏却被跟随拉成笔记区）。
               // 总览态下页面条原样保留各标签，点击即恢复；收尾口径与 closeTab / 反馈1 返回一致。
-              onWorkbench={() => {
-                setActiveToolTab(null)
-                setActiveIntelTab(null)
-                // 反馈 F-5（2026-09-30）：恢复「进整窗模块前」的工作台标签（仍在 openTabs 时）；
-                // 否则保留反馈 10 的安全兜底——落总览态，避免旧兜底落到「没开页面的 knowledge」而左栏被拉错。
-                const back = lastWorkbenchTabRef.current
-                if (back && openTabs.includes(back)) { setActiveTab(back) }
-                else { setActiveTab(null); setRailModule(null) }
-              }}
+              // F-5（2026-09-30）：恢复「进整窗模块前」的工作台标签（仍在 openTabs 时），
+              // 否则落总览态。判定收口在 goWorkbench（看板右列的「打开工作台」共用）。
+              onWorkbench={goWorkbench}
               flush={winMax}
             />
           )}
