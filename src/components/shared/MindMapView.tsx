@@ -521,7 +521,7 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
                       onPointerDown={e => e.stopPropagation()}
                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitEdit() } else if (e.key === 'Escape') { e.preventDefault(); setEditingId(null) } }}
                       onBlur={commitEdit}
-                      className="min-w-0 flex-1 bg-transparent outline-none text-[12.5px] text-[var(--text-primary)]"
+                      className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)]"
                     />
                   ) : (
                     <>

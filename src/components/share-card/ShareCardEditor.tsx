@@ -161,7 +161,7 @@ export function ShareCardEditor({ open, onClose, data, texts, style, theme, prom
                   onFocus={() => setPromptEditing(true)}
                   onBlur={() => setPromptEditing(false)}
                   onChange={(e) => onChangePrompt(e.target.value)}
-                  className="h-full w-full resize-none bg-transparent font-mono text-[12px] leading-[1.7] text-[var(--text-primary)] outline-none"
+                  className="kb-field-control h-full w-full resize-none font-mono text-[12px] leading-[1.7] text-[var(--text-primary)]"
                 />
               </div>
             )}

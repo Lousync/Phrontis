@@ -37,6 +37,14 @@ const migrated = [
   ['书市 · 搜索', 'src/modules/bookmarket/DiscoverView.tsx', ['kb-field-control']],
   ['插件市场 · 搜索', 'src/modules/plugins/index.tsx', ['kb-field', 'kb-field-control']],
   ['设置 · 数值输入', 'src/modules/settings/components/fields/NumberField.tsx', ['kb-field-control']],
+  // 2026-11-14 第二轮（右栏网址导航搜索报障后全仓盘点）
+  ['右栏 · 网址导航搜索', 'src/components/workbench/widgets/NavWidget.tsx', ['kb-field', 'kb-field-control']],
+  ['右栏 · 番茄钟主题', 'src/components/workbench/widgets/PomoWidget.tsx', ['kb-field-control']],
+  ['密码本 · 密码显示框', 'src/modules/toolbox/components/PasswordVault.tsx', ['kb-field', 'kb-field-control']],
+  ['思维导图 · 节点改名', 'src/components/shared/MindMapView.tsx', ['kb-field-control']],
+  ['日程 · 工作流阶段 / 检查点', 'src/modules/schedule/components/WorkflowPanel.tsx', ['kb-field-control']],
+  ['分享卡片 · 提示词浮层', 'src/components/share-card/ShareCardEditor.tsx', ['kb-field-control']],
+  ['AI 教学 · 补充回答', 'src/modules/ai-teaching/index.tsx', ['kb-field-control']],
 ]
 for (const [label, file, classes] of migrated) {
   const src = existsSync(join(ROOT, file)) ? read(file) : ''
@@ -44,6 +52,9 @@ for (const [label, file, classes] of migrated) {
 }
 const know = read('src/modules/knowledge/index.tsx')
 check('② 知识库搜索内部 input 不再自带 bg-transparent / outline-none（外壳负责）', !/placeholder="搜索笔记"[\s\S]{0,220}?className="[^"]*\bbg-transparent\b/.test(know))
+const nav = read('src/components/workbench/widgets/NavWidget.tsx')
+check('② 网址导航搜索内部 input 走 .kb-field-control（不再手写 bg-transparent）', /placeholder="搜索书签"[\s\S]{0,260}?kb-field-control/.test(nav) && !/bg-transparent[\s\S]{0,120}?placeholder="搜索书签"/.test(nav))
+check('② 网址导航搜索有清除钮 + Esc 清空（无障碍：aria-label）', /aria-label="清除"/.test(nav) && /key === 'Escape'/.test(nav) && /aria-label="搜索书签"/.test(nav))
 
 console.log('\n--- ③ 规范文档与指针 ---')
 check('③ docs/input-field-pattern.md 存在', existsSync(join(ROOT, 'docs/input-field-pattern.md')))

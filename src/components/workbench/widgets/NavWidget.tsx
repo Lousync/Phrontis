@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Search, ExternalLink } from 'lucide-react'
+import { Search, ExternalLink, X } from 'lucide-react'
 import type { BookmarkCategory, BookmarkItem } from '../../../types'
 import { bookmarkGetAll, openBookmarkUrl } from '../../../lib/ipc'
 import { useDataChanged } from '../../../lib/dataChanged'
@@ -73,14 +73,26 @@ export function NavWidget({ onManage, favoritesOnly = false }: Props) {
 
   return (
     <div className="space-y-2.5">
-      <div className="flex items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5">
-        <Search size={12} className="shrink-0 text-[var(--text-muted)]" />
+      <div className="kb-field flex h-[28px] items-center gap-1.5 rounded-lg px-2">
+        <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Escape') setSearch('') }}
           placeholder="搜索书签"
-          className="min-w-0 flex-1 bg-transparent text-[11.5px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          aria-label="搜索书签"
+          className="kb-field-control min-w-0 flex-1 text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
         />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            data-tip="清除" aria-label="清除"
+            className="shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       {!favoritesOnly && (

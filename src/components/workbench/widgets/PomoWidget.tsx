@@ -152,7 +152,7 @@ export function PomoWidget({ frameless = false }: PomoWidgetProps) {
         </span>
 
         {mode === 'idle' && (
-          <div className="flex h-8 w-full items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2">
+          <div className="flex h-8 w-full items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 transition-colors focus-within:border-[var(--accent)]">
             <Timer size={12} className="shrink-0 text-[var(--text-muted)]" />
             <input
               value={draftTopic}
@@ -162,8 +162,7 @@ export function PomoWidget({ frameless = false }: PomoWidgetProps) {
               autoComplete="off"
               placeholder="这次专注什么？"
               aria-label="专注主题"
-              style={{ background: 'transparent', border: 0, boxShadow: 'none' }}
-              className="min-w-0 flex-1 text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+              className="kb-field-control min-w-0 flex-1 text-[11px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
             <span className="text-[8.5px] tabular-nums text-[var(--text-muted)]">{draftTopic.length}/30</span>
           </div>

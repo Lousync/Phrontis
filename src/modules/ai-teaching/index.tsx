@@ -3320,7 +3320,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           </div>
                         )}
                         {customOpen && (
-                          <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--accent)] bg-[var(--bg-primary)]">
+                          <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--accent)] bg-[var(--bg-primary)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20">
                             <PenLine size={12} className="text-[var(--accent)] shrink-0" />
                             <input autoFocus value={customDraft} disabled={pending}
                               onChange={e => setAskCustomDrafts(p => ({ ...p, [page]: e.target.value }))}
@@ -3334,7 +3334,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               }}
                               placeholder="补充你的回答…（Enter 确认）"
                               data-wb="aiTeachAskCustomInput"
-                              className="flex-1 bg-transparent text-[12.5px] text-[var(--text-primary)] outline-none disabled:opacity-50" />
+                              className="kb-field-control flex-1 text-[12.5px] text-[var(--text-primary)] disabled:opacity-50" />
                             <button onClick={cancelCustom} disabled={pending} data-tip="取消补充（保留原答案）" aria-label="取消补充（保留原答案）"
                               className="shrink-0 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40">取消</button>
                             <span className="text-[10px] text-[var(--text-muted)] shrink-0">Enter 确认</span>

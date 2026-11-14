@@ -193,7 +193,7 @@ function ExistingWorkflow({ workflow, tags, onChanged, onDeleted }: { workflow: 
                       const title = e.target.value.trim()
                       if (title && title !== stage.title) updateStage(stage.id, { title }, '阶段标题已更新')
                     }}
-                    className="min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text-primary)] outline-none"
+                    className="kb-field-control min-w-0 flex-1 text-[12px] text-[var(--text-primary)]"
                   />
                   <button onClick={() => void run(() => deleteScheduleWorkflowStage(workflow.id, stage.id), '阶段已删除')} className="text-[var(--text-disabled)] hover:text-[var(--danger)]"><Trash2 size={11} /></button>
                 </div>
@@ -216,7 +216,7 @@ function ExistingWorkflow({ workflow, tags, onChanged, onDeleted }: { workflow: 
                           const title = e.target.value.trim()
                           if (title && title !== cp.title) void run(() => updateScheduleWorkflowCheckpoint(workflow.id, stage.id, cp.id, { title }), '检查点已更新')
                         }}
-                        className="min-w-0 flex-1 bg-transparent text-[10.5px] text-[var(--text-secondary)] outline-none"
+                        className="kb-field-control min-w-0 flex-1 text-[10.5px] text-[var(--text-secondary)]"
                       />
                       <span className="text-[9.5px] text-[var(--text-disabled)]">{cp.start.slice(5)}</span>
                       <button onClick={() => void run(() => deleteScheduleWorkflowCheckpoint(workflow.id, stage.id, cp.id), '检查点已删除')} className="text-[var(--text-disabled)] hover:text-[var(--danger)]"><Trash2 size={9} /></button>

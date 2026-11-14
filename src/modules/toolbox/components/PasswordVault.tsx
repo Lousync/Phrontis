@@ -845,13 +845,13 @@ export function PasswordVault({ onBack }: Props) {
                     </p>
                   )}
                   <div className="flex gap-1.5">
-                    <div className="flex-1 flex items-center bg-[var(--input-bg)] border border-[var(--border-color)] rounded-md overflow-hidden">
+                    <div className="kb-field flex-1 flex items-center rounded-md overflow-hidden">
                       <input
                         value={showPassword ? password : (password ? '••••••••' : '')}
                         onChange={e => { setPassword(e.target.value); scheduleSave() }}
                         readOnly={!showPassword}
                         onClick={() => { if (!showPassword) { setShowPassword(true); requestAnimationFrame(() => { const inp = document.activeElement as HTMLInputElement | null; if (inp) { inp.focus(); inp.select() } }) } }}
-                        className={`flex-1 px-3 py-2 bg-transparent text-[13px] text-[var(--text-primary)] outline-none font-mono ${!showPassword ? 'cursor-pointer select-none' : ''}`}
+                        className={`kb-field-control flex-1 px-3 py-2 text-[13px] text-[var(--text-primary)] font-mono ${!showPassword ? 'cursor-pointer select-none' : ''}`}
                         placeholder="密码"
                       />
                       <button

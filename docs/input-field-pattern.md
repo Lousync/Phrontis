@@ -142,6 +142,16 @@ input:focus, textarea:focus, select:focus {
 | 番茄钟主题输入（`PomodoroPanel`） | ✅ 已内联 `border: 0`（历史写法，等价） |
 | 设置搜索（`SettingsSearchBox`） | ✅ 内部 input 显式 `border-transparent`（背景层画框，等价） |
 | AI 学习输入（`AiLearn`） | ✅ textarea 已显式 `border-0 bg-transparent` |
+| 右栏 · 网址导航搜索（`widgets/NavWidget.tsx`） | ✅ `.kb-field` + `.kb-field-control` + 清除钮 / Esc / `aria-label`（2026-11-14 第二轮） |
+| 右栏 · 番茄钟主题（`widgets/PomoWidget.tsx`） | ✅ 内部控件 `.kb-field-control`，外壳补 `focus-within` 焦点描边 |
+| 密码本 · 密码显示框（`PasswordVault.tsx`） | ✅ `.kb-field` + `.kb-field-control`（原为外壳画框 + 透明 input） |
+| 思维导图 · 节点内联改名（`MindMapView.tsx`） | ✅ 内部控件 `.kb-field-control`（节点边框即唯一外壳） |
+| 日程 · 工作流阶段 / 检查点（`WorkflowPanel.tsx`） | ✅ 内部控件 `.kb-field-control`（卡片边框即唯一外壳） |
+| 分享卡片 · 提示词浮层（`ShareCardEditor.tsx`） | ✅ 内部控件 `.kb-field-control`（浮层边框即唯一外壳） |
+| AI 教学 · 补充回答（`ai-teaching/index.tsx`） | ✅ 内部控件 `.kb-field-control` + 外壳 `focus-within` ring |
+| 命令面板 / 模型选择 / 关联页搜索（`CommandPalette` / `AiModelPicker` / `PageEditor`） | ✅ A 形态：input 自画唯一一道框，外层只有分隔线，无框中框 |
+
+> **2026-11-14 第二轮盘点结论**：全仓 249 个 `<input>` / 25 个 `<textarea>` / 26 个 `<select>` 过了一遍（脚本按「带边框祖先」筛出 142 处，再逐条判断）。除上表新增的 7 处外，其余都是 A 形态（input 自画框）或「外壳 + 归零」的等价写法；没有发现新的「外壳一道 + input 一道」。
 
 新写组合框时**直接用第 3 节的代码**，不要复制旧的内联写法。
 
