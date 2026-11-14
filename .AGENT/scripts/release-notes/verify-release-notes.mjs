@@ -28,7 +28,7 @@ import { execFileSync } from 'node:child_process'
 import { RELEASE_NOTES } from '../../../electron/lib/releaseNotes/data.ts'
 import { RELEASE_NOTE_HIGHLIGHTS } from '../../../electron/lib/releaseNotes/highlights.ts'
 import {
-  majorMinor, shouldAutoOpenNotes, decideStartup, decideMarkShown, mergeSeen,
+  majorMinor, majorMinorChanged, decideStartup, decideMarkShown, mergeSeen,
 } from '../../../electron/lib/releaseNotes/judge.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -165,8 +165,8 @@ for (const [input, want] of mmCases) {
 }
 check(`majorMinor 表驱动 ${mmCases.length} 例`, mmBad.length === 0, mmBad.join(' ； '))
 
-const autoCases = [
-  // [当前版本, 基线(上次展示), 期望自动打开, 场景说明]
+const notifyCases = [
+  // [当前版本, 基线(上次展示), 期望「值得提醒一次」, 场景说明]
   ['3.1.0', '3.0.0', true, 'x.y 提升 → 弹'],
   ['3.1.0', '2.9.0', true, '跨多个 x.y → 弹'],
   ['4.0.0', '3.1.0', true, '主版本提升 → 弹'],
@@ -178,48 +178,50 @@ const autoCases = [
   ['v3.1.0', 'v3.0.0', true, '带前导 v 也要认'],
   ['3.1.0-beta.2', '3.0.5', true, '预发布号取自 x.y → 弹'],
 ]
-let autoBad = []
-for (const [cur, base, want, why] of autoCases) {
-  const got = shouldAutoOpenNotes(cur, base)
-  if (got !== want) autoBad.push(`${why}: shouldAutoOpenNotes(${cur}, ${base}) = ${got}，期望 ${want}`)
+let notifyBad = []
+for (const [cur, base, want, why] of notifyCases) {
+  const got = majorMinorChanged(cur, base)
+  if (got !== want) notifyBad.push(`${why}: majorMinorChanged(${cur}, ${base}) = ${got}，期望 ${want}`)
 }
-check(`shouldAutoOpenNotes 表驱动 ${autoCases.length} 例`, autoBad.length === 0, autoBad.join(' ； '))
+check(`majorMinorChanged 表驱动 ${notifyCases.length} 例`, notifyBad.length === 0, notifyBad.join(' ； '))
 
 const IDX0 = { lastShown: '', seen: [], updatedAt: '' }
 const NOW = '2026-09-12T00:00:00.000Z'
 
-// 情形① 无基线：写基线、不弹
+// 情形① 无基线：写基线、不提醒
 {
-  const d = decideStartup('3.1.0', IDX0, true, true, NOW)
-  check('① 首装：不弹', d.shouldAutoOpen === false)
+  const d = decideStartup('3.1.0', IDX0, true, NOW)
+  check('① 首装：不提醒', d.unread === false)
   check('① 首装：把基线记成当前版本', d.nextIndex?.lastShown === '3.1.0', `实得 ${JSON.stringify(d.nextIndex)}`)
 }
 // 情形② 同 x.y 且基线=当前版本：不写盘
 {
   const idx = { lastShown: '3.1.0', seen: ['3.1.0'], updatedAt: NOW }
-  const d = decideStartup('3.1.0', idx, true, true, NOW)
-  check('② 同版本：不弹', d.shouldAutoOpen === false)
+  const d = decideStartup('3.1.0', idx, true, NOW)
+  check('② 同版本：不提醒', d.unread === false)
   check('② 同版本：不必写盘（省 IO）', d.nextIndex === null)
 }
 // 情形② patch 升级：推进基线
 {
   const idx = { lastShown: '3.1.0', seen: [], updatedAt: NOW }
-  const d = decideStartup('3.1.2', idx, true, true, NOW)
-  check('② patch 升级：不弹', d.shouldAutoOpen === false)
+  const d = decideStartup('3.1.2', idx, true, NOW)
+  check('② patch 升级：不提醒', d.unread === false)
   check('② patch 升级：基线推进到 3.1.2', d.nextIndex?.lastShown === '3.1.2')
 }
-// 情形③ x.y 变化：弹且**不写盘**（等渲染层确认）
+// 情形③ x.y 变化：未读且**不写盘**（等渲染层确认展示过）
 {
   const idx = { lastShown: '3.0.0', seen: [], updatedAt: NOW }
-  const d = decideStartup('3.1.0', idx, true, true, NOW)
-  check('③ x.y 变化：弹', d.shouldAutoOpen === true)
+  const d = decideStartup('3.1.0', idx, true, NOW)
+  check('③ x.y 变化：未读（看板出入口）', d.unread === true)
   check('③ 未展示前不写基线（异常启动不该标成已读）', d.nextIndex === null)
 }
-// 情形③ 但开关关掉 / 无说明数据
+// 情形③ 无说明数据 / 开关不再参与判定
 {
   const idx = { lastShown: '3.0.0', seen: [], updatedAt: NOW }
-  check('③ 开关关掉 → 不弹', decideStartup('3.1.0', idx, true, false, NOW).shouldAutoOpen === false)
-  check('③ 当前版本无说明数据 → 不弹（不为空页打扰）', decideStartup('3.1.0', idx, false, true, NOW).shouldAutoOpen === false)
+  check('③ 当前版本无说明数据 → 不提醒（不为空页出入口）', decideStartup('3.1.0', idx, false, NOW).unread === false)
+  // 2026-11-14：开关「新版本时在看板提醒」下移到渲染层（关掉 = 连入口都不画）。
+  // 主进程判定必须与开关解耦，否则「有没有东西可读」这个事实会被设置污染。
+  check('③ 判定层不再接 autoOpenOn 参数（开关归渲染层）', decideStartup.length === 4, `实得 ${decideStartup.length} 个参数`)
 }
 // markShown：只认当前版本推进基线
 {
@@ -268,14 +270,54 @@ check('package.json 有 version', !!appVer)
 
 const hasCurrent = versions.includes(appVer)
 if (hasCurrent) {
-  pass(`当前版本 v${appVer} 在 data 里有对应说明（自动打开路径可用）`)
+  pass(`当前版本 v${appVer} 在 data 里有对应说明（看板入口路径可用）`)
 } else {
   warn(
     `当前版本 v${appVer} 在 CHANGELOG 里没有 ## v${appVer} 小节 —— ` +
-    `getReleaseNotesState 会对当前版本判 hasNotes=false，自动打开这条路在开发机上走不通。` +
+    `getReleaseNotesState 会对当前版本判 hasNotes=false，看板上的入口在开发机上不会出现。` +
     `发版时补小节 + 重跑生成器即可；dev 下也可用 KNOWBASE_FAKE_APP_VERSION 指向一个已有说明的版本做联调。`,
   )
 }
+
+// ---------------------------------------------------------------- §6 入口接线
+// 2026-11-14：提醒从「启动自动跳整页」改成「看板右上角一枚入口」。
+// 这一段的失败模式同样是静默的 —— 入口不画 / 画了但点了没反应 / 把关掉的开关当没关，
+// 全都不会有任何报错，只会在真机上「好像没看到」。
+console.log('\n§6 看板入口接线（启动不跳页 / 关了开关就静默 / 点击回得来）')
+
+const readSrc = (rel) => readFileSync(join(ROOT, rel), 'utf-8')
+const app = readSrc('src/App.tsx')
+const dash = readSrc('src/modules/dashboard/index.tsx')
+const settingsTs = readSrc('src/lib/settings.ts')
+const about = readSrc('src/modules/settings/views/AboutView.tsx')
+const stTypes = readSrc('electron/lib/releaseNotes/types.ts')
+const mainTs = readSrc('electron/lib/releaseNotes/index.ts')
+
+check('主进程状态字段是 unread（不再叫 shouldAutoOpen）',
+  /unread:\s*boolean/.test(stTypes) && !/shouldAutoOpen/.test(stTypes))
+check('判定层不再读 autoOpenOn 设置（开关归渲染层）', !/autoOpenOn/.test(mainTs))
+check('启动不再自动跳到更新说明页（负向：延迟常量与自动 effect 都已删除）',
+  !/RELEASE_NOTES_AUTO_OPEN_DELAY_MS/.test(app) && !/shouldAutoOpen/.test(app))
+check('启动首次取未读（activeTab 落看板时取）',
+  /getReleaseNotesState\(\)[\s\S]{0,220}?setNotesUnread\(st\?\.unread/.test(app))
+check('回到看板会重取（读完入口消失，markShown 不广播）',
+  /activeTab !== null && activeTab !== 'dashboard'\) return/.test(app))
+check('「新版本时在看板提醒」关掉 = 连入口都不画',
+  /notes=\{s\.releaseNotesAutoOpen === false \? null : notesUnread\}/.test(app))
+check('入口点击走 openNotesFromBoard（来源记成看板，关掉后回看板）',
+  /onOpenNotes=\{openNotesFromBoard\}/.test(app)
+  && /tabBeforeNotes\.current = 'dashboard'[\s\S]{0,120}?setActiveTab\('releaseNotes'\)/.test(app))
+check('看板渲染那枚入口（版本号 + 与日期行同高右对齐）',
+  /notes && onOpenNotes/.test(dash)
+  && /有什么变化/.test(dash)
+  && /absolute right-0 top-0/.test(dash)
+  && /onClick=\{onOpenNotes\}/.test(dash))
+check('入口仍是原来那页：普通标签、开在工作区里（不新增整窗页）',
+  /case 'releaseNotes': return <ReleaseNotesModule onDismiss=\{dismissReleaseNotes\} \/>/.test(app))
+check('设置项改名「新版本时在看板提醒」，键名不变（保住用户已存的值）',
+  /releaseNotesAutoOpen: \{[^}]*label: '新版本时在看板提醒'/.test(settingsTs)
+  && /新版本时在看板提醒/.test(about)
+  && !/新版本时自动打开更新说明/.test(about))
 
 // ---------------------------------------------------------------- 结果
 console.log('')

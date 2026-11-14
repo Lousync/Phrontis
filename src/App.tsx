@@ -99,9 +99,8 @@ import { RootErrorBoundary } from './components/shared/RootErrorBoundary'
 import { WindowResizeHandles } from './components/shared/WindowResizeHandles'
 // 仅类型引用,编译期擦除,不会把 devtools 模块带进正式版 bundle
 import type { DevToolsModuleProps } from './modules/devtools'
-/** 更新说明自动打开的延迟（ms）。错开标题栏 updateStartupCheck() 的 6s 静默检查，
- *  也留出首屏渲染时间——它是一次「告知」，不该和启动路径抢资源。 */
-const RELEASE_NOTES_AUTO_OPEN_DELAY_MS = 2000
+/** 看板「更新说明入口」的文案版本号展示由 `ReleaseNotesState.currentVersion` 提供，
+ *  启动不再自动跳页（2026-11-14 拍板）。 */
 
 /** 模块 chunk 拉取期间的占位（仅首次访问该 Tab 时出现一瞬，之后由保活层常驻） */
 function ModuleLoadingFallback() {
@@ -664,33 +663,26 @@ export default function App() {
   // 可启动标记）随之退役；activeTab 初值本来就是 null，删掉这段 effect 即达成新口径。
   // （旧注释保留的教训：曾经的兜底循环含 recycle/help，导致「把侧边栏模块全隐藏 + 重启」开回收站。）
 
-  // ---- 更新说明（VS Code 式）：启动按版本判定自动打开 ----
-  // 判定在主进程（app.getVersion() vs 仓库 `.knowbase/modules/release-notes/index.json` 的基线），
-  // 渲染层只消费结果。延迟 2s：错开 updateStartupCheck() 的 6s（不抢网络/IO），也不与首屏渲染抢。
+  // ---- 更新说明：看板上的「未读入口」（2026-11-14 拍板，取代「启动 2s 后自动跳整页」）----
+  // 判定仍在主进程（app.getVersion() vs 仓库 `.knowbase/modules/release-notes/index.json`
+  // 的基线），渲染层只消费 `unread`。启动**不再抢首屏**：看板照常落下，有未读就在 hero
+  // 日期行右端出一枚入口，点进去仍是原来那页（工作区里的普通标签）。
+  // 回到看板时重取一次 —— 读过会推进基线（markShown 不广播），入口随之消失。
   // 无当前仓库 / IPC 未就绪 → 静默失败，绝不打扰（更新说明不值得为它弹错误）。
   const activeTabRef = useRef<TabName | null>(null)
   useEffect(() => { activeTabRef.current = activeTab }, [activeTab])
   const tabBeforeNotes = useRef<TabName | null>(null)
-  const notesCheckedRef = useRef(false)
+  const [notesUnread, setNotesUnread] = useState<{ version: string } | null>(null)
   useEffect(() => {
-    if (!settingsReady || !loaded || notesCheckedRef.current) return
-    notesCheckedRef.current = true
+    if (!settingsReady || !loaded) return
+    if (activeTab !== null && activeTab !== 'dashboard') return
     let alive = true
-    let timer = 0
     getReleaseNotesState()
-      .then((st) => {
-        if (!alive || !st?.shouldAutoOpen) return
-        timer = window.setTimeout(() => {
-          if (!alive) return
-          const prev = activeTabRef.current
-          tabBeforeNotes.current = prev === 'releaseNotes' ? null : prev
-          setActiveTab('releaseNotes')
-        }, RELEASE_NOTES_AUTO_OPEN_DELAY_MS)
-      })
+      .then((st) => { if (alive) setNotesUnread(st?.unread ? { version: st.currentVersion } : null) })
       .catch(() => { /* 静默 */ })
-    return () => { alive = false; if (timer) window.clearTimeout(timer) }
+    return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsReady, loaded])
+  }, [settingsReady, loaded, activeTab])
 
   // ---- 存量 AI 会话认领的一次性告知（会话随仓库走，2026-10-13）----
   // 认领发生在主进程「仓库成为当前仓库」时，而切库收尾是整窗重载——当场广播的 Toast 会被抹掉，
@@ -742,13 +734,21 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsReady, loaded])
   /** 「知道了」：回到进更新说明之前那个模块；**没有来源时回工作台空态**
-   *  （启动即工作台，已无「启动项」可退；非法 id 的兜底统一由 openTab 的守卫负责）。 */
+   *  （启动即看板，已无「启动项」可退；非法 id 的兜底统一由 openTab 的守卫负责）。 */
   const dismissReleaseNotes = useCallback(() => {
     const prev = tabBeforeNotes.current
     tabBeforeNotes.current = null
     if (prev) openTab(prev)
     else setActiveTab(null)
   }, [openTab])
+
+  /** 看板入口 → 更新说明页（2026-11-14）。来源记成看板，关闭后回看板而不是空态。
+   *  走的仍是原来那条路：普通标签、开在工作区里（侧栏照常），与手动入口同形态。 */
+  const openNotesFromBoard = useCallback(() => {
+    tabBeforeNotes.current = 'dashboard'
+    setActiveTab('releaseNotes')
+    setSidebarOpen(true)
+  }, [])
 
   // Apply theme class to <html> — reacts to async loaded settings (fixes stale-default bug)
   // 插件主题:先确保 <style> 已注入,再应用主题类(插件主题依赖运行时注入的 CSS 变量)
@@ -1823,6 +1823,10 @@ export default function App() {
           handleTabChange('bookshelf')
         }}
         onJumpSchedule={() => handleTabChange('schedule')}
+        // 更新说明入口（2026-11-14）：只在「有未读 + 「新版本时在看板提醒」开着」时出。
+        // 开关关掉 = 连这枚入口都不出现（用户要的是彻底静默）。
+        notes={s.releaseNotesAutoOpen === false ? null : notesUnread}
+        onOpenNotes={openNotesFromBoard}
       />
       case 'recycle': return <RecycleBinModule isActive={on} />
       // 终端（v3.5.0，docs/terminal-module-design.md）：工作台内 Tab，动态加载（xterm 不进首屏）；模块侧栏托管会话列表

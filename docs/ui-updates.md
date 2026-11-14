@@ -2730,3 +2730,23 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **验收**：web tsc 0 错；`npm run build` 通过；`verify-input-field.mjs` 全绿（7 处组合框）；运行态截图确认只剩一道外框、焦点落在外壳、三件同高。
 
 **验收**：`npm run build` 通过；`verify-daycycle.mjs` 全绿（含新增 C9b–C9e）；`lightningcss` 解析 0 错。真机观感待用户在 dev 里过一遍四时段。
+
+## 2026-11-14 · 更新说明从「启动跳页」收成看板上一枚入口
+
+**现状 / 用户反馈**：看板升为首页后，启动仍按旧规则在 2 秒后 `setActiveTab('releaseNotes')` —— 用户第一眼看到的是工作区里那一页，首页被抢走。用户要求：「只要有更新说明，就在看板上加一个入口，点击后还是跟以前一样在工作区上看」。
+
+**决策**（三项均按最保守选项，用户 2026-11-14 拍板）：
+- 取消启动自动跳转，只留入口；
+- 设置项「新版本时自动打开更新说明」改名「新版本时在看板提醒」，**键名 `releaseNotesAutoOpen` 不变**（保住用户已存的值）；关掉 = 连入口都不画；
+- 提醒范围不变：只有 major.minor 变化（patch 不打扰、首装不提醒）。
+- 位置：hero 日期行右端（与 `2026 · 11 · 14 星期六` 同一行、右对齐）。理由：零垂直占地（那行右半边本来就空）、处在第一眼落点、读完消失页面回到原样；不选「右列顶部提示条」（右列已三块，出现时整列下移）与「卡片上方 banner」（会把一张纸切成分段）。
+
+**改动点**：
+- `electron/lib/releaseNotes/judge.ts`：`shouldAutoOpenNotes` → `majorMinorChanged`；`decideStartup` 去掉 `autoOpenOn` 参数，返回值 `shouldAutoOpen` → `unread`（判定层只回答「有没有未读」，开关归渲染层）。
+- `electron/lib/releaseNotes/{index,types}.ts`：`ReleaseNotesState.unread`；不再读 `releaseNotesAutoOpen`。
+- `src/App.tsx`：删掉 2s 自动跳页 effect 与 `RELEASE_NOTES_AUTO_OPEN_DELAY_MS`；改为 `notesUnread` 状态（activeTab 落看板时取、回看板重取 —— markShown 不广播，重取才知道读过了）；新增 `openNotesFromBoard`（来源记成看板，关闭后回看板）。
+- `src/modules/dashboard/index.tsx`：hero 加 `relative` + 绝对定位胶囊 `v{version} 有什么变化 →`（`kb-view-fade` 入场，accent 淡底 + 淡边）。
+- `src/lib/settings.ts` + `src/modules/settings/views/AboutView.tsx`：文案改名。
+- 契约：`verify-release-notes.mjs` 新增 §6「看板入口接线」10 项（含两条负向：自动跳页已删、开关关掉静默）。
+
+**验收**：web / node tsc 0 错；`npm run build` 通过；`verify-release-notes.mjs` PASS（§6 10 项）+ `verify-dashboard.mjs` 88 项 + `verify-startup-tab.mjs` 26 项全绿；真机（`KNOWBASE_FAKE_APP_VERSION=3.29.0` + 基线 3.28.0）：1440×900 / 1280×963 / 1000×700 入口位置无重叠（1000 宽时出口紧贴右缘 959、KPI 顶 97 与入口底 79 不相交）；点击 → 工作区里那页（侧栏、页签、知道了都在）→ 知道了 → 回看板且入口消失；设置关掉 + 重载 → 主进程仍报 `unread: true` 但界面不画（判定与开关解耦生效）。截图 `tmp/dashboard-impl-shots/notes-entry-*.png`。

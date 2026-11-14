@@ -114,6 +114,17 @@ todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // �
 - `.AGENT/scripts/startup-tab/verify-startup-tab.mjs`：图标条成员快照同步。
 - 真机：1280×820 / 963、1440×900、1920×1080、2560×1440 无滚动；1000×700（<1080 右列落下方）页面滚动、主列 520 保底。
 
+## 7b. 更新说明入口（2026-11-14 追加）
+
+启动不再按旧规则 2 秒后自动跳到更新说明页（那会把首页抢走）。改为：有未读时在 hero
+日期行右端出一枚 `v{version} 有什么变化 →`，点了才进原来那页（工作区里的普通标签），
+读完「知道了」回看板且入口消失。
+
+- 位置取舍：零垂直占地、第一眼落点、读完即消失；不做右列提示条（右列已三块）与卡片上方 banner（切开一张纸）。
+- 判定解耦：主进程 `decideStartup` 只回 `unread`（有没有东西可读），开关「新版本时在看板提醒」在渲染层决定画不画；关掉 = 连入口都不出。
+- 设置键名沿用 `releaseNotesAutoOpen`（改名会丢用户已存的值），只改文案。
+- 契约：`verify-release-notes.mjs` §6「看板入口接线」10 项。
+
 ## 8. 收尾待办
 
 - **AI 手册必须同步**：`resources/help/*.md` 里讲「看板 / 图标条 / 启动落点 / 怎么回看板 / 磁贴编辑」的段落已过时，按 `.AGENT/help-rewrite/README.md` 重编，并跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`。

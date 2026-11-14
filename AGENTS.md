@@ -100,7 +100,7 @@ src/
 21. **同一文件禁止并行 Edit** —— 并行会静默互相覆盖，而工具仍回 "Successfully edited"。同文件串行、不同文件才可并行；改完 grep 复核关键标识。
 22. **`electron/database/` 不是死代码**：目录名未改，现在是 IPC handler 注册层（33 个 `registerXxxHandlers()`，转发给 phrontis-core 的 kbStore），**别删**。`grep sql.js` 只会命中注释。
 23. 沙箱构建两类故障（EPERM 报错退出 / 永不返回）与退路 → skill `windows-sandbox-ops` §6、§7。
-24. **`CHANGELOG.md` 是「应用内更新说明」的唯一源** —— 改完必须重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs` 生成 `electron/lib/releaseNotes/data.ts`（忘跑 = 页面显示上一版内容，无任何报错；契约脚本 §4 会拦）。触发规则（仅 major.minor 变化时自动打开 / 首装不弹 / **页面成功展示后**才推进基线）的纯函数在 `electron/lib/releaseNotes/judge.ts`（零依赖独立文件，专为让脚本 import）——**改规则必须同步补 `.AGENT/scripts/release-notes/verify-release-notes.mjs` 的用例表**，别把规则写回 `index.ts`。
+24. **`CHANGELOG.md` 是「应用内更新说明」的唯一源** —— 改完必须重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs` 生成 `electron/lib/releaseNotes/data.ts`（忘跑 = 页面显示上一版内容，无任何报错；契约脚本 §4 会拦）。触发规则（仅 major.minor 变化时提醒 / 首装不提醒 / 提醒形式是**看板 hero 右上角一枚入口**而非自动跳页 / **页面成功展示后**才推进基线）的纯函数在 `electron/lib/releaseNotes/judge.ts`（零依赖独立文件，专为让脚本 import）——**改规则必须同步补 `.AGENT/scripts/release-notes/verify-release-notes.mjs` 的用例表**，别把规则写回 `index.ts`。
 
 ### 交互
 

@@ -237,7 +237,10 @@ export const SETTINGS = {
 
   // ---- 更新说明（VS Code 式 tab）：清单由 CHANGELOG 生成，阅读记录落仓库 .knowbase/modules/release-notes/ ----
   // 详见 docs/release-notes-design.md
-  releaseNotesAutoOpen: { default: true, type: 'toggle', label: '新版本时自动打开更新说明', group: '更新说明', desc: '中间版本号（x.y）变化后的首次启动，自动打开一页更新说明；修正版（x.y.z）不打扰', keywords: ['更新说明', '更新日志', '发布说明', '新版本', '自动打开', 'release notes', 'changelog'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.releaseNotes' },
+  // 键名保留 `releaseNotesAutoOpen`（2026-09-12 起的历史名）：改名会丢掉用户已存的值，
+  // 而且它要表达的事没变（新版本时要不要主动提醒）—— 只是提醒形式从「自动打开整页」
+  // 改成了「看板右上角一枚入口」（2026-11-14 看板升为首页后拍板）。
+  releaseNotesAutoOpen: { default: true, type: 'toggle', label: '新版本时在看板提醒', group: '更新说明', desc: '中间版本号（x.y）变化后，首页看板右上角出一枚更新说明入口（点了才打开那一页）；修正版（x.y.z）不提醒。关掉 = 完全静默，只能用下面的「查看更新说明」手动打开', keywords: ['更新说明', '更新日志', '发布说明', '新版本', '看板', '提醒', 'release notes', 'changelog'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.releaseNotes' },
   releaseNotesKeepHistory: { default: true, type: 'toggle', label: '在仓库中保留更新说明存档', group: '更新说明', desc: '把当前版本的更新说明与阅读记录写进仓库 .knowbase/modules/release-notes/，换电脑拷走仓库一并带走', keywords: ['更新说明', '存档', '保留', '阅读记录', 'release notes', 'knowbase'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.releaseNotes' },
   badgeEggActivated: { default: false, type: 'toggle', label: '角标彩蛋', group: '彩蛋', desc: '彩蛋：标题栏角标变为 YHAz（外观页输入 YHAz 激活）', keywords: ['彩蛋', '角标', 'YHAz', 'badge'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   aiToolMonthlyLimit: { default: 0, type: 'number', label: '月度调用上限', group: '工具调用', desc: '每月最多调用次数，0 表示不限制', keywords: ['上限', '限制', '每月', '调用上限', 'limit', '额度', '配额'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.monthlyLimit', aiTab: 'usage', min: 0, max: 1000000, step: 10 },

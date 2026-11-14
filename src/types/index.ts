@@ -208,7 +208,8 @@ export interface ReleaseNoteListEntry {
 export interface ReleaseNotesState {
   currentVersion: string
   hasNotes: boolean
-  shouldAutoOpen: boolean
+  /** 有当前版本说明且基线 major.minor 变了 = 未读（看板据此出入口；开关由渲染层判断） */
+  unread: boolean
 }
 
 // toolbox

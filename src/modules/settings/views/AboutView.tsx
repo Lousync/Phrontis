@@ -262,15 +262,15 @@ export function AboutView() {
         <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">更新说明</h3>
 
         <div className="flex items-center justify-between gap-3 max-w-md py-1.5">
-          <span className="text-[12px] text-[var(--text-primary)]">新版本时自动打开更新说明</span>
+          <span className="text-[12px] text-[var(--text-primary)]">新版本时在看板提醒</span>
           <SettingSwitch
             checked={s.releaseNotesAutoOpen !== false}
             onChange={v => update('releaseNotesAutoOpen', v)}
-            aria-label="新版本时自动打开更新说明"
+            aria-label="新版本时在看板提醒"
           />
         </div>
         <p className="text-[11px] text-[var(--text-muted)] max-w-md leading-relaxed">
-          中间版本号（x.y）变化后的首次启动自动打开一页；修正版（x.y.z）与全新安装不打扰。
+          中间版本号（x.y）变化后，首页看板右上角出一枚入口，点了才打开这一页；修正版（x.y.z）与全新安装不提醒。关掉则完全静默。
         </p>
 
         <div className="flex items-center justify-between gap-3 max-w-md py-1.5 mt-3">

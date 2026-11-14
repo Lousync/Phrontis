@@ -104,8 +104,8 @@ export interface ReleaseNotesState {
   currentVersion: string
   /** 是否有对应版本的更新说明数据 */
   hasNotes: boolean
-  /** 是否应当自动打开更新说明页 */
-  shouldAutoOpen: boolean
+  /** 是否有未读的本版说明（= 该在看板出提醒入口）；与「新版本时在看板提醒」开关无关 */
+  unread: boolean
 }
 
 /** jsonStore 的 module 参数。沿用本仓「模块数据一律在 .knowbase/modules/<模块>/」的口径 */

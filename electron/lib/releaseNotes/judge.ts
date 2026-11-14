@@ -38,14 +38,18 @@ export function mergeSeen(seen: readonly string[], version: string): string[] {
 }
 
 /**
- * 是否应当自动打开。语义 = **基线存在，且 major.minor 相对基线发生了变化**。
+ * major.minor 是否相对基线发生了变化（= 这个版本值得提醒一次）。
  *
  * - 首装 / 首次见到本仓库（基线为空）恒为 false —— 新用户先走新手引导，
  *   不该再塞一页更新说明。
  * - patch 升级（3.1.0 → 3.1.2）为 false —— 小补丁不打扰，用户能接受「不通知」，
  *   但接受不了「每次小更新都被弹一页」。
+ *
+ * 2026-11-14 更名（原 `shouldAutoOpenNotes`）：启动不再自动跳到更新说明页，
+ * 改为**在看板出一枚入口**（见 decideStartup 的 unread）——这里只判「版本该不该提醒」，
+ * 与「用什么形式提醒」无关。
  */
-export function shouldAutoOpenNotes(currentVersion: string, baseline: string): boolean {
+export function majorMinorChanged(currentVersion: string, baseline: string): boolean {
   const cur = normalizeVersion(currentVersion)
   const base = normalizeVersion(baseline)
   if (!cur || !base) return false
@@ -53,8 +57,12 @@ export function shouldAutoOpenNotes(currentVersion: string, baseline: string): b
 }
 
 export interface NotesDecision {
-  /** 是否应自动打开更新说明页 */
-  shouldAutoOpen: boolean
+  /**
+   * 是否有**未读**的本版说明（= 该在看板上出提醒入口）。
+   * 与「新版本时在看板提醒」开关解耦：开关由渲染层决定要不要真的画出来，
+   * 判定层只回答「有没有东西可读」。
+   */
+  unread: boolean
   /** 需要落盘的下一份阅读记录；`null` = 本次不必写盘 */
   nextIndex: ReleaseNotesIndex | null
 }
@@ -70,11 +78,11 @@ function indexWith(index: ReleaseNotesIndex, lastShown: string, version: string,
 /**
  * 启动时的判定（纯函数版）。三种情形：
  *
- * | 情形 | shouldAutoOpen | 是否写盘 |
+ * | 情形 | unread | 是否写盘 |
  * |---|---|---|
  * | ① 无基线（全新安装 / 首次见到本仓库） | false | **写**：把基线记成当前版本 |
  * | ② 同 major.minor（含 patch 升级） | false | 仅当基线 ≠ 当前版本时写（推进基线） |
- * | ③ major.minor 变了 | `hasNotes && autoOpenOn` | **不写** |
+ * | ③ major.minor 变了 | `hasNotes` | **不写** |
  *
  * 情形③ 故意不写盘：用户可能根本没看到这一页（刚渲染就崩了 / 立刻切走）。
  * 基线由渲染层页面**成功展示后**调 `markShown` 写入 —— 否则一次异常启动
@@ -87,7 +95,6 @@ export function decideStartup(
   currentVersion: string,
   index: ReleaseNotesIndex,
   hasNotes: boolean,
-  autoOpenOn: boolean,
   nowIso: string,
 ): NotesDecision {
   const cur = normalizeVersion(currentVersion)
@@ -95,17 +102,17 @@ export function decideStartup(
 
   // ① 无基线
   if (!baseline) {
-    return { shouldAutoOpen: false, nextIndex: indexWith(index, cur, cur, nowIso) }
+    return { unread: false, nextIndex: indexWith(index, cur, cur, nowIso) }
   }
 
   // ② 同 major.minor
-  if (!shouldAutoOpenNotes(cur, baseline)) {
-    if (baseline === cur) return { shouldAutoOpen: false, nextIndex: null }
-    return { shouldAutoOpen: false, nextIndex: indexWith(index, cur, cur, nowIso) }
+  if (!majorMinorChanged(cur, baseline)) {
+    if (baseline === cur) return { unread: false, nextIndex: null }
+    return { unread: false, nextIndex: indexWith(index, cur, cur, nowIso) }
   }
 
-  // ③ major.minor 变化：不写盘，等渲染层确认
-  return { shouldAutoOpen: hasNotes && autoOpenOn, nextIndex: null }
+  // ③ major.minor 变化：不写盘，等渲染层确认（页面展示过才推进基线）
+  return { unread: hasNotes, nextIndex: null }
 }
 
 /**

@@ -10,10 +10,12 @@
  * 「这个仓库看过哪几版的更新说明」属于仓库级事实；同时顺带把当前版本说明留档，
  * 换电脑拷走仓库就能一起带走。
  *
- * 触发规则（详见 docs/release-notes-design.md）：
- *   - 只在 **major.minor 变化** 时自动打开（patch 版本不打扰）；这对应「中间版本号的提升」
- *   - **首次安装（无阅读记录）只写记录、不弹** —— 新用户先走新手引导，不该再塞一页更新说明
- *   - 当前版本没有对应说明数据时也不弹（避免打开一个空页）
+ * 触发规则（判定本体在 ./judge.ts）：
+ *   - 只在 **major.minor 变化** 时提醒（patch 版本不打扰）；这对应「中间版本号的提升」
+ *   - **首次安装（无阅读记录）只写记录、不提醒** —— 新用户先走新手引导，不该再塞一页更新说明
+ *   - 当前版本没有对应说明数据时也不提醒（避免打开一个空页）
+ *   - 2026-11-14 起**不再自动打开整页**：看板首页是启动落点，提醒改为看板上的一枚入口
+ *     （`ReleaseNotesState.unread`）；读到之后由 markShown 推进基线，入口自然消失
  */
 
 import { app, ipcMain } from 'electron'
@@ -28,7 +30,7 @@ import { decideMarkShown, decideStartup, normalizeVersion } from './judge'
 
 // 判定规则本体在 ./judge.ts（零依赖纯函数，契约脚本可直接 import）。
 // 这里转出去，让「规则」只有一个可引用的入口。
-export { majorMinor, shouldAutoOpenNotes, mergeSeen, normalizeVersion } from './judge'
+export { majorMinor, majorMinorChanged, mergeSeen, normalizeVersion } from './judge'
 
 /** 设置读取器（registerReleaseNotesHandlers 注入），与 updateService / quizRepo 同款接法 */
 let getSettingValue: (key: string) => unknown = () => undefined
@@ -53,7 +55,7 @@ export function currentAppVersion(): string {
   return app.getVersion()
 }
 
-// majorMinor / shouldAutoOpenNotes / decideStartup / decideMarkShown 见 ./judge.ts
+// majorMinor / majorMinorChanged / decideStartup / decideMarkShown 见 ./judge.ts
 
 // ---------------------------------------------------------------- 阅读记录
 
@@ -123,18 +125,18 @@ export function getReleaseNotesState(): ReleaseNotesState {
   const currentVersion = currentAppVersion()
   const index = readIndex()
   const hasNotes = !!findReleaseNote(currentVersion)
-  const autoOpenOn = truthySetting('releaseNotesAutoOpen', true)
 
-  const { shouldAutoOpen, nextIndex } = decideStartup(
+  // 「新版本时在看板提醒」开关**不参与这里**：判定层只回答「有没有未读说明」，
+  // 画不画那枚入口由渲染层按设置决定（关掉开关 = 连入口都不出）。
+  const { unread, nextIndex } = decideStartup(
     currentVersion,
     index,
     hasNotes,
-    autoOpenOn,
     new Date().toISOString(),
   )
   if (nextIndex) writeIndex(nextIndex)
 
-  return { currentVersion, hasNotes, shouldAutoOpen }
+  return { currentVersion, hasNotes, unread }
 }
 
 /**

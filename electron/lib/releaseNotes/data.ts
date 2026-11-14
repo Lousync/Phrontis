@@ -61,6 +61,27 @@ export const RELEASE_NOTES = [
         ]
       },
       {
+        "title": "看板 · 更新说明入口",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "启动不再跳走",
+            "rest": "有更新说明时，软件不再 2 秒后自动把整页换成更新说明 —— 第一眼仍是「今天这一页」。",
+            "sub": []
+          },
+          {
+            "lead": "收进一枚入口",
+            "rest": "日期行右端出一枚 `v3.29.0 有什么变化`，点进去还是原来那页（工作区里打开、看完「知道了」回到看板），读完入口自动消失。",
+            "sub": []
+          },
+          {
+            "lead": "设置里改口",
+            "rest": "「新版本时自动打开更新说明」改为「新版本时在看板提醒」；关掉 = 连这枚入口都不出现（之前存的值仍然生效，不会被重置）。中间版本号（x.y）变化才提醒，修正版不打扰。",
+            "sub": []
+          }
+        ]
+      },
+      {
         "title": "内部",
         "kind": "internal",
         "items": [
@@ -81,7 +102,12 @@ export const RELEASE_NOTES = [
           },
           {
             "lead": "",
-            "rest": "契约：重写 `.AGENT/scripts/dashboard/verify-dashboard.mjs`（84 项）；删除磁贴 / 插件控件两份旧契约与 `cards.tsx` / `tileGrid.ts` / 旧 `Heatmap.tsx`；`verify-workbench-shell` / `verify-startup-tab` 同步书签集合与图标条成员。",
+            "rest": "契约：重写 `.AGENT/scripts/dashboard/verify-dashboard.mjs`（88 项）；删除磁贴 / 插件控件两份旧契约与 `cards.tsx` / `tileGrid.ts` / 旧 `Heatmap.tsx`；`verify-workbench-shell` / `verify-startup-tab` 同步书签集合与图标条成员。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "更新说明判定与提醒形式解耦：`ReleaseNotesState.shouldAutoOpen` → `unread`（主进程只回答「有没有未读」，开关归渲染层）；`judge.shouldAutoOpenNotes` → `majorMinorChanged`；`verify-release-notes.mjs` 新增 §6「看板入口接线」10 项（删掉的自动跳页、关开关静默、点击回得来都是静默失败模式）。",
             "sub": []
           }
         ]

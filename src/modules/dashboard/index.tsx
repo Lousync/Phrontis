@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { ArrowRight, Pencil, Sparkles } from 'lucide-react'
 import { dashboardGetSnapshot, onAiTeachCourseRefresh, toggleHabitCheck } from '../../lib/ipc'
 import { notifyDataChanged, useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
@@ -74,7 +74,7 @@ function hhmm(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench, onOpenBook, onJumpSchedule }: {
+export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench, onOpenBook, onJumpSchedule, notes, onOpenNotes }: {
   /** 工作台当前打开的模块标签（右列「工作台窗口」列它们） */
   openTabs: TabName[]
   /** 最近停留过的那个标签（标「上次」） */
@@ -83,6 +83,9 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
   onOpenWorkbench: () => void
   onOpenBook?: (relPath: string) => void
   onJumpSchedule?: () => void
+  /** 有未读的更新说明时给出当前版本号（渲染层已按「新版本时在看板提醒」开关过滤） */
+  notes?: { version: string } | null
+  onOpenNotes?: () => void
 }) {
   const { s, update } = useSettings()
   const snap = useDashboardSnapshot()
@@ -145,7 +148,23 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
         <div className="mx-auto flex min-h-[560px] w-full max-w-[1800px] flex-1 flex-col min-[2000px]:max-w-[2000px]">
 
           {/* ---------- 顶部：一句话结论 + 两个 KPI ---------- */}
-          <header className="flex flex-none items-end justify-between gap-6 px-0.5">
+          <header className="relative flex flex-none items-end justify-between gap-6 px-0.5">
+            {/* 更新说明入口（2026-11-14）：与日期同高、右对齐 —— 零垂直占地，
+                读过之后自动消失，页面回到一张干净的纸。只走这里，不再自动跳整页。 */}
+            {notes && onOpenNotes && (
+              <button
+                type="button"
+                onClick={onOpenNotes}
+                data-tip="本版改了什么（点击打开）"
+                className="kb-view-fade group absolute right-0 top-0 inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--accent)_26%,var(--border-color))] bg-[color-mix(in_srgb,var(--accent)_7%,var(--card-bg))] px-2.5 py-[3.5px] text-[10px] leading-none text-[var(--text-secondary)] transition-colors hover:border-[color-mix(in_srgb,var(--accent)_55%,transparent)] hover:text-[var(--text-primary)]"
+                aria-label={`打开 v${notes.version} 更新说明`}
+              >
+                <Sparkles size={11} className="flex-none text-[var(--accent)]" />
+                <b className="font-semibold tabular-nums text-[var(--text-primary)]">v{notes.version}</b>
+                <span>有什么变化</span>
+                <ArrowRight size={11} className="flex-none opacity-55 transition-opacity group-hover:opacity-90" />
+              </button>
+            )}
             <div className="min-w-0">
               <span className="block text-[9px] uppercase tracking-[0.14em] text-[var(--text-muted)]">{dateLine(snap.today)}</span>
               <h1 className={`mt-[7px] font-bold leading-[1.08] tracking-[-0.035em] text-[var(--text-primary)] ${compact ? 'text-[26px]' : 'text-[clamp(26px,2.1vw,36px)] min-[2000px]:text-[42px]'}`}>
