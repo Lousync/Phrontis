@@ -33,6 +33,7 @@ export const HANDLER_STAGED_DATA_TOOLS = new Set([
  */
 export const STAGEABLE_WRITE_TOOLS = new Set([
   'builtin.blog.create-entry',
+  'builtin.knowledge.topic.assign',
   'builtin.quiz.set-note',
   'builtin.quiz.tag',
   'builtin.quiz.collect',

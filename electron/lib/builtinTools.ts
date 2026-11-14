@@ -33,6 +33,7 @@ import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
 import { getKnowledgeIndex, getKnowledgeTextIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { getGraphIndex } from 'phrontis-core/kbStore/graphIndex'
 import { vaultGetPageById, vaultGetCategories, vaultCreatePage, vaultDirExists } from 'phrontis-core/kbStore/knowledgeVaultRepo'
+import { vaultGetTopics, vaultResolveOrCreateTopic, vaultPatchTopicMembers } from 'phrontis-core/kbStore/knowledgeTopicsRepo'
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from 'phrontis-core/kbStore/blogVaultRepo'
@@ -124,6 +125,8 @@ function buildExcerpt(plain: string, terms: string[], radius = 60): string {
 }
 
 const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
+/** 数组入参（AI 工具用）：只收字符串条目，trim 后去空 */
+const asStrList = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => str(x).trim()).filter(Boolean) : [])
 const num = (v: unknown, fallback: number): number => {
   const n = Number(v)
   return Number.isFinite(n) ? n : fallback
@@ -1158,6 +1161,124 @@ export function registerBuiltinTools(): void {
     return { ok: true, id: page.id, title, path: page.path }
   })
 
+  // 8b. builtin.knowledge.topics —— 读虚拟主题（v3.28.0 B 批，docs/knowledge-feed-topics-plan.md §5.1）
+  //     主题 = 跨目录的虚拟集合，只记「主题 → pageId 成员」。读工具按需装载（铁律 16）：
+  //     典型会话并不整理主题，常驻会把 schema 成本摊到每一轮。
+  registerTool({
+    name: 'builtin.knowledge.topics',
+    title: '查笔记主题',
+    description: '列出笔记主题（虚拟集合：跨目录，不移动文件）。可按主题名/id 或某篇笔记过滤；需要成员标题时加 includeMembers',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic: { type: 'string', description: '主题名或 id（名字按包含匹配）' },
+        pageId: { type: 'string', description: '只看该笔记属于哪些主题（id 或仓库相对路径）' },
+        includeMembers: { type: 'boolean', description: '附成员 id + 标题（每主题最多 100）' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'knowledge',
+  }, args => {
+    const q = str(args.topic).trim().toLowerCase()
+    const pageKey = str(args.pageId).trim()
+    const idx = getKnowledgeIndex()
+    const pathToId = new Map<string, string>()
+    for (const p of idx.pages) pathToId.set(p.path, p.id)
+    const wantedId = pageKey ? (idx.byId[pageKey]?.id ?? pathToId.get(pageKey)) : undefined
+    // 查不存在的笔记要说清楚，不能静默返回空（模型会误判为「这篇不属于任何主题」）
+    if (pageKey && !wantedId) throw new Error(`笔记不存在：${pageKey}（可先用 builtin.knowledge.search 确认 id）`)
+    const rows = vaultGetTopics().filter(t => {
+      if (q && t.id.toLowerCase() !== q && !t.name.toLowerCase().includes(q)) return false
+      if (wantedId && !t.members.some(m => m.pageId === wantedId)) return false
+      return true
+    })
+    return rows.map(t => {
+      // 目录数口径与 UI 的 topicDirCount 一致：成员所在目录（不含文件名）去重
+      const dirs = new Set<string>()
+      for (const m of t.members) {
+        const path = (idx.byId[m.pageId]?.path ?? m.path ?? '').replace(/\\/g, '/')
+        const i = path.lastIndexOf('/')
+        dirs.add(i < 0 ? '' : path.slice(0, i))
+      }
+      return {
+        id: t.id,
+        name: t.name,
+        desc: t.desc,
+        memberCount: t.members.length,
+        dirCount: dirs.size,
+        updatedAt: t.updatedAt,
+        ...(args.includeMembers === true
+          ? {
+            members: t.members.slice(0, 100).map(m => {
+              const p = idx.byId[m.pageId]
+              return { id: m.pageId, title: p?.title ?? '', path: p?.path ?? m.path ?? '' }
+            }),
+          }
+          : {}),
+      }
+    })
+  })
+
+  // 8c. builtin.knowledge.topic.assign —— 整理主题成员（v3.28.0 B 批，§5.2）
+  //     **只改成员关系**：不移动文件、不改 frontmatter、不改正文（数据层 vaultPatchTopicMembers 保证）。
+  //     注册在 STAGEABLE_WRITE_TOOLS：参数即完整意图、重复执行幂等，确认模式由通用暂存层预览。
+  registerTool({
+    name: 'builtin.knowledge.topic.assign',
+    title: '整理笔记主题',
+    description: '把笔记加入 / 移出主题（只改成员关系，不移动文件、不改正文）。主题按 id 或名字指定，名字不存在会自动新建；add / remove 填笔记 id 或仓库相对路径，重复操作幂等',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topicId: { type: 'string', description: '主题 id（优先于 name）' },
+        name: { type: 'string', description: '主题名（不存在则新建）' },
+        add: { type: 'array', items: { type: 'string' }, description: '要加入的笔记 id 或相对路径' },
+        remove: { type: 'array', items: { type: 'string' }, description: '要移出的笔记 id 或相对路径' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'knowledge',
+  }, args => {
+    const topicId = str(args.topicId).trim()
+    const name = str(args.name).trim()
+    const add = asStrList(args.add)
+    const remove = asStrList(args.remove)
+    if (!topicId && !name) throw new Error('需要 topicId 或 name 指定主题')
+    let topic = topicId ? vaultGetTopics().find(t => t.id === topicId) : undefined
+    if (topicId && !topic) throw new Error(`主题不存在：${topicId}（可先用 builtin.knowledge.topics 查）`)
+    let created = false
+    if (!topic) {
+      const r = vaultResolveOrCreateTopic(name)
+      topic = r.topic
+      created = r.created
+    }
+    const before = new Set(topic.members.map(m => m.pageId))
+    // 成员级换算出「本次实际变化」：入参可能已是成员（幂等），直接回参数会让模型以为都改了
+    const next = (add.length || remove.length)
+      ? vaultPatchTopicMembers(topic.id, { add, remove, source: 'ai' })
+      : topic
+    const after = new Set(next.members.map(m => m.pageId))
+    const addedIds = [...after].filter(id => !before.has(id))
+    const removedIds = [...before].filter(id => !after.has(id))
+    // 写后广播（铁律 1）：知识库是保活模块，不通知界面就看不到新成员
+    if (created || addedIds.length || removedIds.length) broadcastDataChanged('knowledge')
+    return {
+      ok: true,
+      topicId: next.id,
+      name: next.name,
+      created,
+      added: addedIds.length,
+      removed: removedIds.length,
+      memberCount: next.members.length,
+    }
+  })
+
   // 9. builtin.knowledge.append-page 已退役（2026-09-09 P2）：vault.edit(append=true) 收编
   //    （先 knowledge.search 或 vault.read(id=) 定位页面 path，再 vault.edit append）
 
@@ -1866,7 +1987,7 @@ export function registerBuiltinTools(): void {
 
   // 12e. builtin.vocab.words —— 背单词：今天 + 近 N 天错词（读）
   // 造句复习的默认数据源；description 里明确「先出题、后批改」，避免模型一次性把答案说完。
-  // v3.17.0 背单词暂不开放：3.18.0 把 VOCAB_ENTRY_ENABLED 置 true 即恢复；届时补回 tool.request 清单。
+  // v3.17.0 背单词暂不开放：适配完成后把 VOCAB_ENTRY_ENABLED 置 true 即恢复；届时补回 tool.request 清单。
   if (VOCAB_ENTRY_ENABLED) registerTool({
     name: 'builtin.vocab.words',
     title: '查询背单词记录',
@@ -2062,7 +2183,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.move / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.constraints.write / course.constraints.read / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.move / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / knowledge.topics / knowledge.topic.assign / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.constraints.write / course.constraints.read / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

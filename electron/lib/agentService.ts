@@ -550,6 +550,7 @@ const CHANGE_LABELS: Record<string, string> = {
   'builtin.vault.move': '批量移动文件',
   'builtin.vault.trash': '移入回收站',
   'builtin.knowledge.create-page': '新建知识页',
+  'builtin.knowledge.topic.assign': '整理笔记主题',
   'builtin.blog.create-entry': '新建日记',
   'builtin.schedule.create-todo': '创建待办',
   'builtin.schedule.update-todo': '修改待办',
@@ -1790,6 +1791,8 @@ async function runAgentLoop(
               ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
             : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image') ? String(data?.relPath ?? '').trim()
               : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
+                // 主题整理：结果是主题名（不是文件），「本次改动」清单显示「整理笔记主题 · 面试高频」
+                : realName === 'builtin.knowledge.topic.assign' ? String(data?.name ?? '').trim()
                 : ''
           const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
           // 参数里取不到可读目标时，回落到工具结果自带的标题（如 schedule.delete-todo

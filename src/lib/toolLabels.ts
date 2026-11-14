@@ -17,6 +17,8 @@ export const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.vault.trash': '移入回收站',
   'builtin.knowledge.search': '检索知识库',
   'builtin.knowledge.create-page': '新建知识页',
+  'builtin.knowledge.topics': '查笔记主题',
+  'builtin.knowledge.topic.assign': '整理笔记主题',
   'builtin.blog.create-entry': '新建日记',
   'builtin.schedule.list-todos': '查看待办',
   'builtin.schedule.create-todo': '创建待办',

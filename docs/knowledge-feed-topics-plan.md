@@ -1,6 +1,6 @@
 # 笔记区改造（笔记流 + 虚拟主题）实现方案
 
-> 状态：**A 批已实施（v3.27.0，2026-11-14）**；B 批（AI 工具）待开始。
+> 状态：**A 批已实施（v3.27.0，2026-11-14）；B 批已实施（v3.28.0，2026-11-14）**。
 > 原型（本地，不入库）：`tmp/note-zone-proto/index.html`
 > 拍板记录：2026-11-14 用户确认「主题 = 虚拟集合」等 8 条；本文所有「已拍板」以那轮为准。
 >
@@ -251,6 +251,10 @@ patchKnowledgeTopicMembers(id, p: { add?: string[]; remove?: string[] }): Promis
 笔记右键新增「加入主题…」：列出全部主题（已加入的带 ✓，点击切换成员），底部「新建主题并加入…」。
 
 ## 5. AI 工具（B 批）
+
+> **已落码（v3.28.0）**：读 `builtin.knowledge.topics` / 写 `builtin.knowledge.topic.assign`；
+> 名字 → 主题桥放在 core `vaultResolveOrCreateTopic(name)`（UI 与 AI 共用判重口径，铁律 18）；
+> 写工具进 `STAGEABLE_WRITE_TOOLS`；契约 `.AGENT/scripts/knowledge-topics/verify-topic-ai-tools.mjs` 36 项。
 
 ### 5.1 读工具 `builtin.knowledge.topics`
 

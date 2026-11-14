@@ -1,9 +1,9 @@
 源文件: /home/lousync/Projects/Phrontis/electron/lib/builtinTools.ts
-工具总数: 69
+工具总数: 71
 
 【core —— 每轮常驻注入】16 个
   builtin.vault.read                  5804 字符  ~1709 tok  schema  472  [read/-]
-  builtin.tool.request                3535 字符  ~1191 tok  schema  157  [read/-]
+  builtin.tool.request                3579 字符  ~1202 tok  schema  157  [read/-]
   builtin.quiz.list                   3290 字符  ~1036 tok  schema  556  [read/quiz]
   builtin.pomodoro.summary            2489 字符  ~ 648 tok  schema   83  [read/pomodoro]
   builtin.habits.stats                2438 字符  ~ 684 tok  schema  241  [read/checkin]
@@ -18,9 +18,9 @@
   builtin.web.read                     932 字符  ~ 308 tok  schema  174  [read/-]
   builtin.web.search                   722 字符  ~ 245 tok  schema  173  [read/-]
   builtin.schedule.list-recurring      570 字符  ~ 167 tok  schema   34  [read/schedule]
-  小计: 33184 字符  ~10240 tok
+  小计: 33228 字符  ~10251 tok
 
-【ondemand —— 默认折叠，tool.request 后才注入】53 个
+【ondemand —— 默认折叠，tool.request 后才注入】55 个
   builtin.quiz.gen-paper              4961 字符  ~1631 tok  schema  713  [write/quiz]
   image                               4422 字符  ~1632 tok  schema  362  [write/-]
   builtin.knowledge.graph-topology    4346 字符  ~1345 tok  schema  264  [read/knowledge]
@@ -34,8 +34,10 @@
   builtin.vault.rename                2669 字符  ~ 860 tok  schema  188  [write/-]
   builtin.schedule.create-workflow    2586 字符  ~ 697 tok  schema  623  [write/schedule]
   builtin.schedule.update-todo        2432 字符  ~ 858 tok  schema  788  [write/schedule]
+  builtin.knowledge.topics            2128 字符  ~ 642 tok  schema  233  [read/knowledge]
   builtin.schedule.mutate-checkpoint  2067 字符  ~ 563 tok  schema  565  [write/schedule]
-  builtin.accounting.balances         2049 字符  ~ 674 tok  schema   34  [read/accounting]
+  builtin.knowledge.topic.assign      2052 字符  ~ 647 tok  schema  312  [write/knowledge]
+  builtin.accounting.balances         2047 字符  ~ 678 tok  schema   34  [read/accounting]
   builtin.schedule.mutate-stage       2014 字符  ~ 552 tok  schema  551  [write/schedule]
   builtin.knowledge.create-page       1999 字符  ~ 690 tok  schema  324  [write/knowledge]
   inventory                           1779 字符  ~ 683 tok  schema  109  [write/-]
@@ -74,10 +76,10 @@
   course.outline.remove-unit           619 字符  ~ 211 tok  schema  106  [write/-]
   builtin.schedule.delete-workflow     601 字符  ~ 174 tok  schema   96  [write/schedule]
   builtin.schedule.get-workflow        594 字符  ~ 173 tok  schema   96  [read/schedule]
-  小计: 91874 字符  ~29608 tok
+  小计: 96052 字符  ~30901 tok
 
-合计若全部装载: ~39848 tok
-实际常驻(默认权限 read 态): ~10240 tok / 轮
+合计若全部装载: ~41152 tok
+实际常驻(默认权限 read 态): ~10251 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】
   ⚠️ 超线 3 个：builtin.schedule.create-recurring 985；builtin.intel.query 974；builtin.schedule.update-recurring 847

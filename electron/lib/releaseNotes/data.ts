@@ -4,11 +4,65 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：77
+ * 版本数：78
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.28.0",
+    "date": "2026-11-14",
+    "summary": "本版一句话：AI 现在能整理笔记主题——把笔记归到「面试高频」这类跨目录集合，全程不移动任何文件。",
+    "groups": [
+      {
+        "title": "AI · 笔记主题",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "查主题",
+            "rest": "AI 能列出主题、成员数与跨了几个目录；也可反查「这篇笔记属于哪些主题」，需要时附上成员标题。",
+            "sub": []
+          },
+          {
+            "lead": "整理主题",
+            "rest": "一句话就能「把这几篇加入面试高频」。主题按名字指定、不存在自动新建；重复归同一篇不会重复入列。只改成员关系——不移动文件、不写 frontmatter、不改正文，改名或移动文件也不会断链。",
+            "sub": []
+          },
+          {
+            "lead": "先预览再落盘",
+            "rest": "统一助手开启「先预览」时，主题变更会进变更方案（写明主题与增删篇数），确认后才生效。",
+            "sub": []
+          },
+          {
+            "lead": "边界",
+            "rest": "AI 不能删除或重命名主题（删除只解散集合、笔记全部保留，请在主题详情页操作）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "需要知识库模块对 AI 开放写入（设置 → AI → 权限），并允许它申请这两个按需工具。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "内置工具 71 个（16 常驻 + 55 按需）；主题工具挂 `ondemand`，schema 分别 233 / 312 字符。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约 `.AGENT/scripts/knowledge-topics/verify-topic-ai-tools.mjs`（36 项：注册面 / 只改成员的边界 / 暂存白名单与工具清单 / 真盘幂等与「Markdown 一字节不变」）。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.27.0",
     "date": "2026-11-14",
