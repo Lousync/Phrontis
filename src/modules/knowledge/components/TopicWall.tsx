@@ -17,6 +17,8 @@ export interface TopicWallProps {
   topics: KnowledgeTopic[]
   pages: KnowledgePage[]
   unfiled: KnowledgePage[]
+  /** 搜索词（v3.27.x：左栏搜索框三视图常驻，主题视图按主题名 / 描述 / 成员标题过滤） */
+  query: string
   /** 内联新建是否展开（由模块层控制：头部 ＋ → 新建主题也走这条） */
   creating: boolean
   onStartCreate: () => void
@@ -34,7 +36,7 @@ export interface TopicWallProps {
 const MAX_PREVIEW = 3
 
 export function TopicWall({
-  topics, pages, unfiled, creating, onStartCreate, onCancelCreate, onCreate,
+  topics, pages, unfiled, query, creating, onStartCreate, onCancelCreate, onCreate,
   onOpenTopic, onOpenUnfiled, onOpenPage, onContextMenu, onAddMember, onRemoveMember,
 }: TopicWallProps) {
   const [draft, setDraft] = useState('')
@@ -49,6 +51,17 @@ export function TopicWall({
   const memberPages = useMemo(
     () => new Map(topics.map((t) => [t.id, resolveTopicPages(t, pages)])),
     [topics, pages],
+  )
+
+  /* 搜索过滤（v3.27.x）：主题名 / 描述 / 成员标题；未归类按标题 + 路径 */
+  const q = query.trim().toLowerCase()
+  const visibleTopics = useMemo(() => {
+    if (!q) return topics
+    return topics.filter((t) => `${t.name} ${t.desc} ${(memberPages.get(t.id) ?? []).map((p) => p.title).join(' ')}`.toLowerCase().includes(q))
+  }, [topics, q, memberPages])
+  const visibleUnfiled = useMemo(
+    () => (q ? unfiled.filter((p) => `${p.title} ${p.path ?? ''}`.toLowerCase().includes(q)) : unfiled),
+    [unfiled, q],
   )
 
   const submitCreate = async (): Promise<void> => {
@@ -135,7 +148,7 @@ export function TopicWall({
         </button>
       )}
 
-      {topics.map((t) => {
+      {visibleTopics.map((t) => {
         const members = memberPages.get(t.id) ?? []
         const isOver = overTopicId === t.id
         const open = expanded.has(t.id)
@@ -221,13 +234,15 @@ export function TopicWall({
         )
       })}
 
-      {!topics.length && !creating && (
+      {!visibleTopics.length && !creating && (
         <div className="px-2 pb-3 text-center text-[11.5px] leading-relaxed text-[var(--text-muted)]">
-          还没有主题。点顶部「＋ → 新建主题」，或把笔记右键「加入主题…」。
+          {q ? '没有匹配的主题' : '还没有主题。点顶部「＋ → 新建主题」，或把笔记右键「加入主题…」。'}
         </div>
       )}
 
-      {/* 未归类：不是主题、也不是落点（避免误以为「拖进来 = 移出全部主题」） */}
+      {/* 未归类：不是主题、也不是落点（避免误以为「拖进来 = 移出全部主题」）。
+          搜索时若无匹配则整卡收起，不占位置。 */}
+      {(!q || visibleUnfiled.length > 0) && (
       <div className="relative mt-1 overflow-hidden rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 pb-2 pt-2.5">
         <button
           type="button"
@@ -237,10 +252,10 @@ export function TopicWall({
         >
           <List size={14} className="shrink-0 text-[var(--text-muted)]" />
           <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[var(--text-primary)]">未归类</span>
-          <span className="shrink-0 rounded-full bg-[var(--bg-tertiary)] px-1.5 text-[9.5px] leading-4 tabular-nums text-[var(--text-muted)]">{unfiled.length}</span>
+          <span className="shrink-0 rounded-full bg-[var(--bg-tertiary)] px-1.5 text-[9.5px] leading-4 tabular-nums text-[var(--text-muted)]">{visibleUnfiled.length}</span>
         </button>
         <div className="mt-1" />
-        {unfiled.slice(0, MAX_PREVIEW).map((p) => (
+        {visibleUnfiled.slice(0, MAX_PREVIEW).map((p) => (
           <button
             key={p.id}
             type="button"
@@ -253,12 +268,13 @@ export function TopicWall({
             <span className="max-w-[42%] shrink-0 overflow-hidden text-ellipsis text-[9.5px] text-[var(--text-disabled)]">{dirLabelOfPath(p.path)}</span>
           </button>
         ))}
-        {unfiled.length > MAX_PREVIEW && (
+        {visibleUnfiled.length > MAX_PREVIEW && (
           <button type="button" onClick={onOpenUnfiled} className="mt-0.5 inline-flex rounded px-1.5 py-1 text-[10.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]">
-            还有 {unfiled.length - MAX_PREVIEW} 篇…
+            还有 {visibleUnfiled.length - MAX_PREVIEW} 篇…
           </button>
         )}
       </div>
+      )}
     </div>
   )
 }

@@ -81,8 +81,12 @@ const JS_SIDEBAR = `(() => {
     noteRows: document.querySelectorAll('[data-kb-note-row]').length,
     hasHome: !!document.querySelector('[data-wb="kbNoteHome"]'),
     hasWall: !!document.querySelector('[data-wb="kbTopicWall"]'),
-    hasTree: !!document.querySelector('[data-wb-tree-node]'),
+    hasTree: document.querySelectorAll('[data-wb-tree-node]').length > 0,
     outline: !!document.querySelector('[data-wb="kbOutlineMode"]'),
+    search: !!document.querySelector('[data-wb="kbFeedSidebar"] .kb-field input'),
+    expandBtn: !!document.querySelector('[data-wb="kbTreeSubtreeBtn"]'),
+    treeSearchRows: document.querySelectorAll('[data-kb-tree-search-result]').length,
+    inlineCreate: !!document.getElementById('kb-inline-create'),
   }
 })()`
 
@@ -151,6 +155,29 @@ async function main() {
   ok(st.hasHome, 'K4b 点总览标签 → 中间渲染总览')
   await shot('feed-02-home')
 
+  // 左栏交互收口：搜索三视图常驻；结构专属按钮只在结构出现
+  await evalJs(`document.querySelector('[data-wb="kbFeedView-recent"]')?.click()`)
+  await sleep(400)
+  st = await evalJs(JS_SIDEBAR)
+  ok(st.search, 'K4c 最近视图有搜索框')
+  ok(!st.expandBtn, 'K4d 最近视图没有「展开 / 收起」按钮（结构专属）')
+  await evalJs(`document.querySelector('[data-wb="kbFeedView-tree"]')?.click()`)
+  await sleep(700)
+  st = await evalJs(JS_SIDEBAR)
+  ok(st.view === 'tree' && st.search, 'K4e 结构视图搜索框仍在（不再消失）')
+  ok(st.expandBtn, 'K4f 结构视图有「展开 / 收起」按钮')
+  await evalJs(`(() => { const q=document.querySelector('[data-wb="kbFeedSidebar"] .kb-field input'); q && q.focus(); })()`)
+  await send('Input.insertText', { text: 'README' })
+  await sleep(700)
+  st = await evalJs(JS_SIDEBAR)
+  ok(st.treeSearchRows > 0, 'K4g 结构搜索出平铺结果（查找并定位）', `rows=${st.treeSearchRows}`)
+  await shot('feed-02b-tree-search')
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await sleep(500)
+  st = await evalJs(JS_SIDEBAR)
+  ok(st.treeSearchRows === 0 && st.hasTree, 'K4h Esc 清空 → 回到目录树', `rows=${st.treeSearchRows}`)
+
   // 主题视图 + 内联新建
   await evalJs(`document.querySelector('[data-wb="kbFeedView-topics"]')?.click()`)
   await sleep(500)
@@ -180,6 +207,23 @@ async function main() {
   })()`)
   ok(created.text.includes(TEST_TOPIC) && created.cards >= 1, 'K5d 新建主题 → 卡片出现', `cards=${created.cards}`)
   await shot('feed-03-topics')
+
+  // ＋ → 新建笔记：列表视图内联命名，不切视图
+  await evalJs(`document.querySelector('[data-wb="treeNewBtn"]')?.click()`)
+  await sleep(350)
+  const picked = await evalJs(`(() => {
+    const item = document.querySelector('[data-wb="treeNewItem-knowledge"]')
+    if (!item) return false
+    item.click(); return true
+  })()`)
+  await sleep(500)
+  st = await evalJs(JS_SIDEBAR)
+  ok(picked && st.inlineCreate && st.view === 'topics',
+    'K5e ＋ → 新建笔记在列表顶部内联命名，视图不跳', `view=${st.view}`)
+  await shot('feed-03b-inline-create')
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await sleep(400)
 
   // 落盘
   await sleep(400)

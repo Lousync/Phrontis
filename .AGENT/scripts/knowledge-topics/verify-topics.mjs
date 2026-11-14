@@ -136,12 +136,23 @@ check('⑤ 风格页面条恒可见（onStripVisible 恒 true）', /onStripVisib
 check('⑤ 阅读态自动大纲（activePreview + manualFeed 覆盖）', /const outlineMode = .*activeIsMd.*activePreview.*manualFeed/.test(mod))
 check('⑤ PageEditor 上报阅读态', /onPreviewChange=/.test(mod))
 check('⑤ PageEditor 接线 onPreviewChange', /onPreviewChange\?: \(preview: boolean\)/.test(stripComments(read('src/modules/knowledge/components/PageEditor.tsx'))))
-check('⑤ ＋ 菜单含「新建主题」', /label: '新建主题'/.test(mod))
+check('⑤ ＋ 菜单含「新建主题」且只在主题视图给出（不点了先切视图）', /feedView === 'topics'[\s\S]{0,160}?label: '新建主题'/.test(mod))
 check('⑤ 笔记右键含「加入主题…」与「新建主题并加入…」', /label: '加入主题…'/.test(mod) && /label: '新建主题并加入…'/.test(mod))
 check('⑤ 拖到主题 = 加成员（onAddMember），不调用移动文件', /onAddMember=\{handleAddMember\}/.test(mod) && !/dropOnTopic[\s\S]{0,200}handleTreeMove/.test(mod))
 check('⑤ 主题删除走行内确认（无中央模态）', /确认删除/.test(stripComments(read('src/modules/knowledge/components/TopicDetail.tsx'))))
 
+/* 左栏交互收口（v3.27.x，docs/knowledge-feed-topics-plan.md §11）：
+   ① 搜索框三视图常驻（此前结构视图直接不渲染 ＝ 用户报的「切过去搜索框没了」）
+   ② 只在结构成立的动作（展开 / 收起）只在结构视图出现，不靠「点了替你切视图」
+   ③ 新建笔记在最近 / 主题走列表内联行，不把画面切到结构 */
 const wall = stripComments(read('src/modules/knowledge/components/TopicWall.tsx'))
+check('⑤ 搜索框三视图常驻（不再按 feedView 条件隐藏）', !/feedView !== 'tree' && \(\s*<div className="shrink-0 px-2\.5 pb-2 pt-2"/.test(mod))
+check('⑤ 结构视图有「查找并定位」结果区（data-wb="kbTreeSearch"）', /data-wb="kbTreeSearch"/.test(mod) && /data-kb-tree-search-result=/.test(mod))
+check('⑤ 展开 / 收起按钮只在结构视图渲染', /feedView === 'tree' && \(\s*<TreeExpandButton/.test(mod))
+check('⑤ 负数：不再有「点了先切到结构」的展开按钮', !/changeFeedView\('tree'\);\s*if \(!treeSubtreeExpanded\)/.test(mod))
+check('⑤ 新建笔记在列表视图走内联行（kb-inline-create），结构走树内联', /id="kb-inline-create"/.test(mod) && /if \(feedView !== 'tree'\)[\s\S]{0,260}?setInlineCreate\(true\)/.test(mod))
+check('⑤ 主题视图搜索真的过滤（TopicWall 接 query）', /<TopicWall[\s\S]{0,200}?query=\{feedQuery\}/.test(mod) && /visibleTopics/.test(wall))
+
 check('⑤ 主题卡是 pointer 拖拽（铁律 9，不用 HTML5 dataTransfer）', /onPointerDown/.test(wall) && !/dataTransfer/.test(wall))
 check('⑤ 落点识别走 data-topic-drop', /data-topic-drop/.test(wall))
 

@@ -70,7 +70,7 @@ import { TopicWall } from './components/TopicWall'
 import { TopicDetail } from './components/TopicDetail'
 import { NoteHome } from './components/NoteHome'
 import {
-  filterFeedPages, resolveTopicPages,
+  dirLabelOfPath, filterFeedPages, resolveTopicPages,
   topicColorOf, topDirOfPath, unfiledPages, type FeedSort,
 } from './topicsPure'
 import { isEditingInput } from '../../lib/shortcuts'
@@ -236,6 +236,12 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   const [topicCreating, setTopicCreating] = useState(false)
   /** 「新建主题并加入…」：记住待加入的 pageId，创建成功后一次性加成员 */
   const [topicPendingAdd, setTopicPendingAdd] = useState<string | null>(null)
+  /**
+   * 列表视图（最近 / 主题）的新建笔记内联行。
+   * v3.27.x 交互收口：新建笔记**不再先把画面切到结构**再命名 —— 在列表顶部就地输入，
+   * 回车创建并打开，视图不变（结构视图仍走树内联命名，那是目录的天然落点）。
+   */
+  const [inlineCreate, setInlineCreate] = useState(false)
   /** 笔记右键菜单（最近视图 / 主题卡 / 总览共用） */
   const [pageMenu, setPageMenu] = useState<{ x: number; y: number; page: KnowledgePage } | null>(null)
   /** 笔记流排序菜单（与树排序菜单分开：两套选项语义不同） */
@@ -419,11 +425,56 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   const feedPages = useMemo(() => filterFeedPages(feedBase, feedQuery), [feedBase, feedQuery])
   const treeRootCount = useMemo(() => new Set(allPages.map((p) => topDirOfPath(p.path))).size, [allPages])
 
+  /**
+   * 结构视图搜索 = **查找并定位**（v3.27.x，docs/knowledge-feed-topics-plan.md §11）。
+   *
+   * 为什么不做「过滤树」：树是懒加载的（VaultTree 只渲染 dirCache 里已加载的目录），
+   * 过滤只能覆盖已展开部分，未展开的分支会静默漏掉 —— 那比「没有搜索框」更糟。
+   * 这里改用索引 + 分类路径直接给出平铺结果，点一条再展开祖先并滚动定位。
+   */
+  const treeSearchRows = useMemo(() => {
+    const q = feedQuery.trim().toLowerCase()
+    if (!q) return [] as Array<{ key: string; kind: 'page' | 'dir'; rel: string; name: string; path: string; pageId?: string; fileType?: string }>
+    const rows: Array<{ key: string; kind: 'page' | 'dir'; rel: string; name: string; path: string; pageId?: string; fileType?: string }> = []
+    const seenDirs = new Set<string>()
+    // 目录：分类目录（空间 / 笔记本 / 文件夹）先入
+    for (const c of categories) {
+      if (!c.path || seenDirs.has(c.path)) continue
+      seenDirs.add(c.path)
+      const name = c.path.split('/').pop() ?? c.path
+      if (`${name} ${c.path}`.toLowerCase().includes(q)) rows.push({ key: `dir:${c.path}`, kind: 'dir', rel: c.path, name, path: c.path })
+    }
+    for (const p of allPages) {
+      const rel = p.path ?? ''
+      if (!rel) continue
+      // 手工目录（不在 categories 里的）也进结果：从页面路径的祖先段推导
+      const parts = rel.split('/').slice(0, -1)
+      for (let i = 1; i <= parts.length; i++) {
+        const dir = parts.slice(0, i).join('/')
+        if (seenDirs.has(dir)) continue
+        const name = parts[i - 1]
+        if (name.toLowerCase().includes(q)) {
+          seenDirs.add(dir)
+          rows.push({ key: `dir:${dir}`, kind: 'dir', rel: dir, name, path: dir })
+        }
+      }
+      if (`${p.title} ${rel}`.toLowerCase().includes(q)) {
+        rows.push({
+          key: `page:${p.id}`, kind: 'page', rel,
+          name: p.title || rel.split('/').pop() || rel, path: rel,
+          pageId: p.id, fileType: p.fileType || '',
+        })
+      }
+    }
+    return rows.slice(0, 200)
+  }, [feedQuery, categories, allPages])
+
   /** 切视图：写设置（持久化）+ 退出自动大纲 */
   const changeFeedView = useCallback((view: 'recent' | 'topics' | 'tree') => {
     setFeedView(view)
     setManualFeed(true)
     setTopicCreating(false)
+    setInlineCreate(false)
     // 聚焦只属于「最近」视图：切走后清掉，避免出现看着已聚焦、列表却没过滤的假开关
     if (view !== 'recent') setFeedFocusDir(null)
     updateSettings('knowledgeFeedView', view)
@@ -1379,30 +1430,45 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
    *  读 ref 而非 state：恒等稳定的 useCallback（deps 为空）才能被模块级快捷键 effect 安全依赖。 */
   const treeLandDir = useCallback(() => selectedDirRelRef.current ?? '', [])
 
-  /** 头部「＋」菜单项（v3.27.0 笔记流：三项 = 新建笔记 / 新建主题 / 新建目录）。
-   *  「新建分类目录」仍在文件树右键菜单里；「新建目录」落点跟随选中目录。 */
+  /** 头部「＋」菜单项：只列**当前视图能创建的东西**（v3.27.x 交互收口）。
+   *  - 最近：新建笔记（列表顶部内联命名）
+   *  - 主题：新建笔记 / 新建主题
+   *  - 结构：新建笔记 / 新建目录（树内联命名）
+   *  菜单项不再「点了先切到结构」；「新建分类目录」仍在文件树右键菜单里。 */
   const treeNewItems = useMemo<TreeNewMenuItem[]>(() => {
     const ic = 'shrink-0 text-[var(--text-muted)]'
-    return [
+    const items: TreeNewMenuItem[] = [
       { key: 'knowledge', label: '新建笔记', icon: <FileText size={13} className={ic} /> },
-      { key: 'topic', label: '新建主题', icon: <LayoutGrid size={13} className={ic} /> },
-      { key: 'dir', label: '新建目录', icon: <Folder size={13} className={ic} /> },
     ]
-  }, [])
+    if (feedView === 'topics') {
+      items.push({ key: 'topic', label: '新建主题', icon: <LayoutGrid size={13} className={ic} /> })
+    }
+    if (feedView === 'tree') {
+      items.push({ key: 'dir', label: '新建目录', icon: <Folder size={13} className={ic} /> })
+    }
+    return items
+  }, [feedView])
 
   /** 「＋」选中类型 → 进既有内联输入，不新写创建逻辑（B-13 起分类目录也走这条路）。
-   *  先确保落点目录展开：内联输入行渲染在目录子级里，目录收着的话输入框根本不可见（表现为"点＋没反应"）。 */
+   *  最近 / 主题：在列表顶部内联命名，**不切视图**；结构：树内联命名（先确保落点目录展开，
+   *  否则输入行渲染在收起子树里 = 看起来「点＋没反应」）。 */
   const handleTreeNewPick = useCallback((key: string) => {
     // 新建主题：切到主题视图并展开内联命名卡（不落盘占位）
     if (key === 'topic') { openTopicCreate(); return }
     // 分类目录恒落仓库根层（顶层 mkdir + categories.json 登记），落点不跟随选中目录
     if (key === 'category') { setTreeCreating({ dirRel: '', type: 'category' }); return }
+    if (feedView !== 'tree') {
+      setManualFeed(true)
+      // 过滤会让内联行被「没有匹配」盖住 → 先清空查询
+      setFeedQuery('')
+      setInlineCreate(true)
+      requestAnimationFrame(() => document.getElementById('kb-inline-create')?.focus())
+      return
+    }
     const dirRel = treeLandDir()
     if (dirRel) setExpandedDirs((prev) => (prev.has(dirRel) ? prev : new Set(prev).add(dirRel)))
-    setFeedView('tree')
-    setManualFeed(true)
     setTreeCreating({ dirRel, type: key as 'knowledge' | 'dir' })
-  }, [treeLandDir, openTopicCreate])
+  }, [feedView, treeLandDir, openTopicCreate])
 
   /**
    * 「新建知识页」的**跨模块入口**（2026-10-13）：桌面「新建」与命令面板都派发 `kb-editor-new-page`。
@@ -2636,25 +2702,30 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
             </button>
           ) : (
             <>
-              <TreeNewButton items={treeNewItems} onPick={handleTreeNewPick} title="新建笔记 / 主题 / 目录" />
-              <button
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect()
-                  if (feedView === 'tree') setSortMenuPos({ x: r.left, y: r.bottom + 6 })
-                  else setFeedSortMenuPos({ x: r.left, y: r.bottom + 6 })
-                }}
-                data-tip="排序方式"
-                aria-label="排序方式"
-                data-wb="kbTreeSortBtn"
-                className={`rounded p-1 transition-colors ${sortMenuPos || feedSortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
-              >
-                {(feedView === 'tree'
-                  ? (treeSort === 'name-desc' || treeSort === 'mtime-desc')
-                  : feedSort === 'title')
-                  ? <ArrowDownNarrowWide {...SIDEBAR_HEADER_ICON} />
-                  : <ArrowUpNarrowWide {...SIDEBAR_HEADER_ICON} />}
-              </button>
-              {feedView === 'tree' ? (
+              <TreeNewButton items={treeNewItems} onPick={handleTreeNewPick} title="新建" />
+              {/* 排序：最近（笔记流排序）/ 结构（树排序）各有自己的选项；
+                  主题卡没有排序入口（只按最后更新），所以不在这里画一个点了没反应的按钮。 */}
+              {feedView !== 'topics' && (
+                <button
+                  onClick={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect()
+                    if (feedView === 'tree') setSortMenuPos({ x: r.left, y: r.bottom + 6 })
+                    else setFeedSortMenuPos({ x: r.left, y: r.bottom + 6 })
+                  }}
+                  data-tip="排序方式"
+                  aria-label="排序方式"
+                  data-wb="kbTreeSortBtn"
+                  className={`rounded p-1 transition-colors ${sortMenuPos || feedSortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                >
+                  {(feedView === 'tree'
+                    ? (treeSort === 'name-desc' || treeSort === 'mtime-desc')
+                    : feedSort === 'title')
+                    ? <ArrowDownNarrowWide {...SIDEBAR_HEADER_ICON} />
+                    : <ArrowUpNarrowWide {...SIDEBAR_HEADER_ICON} />}
+                </button>
+              )}
+              {/* 展开 / 收起只在结构视图成立 —— 其余视图不渲染（不是置灰、也不会替你把画面切过去） */}
+              {feedView === 'tree' && (
                 <TreeExpandButton
                   expanded={treeSubtreeExpanded}
                   onClick={toggleTreeSubtree}
@@ -2663,15 +2734,6 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                     ? (selectedDirRel ? '收起此目录（含子目录）' : '全部关闭')
                     : (selectedDirRel ? '展开此目录（含子目录）' : '展开全部（含子目录）')}
                 />
-              ) : (
-                <button
-                  onClick={() => { changeFeedView('tree'); if (!treeSubtreeExpanded) toggleTreeSubtree() }}
-                  data-tip="在结构视图中展开全部" aria-label="在结构视图中展开全部"
-                  data-wb="kbTreeSubtreeBtn"
-                  className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                >
-                  <ChevronsUpDown {...SIDEBAR_HEADER_ICON} />
-                </button>
               )}
               {feedView === 'tree' ? (
                 <FolderFocusButton
@@ -2764,31 +2826,34 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
               </div>
             ) : (
               <>
-                {/* 搜索（结构视图不渲染：树没有查询入口，不给点了没反应的控件） */}
-                {feedView !== 'tree' && (
-                  <div className="shrink-0 px-2.5 pb-2 pt-2">
-                    <div className="kb-field flex h-[30px] items-center gap-1.5 rounded-lg px-2">
-                      <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
-                      <input
-                        value={feedQuery}
-                        onChange={(e) => setFeedQuery(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Escape') setFeedQuery('') }}
-                        placeholder="搜索笔记"
-                        className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
-                      />
-                      {feedQuery && (
-                        <button
-                          type="button"
-                          onClick={() => setFeedQuery('')}
-                          data-tip="清除" aria-label="清除"
-                          className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                        >
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
+                {/* 搜索：三视图常驻（v3.27.x 用户反馈 —— 切到结构时搜索框消失很跳）。
+                    语义随视图：最近/主题 = 就地过滤；结构 = 查找并定位（见 treeSearchRows）。 */}
+                <div className="shrink-0 px-2.5 pb-2 pt-2">
+                  <div className="kb-field flex h-[30px] items-center gap-1.5 rounded-lg px-2">
+                    <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
+                    <input
+                      value={feedQuery}
+                      onChange={(e) => setFeedQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setFeedQuery('') }}
+                      placeholder={
+                        feedView === 'tree' ? '在结构中查找（标题 / 路径）'
+                          : feedView === 'topics' ? '搜索主题或成员笔记'
+                            : '搜索笔记'
+                      }
+                      className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
+                    />
+                    {feedQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setFeedQuery('')}
+                        data-tip="清除" aria-label="清除"
+                        className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
                   </div>
-                )}
+                </div>
                 {/* 三视图分段（最近 / 主题 / 结构） */}
                 <div className="mx-2.5 mb-2 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-0.5">
                   {([
@@ -2823,6 +2888,32 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                     </button>
                   </div>
                 )}
+                {/* 列表视图的新建笔记内联行（v3.27.x）：不切视图、不弹窗，回车创建并打开。
+                    右侧小字是落点（选中目录 → 仓库根），与树内联命名同一套「落点来源」。 */}
+                {inlineCreate && feedView !== 'tree' && (
+                  <div className="kb-item-in mx-2.5 mb-2 flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--bg-secondary)] px-2 py-1.5">
+                    <FilePlus size={13} className="shrink-0 text-[var(--accent)]" />
+                    <input
+                      id="kb-inline-create"
+                      autoFocus
+                      placeholder="输入标题，Enter 创建并打开"
+                      aria-label="新建笔记标题"
+                      className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
+                      onBlur={() => setInlineCreate(false)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') { setInlineCreate(false); return }
+                        if (e.key !== 'Enter') return
+                        const name = e.currentTarget.value.trim()
+                        if (!name) return
+                        setInlineCreate(false)
+                        void handleTreeCommitCreate(treeLandDir(), 'knowledge', name)
+                      }}
+                    />
+                    <span className="shrink-0 text-[9.5px] text-[var(--text-disabled)]">
+                      {treeLandDir() ? dirLabelOfPath(`${treeLandDir()}/x`) : '仓库根'}
+                    </span>
+                  </div>
+                )}
                 {feedView === 'recent' ? (
                   <div className="kb-view-in min-h-0 flex-1 overflow-y-auto">
                     <NoteFeed
@@ -2839,6 +2930,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                       topics={topics}
                       pages={allPages}
                       unfiled={unfiledList}
+                      query={feedQuery}
                       creating={topicCreating}
                       onStartCreate={() => { setTopicPendingAdd(null); setTopicCreating(true) }}
                       onCancelCreate={() => { setTopicCreating(false); setTopicPendingAdd(null) }}
@@ -2853,6 +2945,39 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                   </div>
                 ) : (
               <div className="kb-view-in relative flex flex-1 min-h-0 flex-col">
+                {/* 结构视图 + 有查询 = 平铺的查找结果（点一条定位），否则是正常的目录树。
+                    树是懒加载的，直接过滤只会漏掉未展开目录 → 见 treeSearchRows 头注。 */}
+                {feedQuery.trim() ? (
+                  <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3" data-wb="kbTreeSearch">
+                    <div className="px-1.5 pb-1 pt-2 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+                      {treeSearchRows.length
+                        ? `在结构中查找 · ${treeSearchRows.length} 条 · 点一条定位`
+                        : '结构里没有匹配的目录或笔记（只搜标题与路径）'}
+                    </div>
+                    {treeSearchRows.map((r) => (
+                      <button
+                        key={r.key}
+                        type="button"
+                        data-kb-tree-search-result={r.rel}
+                        onClick={() => {
+                          setFeedQuery('')
+                          if (r.kind === 'page' && r.pageId) {
+                            void handleOpenPage(r.pageId, { title: r.name, fileType: r.fileType || 'md' })
+                            return
+                          }
+                          handleLocateInTree(r.rel)
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                      >
+                        <span className="shrink-0 text-[var(--text-muted)]">
+                          {r.kind === 'dir' ? <Folder size={14} /> : <FileText size={14} />}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--text-primary)]">{r.name}</span>
+                        <span className="max-w-[52%] shrink-0 truncate text-[9.5px] text-[var(--text-disabled)]">{r.path}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
                 <VaultTree
                   rootRef={treeRef}
                   dirCache={dirCache}
@@ -2889,6 +3014,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                   onCancelRename={() => setTreeRenaming(null)}
                   deletingMap={deletingMap}
                 />
+                )}
                 {/* B-13（2026-09-21 拍板）：原「新建分类目录」的居中浮层（`catDraft` 通道）**已整体删除**，
                     命名合并进文件树内联输入——与新建知识页/目录/文件同一机制，即 VS Code 式。
                     分类目录语义不变：顶层 mkdir + categories.json 登记，**恒落仓库根层**
