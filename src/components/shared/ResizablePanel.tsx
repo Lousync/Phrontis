@@ -52,9 +52,17 @@ interface Props {
    * 让外壳层垫底的主题特效画布透出来。默认 false = 实底（模块侧栏等照旧）。
    */
   translucent?: boolean
+  /**
+   * 不画自身底色（2026-11-14）：底色交给所在卡片 / 模块表面承担，本层只做布局。
+   * 用于**内嵌分栏**（知识页右栏「关联网络」、AI 教学三条边栏）——它们不在卡片级别，
+   * 自己再铺一层实色会让「页面」和「分栏」分成两个色块；折叠态那 12px 贴边条更是会变成
+   * 一条比页面更实的白条（昼夜主题模块面半透明后暴露出来，用户报「知识页右缘白条」）。
+   * 展开时靠手柄那 1px 分隔线 + 分区头 `border-b` 分界，不缺结构感。
+   */
+  bare?: boolean
 }
 
-export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange, onHandleClick, openDelayMs = 0, translucent = false }: Props) {
+export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange, onHandleClick, openDelayMs = 0, translucent = false, bare = false }: Props) {
   const [width, setWidth] = useState(initialWidth ?? defaultWidth)
   const [dragging, setDragging] = useState(false)
   /** pointer capture 不可用时的退路标记（退回 window 监听，老实现同构但带 dead-zone 与统一收尾） */
@@ -286,7 +294,7 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
   return (
     <div
       ref={panelRef}
-      className={`shrink-0 relative flex flex-col overflow-hidden ${translucent ? 'bg-[color-mix(in_srgb,var(--bg-primary)_72%,transparent)]' : 'bg-[var(--bg-primary)]'} ${className}`}
+      className={`shrink-0 relative flex flex-col overflow-hidden ${bare ? '' : translucent ? 'bg-[color-mix(in_srgb,var(--bg-primary)_72%,transparent)]' : 'bg-[var(--bg-primary)]'} ${className}`}
       style={{
         width: displayWidth,
         // 延迟并入 transition 简写：**不要**与 transitionDelay 长写并存 —— React 在重渲染时

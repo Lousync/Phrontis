@@ -907,7 +907,7 @@ export function MomentsModule() {
       <ThemeFxLayer />
       <div ref={pageScrollRef} className="relative z-[1] flex-1 min-h-0 overflow-y-auto overscroll-contain">
         <div className="px-5 pt-4 pb-3">
-          <div className="max-w-4xl mx-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] px-5 py-4 flex items-center gap-3">
+          <div className="max-w-4xl mx-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] kb-glass-chrome px-5 py-4 flex items-center gap-3">
             <div className="w-12 h-12 rounded-full overflow-hidden border border-[var(--border-color)] bg-[var(--bg-primary)] shrink-0">
               {avatarDataUrl ? (
                 <img src={avatarDataUrl} alt="头像" className="w-full h-full object-cover" />
@@ -962,7 +962,7 @@ export function MomentsModule() {
         </div>
 
       {/* 搜索 + 视图切换 */}
-      <div className="sticky top-0 z-30 px-2 py-1 bg-[var(--bg-primary)]/85 backdrop-blur-md">
+      <div className="sticky top-0 z-30 px-2 py-1 bg-[var(--bg-primary)]/85 backdrop-blur-md kb-glass-chrome">
         <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />

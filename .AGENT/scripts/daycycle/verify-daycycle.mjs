@@ -134,9 +134,11 @@ function mixRgb(c1, c2, t) {
     const bgL = relLum(snap.vars['--bg-primary'])
     if (bgL > 0.15 && bgL < 0.34) bandMinutes += 10
 
-    // 通透表面 composite：主内容 26% + 模块 58% ≈ 69% 不透明，背后 31% 天空。
-    // 用 sky.mid 近似（最亮的一段）；翻板后全天按同一标准验。
-    const glassBg = mixRgb(snap.vars['--bg-primary'], snap.vars['--sky-mid'], 0.31)
+    // 通透表面 composite（2026-11-14 统一档位后 = **单层**外壳卡）：
+    // alpha = 44% + 0.8 × 晨昏增益（与 index.css 的 --wb-glass-bg 同步，改一处必须改两处）。
+    // 背后天空占比 = 1 - alpha；用 sky.mid 近似（最亮的一段）算最坏情况。
+    const glassAlpha = (44 + 0.8 * parseFloat(snap.vars['--dc-glass-boost'])) / 100
+    const glassBg = mixRgb(snap.vars['--bg-primary'], snap.vars['--sky-mid'], 1 - glassAlpha)
     const cGlass = contrast(snap.vars['--text-primary'], glassBg)
     if (cGlass < 3.5) glassBad.push(`t=${formatMinute(minute)} glass=${cGlass.toFixed(2)}`)
 
@@ -157,7 +159,7 @@ function mixRgb(c1, c2, t) {
   assert(varMiss === null, 'B1 全时段 36 支变量齐全非空', varMiss)
   assert(contrastBad.length === 0, 'B2 全时段对比度达标（正文≥4.0 弱文字≥2.0 顶栏≥2.2）',
     contrastBad.slice(0, 3).join(' | '))
-  assert(glassBad.length === 0, 'B2b 通透表面 composite 正文对比度 ≥3.5（69% 不透明 + sky.mid 近似）',
+  assert(glassBad.length === 0, 'B2b 通透表面 composite 正文对比度 ≥3.5（单层 44%+0.8×增益 + sky.mid 近似）',
     glassBad.slice(0, 3).join(' | '))
   assert(bandMinutes === 0, 'B2a UI 色板全天不落中间灰带（跨极性直接取一侧，19:05 不再灰褐）',
     `band=${bandMinutes} 分钟/天`)
@@ -219,10 +221,43 @@ function mixRgb(c1, c2, t) {
   assert(css.includes('html.theme-daycycle'), 'C7 html.theme-daycycle 静态兜底块在场')
   assert(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.kb-dc-bd-celestial\s*\{\s*transition:\s*none/.test(css),
     'C8 reduced-motion 降级（天体平滑 / 环境动效全停）')
-  assert(/html\.theme-daycycle\s+\.kb-theme-surface\s*\{[^}]*background-color:\s*color-mix/.test(css)
-    && /html\.theme-daycycle\s+\.kb-dc-center\s*\{/.test(css)
-    && /html\.theme-daycycle\s+\.kb-dc-side\s*\{/.test(css),
-    'C9 通透玻璃表面覆盖（kb-theme-surface / kb-dc-center / kb-dc-side）')
+  assert(/html\.theme-daycycle\s*\{[^}]*--wb-glass-bg:\s*color-mix\([^;]*calc\(44% \+ var\(--dc-glass-boost, 0%\) \* \.8\)/.test(css),
+    'C9 面板通透度单一旋钮 --wb-glass-bg（44% + 0.8 × 晨昏增益；17:13 ≈ 62.6%）')
+  assert(/html\.theme-daycycle \.kb-dc-center,[\s\S]{0,200}?\.kb-dc-side\s*\{[^}]*background-color:\s*var\(--wb-glass-bg\)/.test(css),
+    'C9b 左栏 / 中栏 / 右栏共用同一档通透度（本次三处不一致的根因）')
+  assert(/\[data-wb='shell'\] \.kb-theme-surface,[\s\S]{0,160}?background-color:\s*transparent/.test(css),
+    'C9c 工作台壳内模块内容面透明 —— 不再「壳 + 面」相乘叠出第二档')
+  assert(/html\.theme-daycycle \.kb-activitybar\s*\{[^}]*calc\(44% \+ var\(--dc-glass-boost, 0%\) \* \.8\)/.test(css),
+    'C9d 图标条与面板同档（只是底色换成 --activitybar-bg）')
+  assert(/html\.theme-daycycle \.kb-pagebar\s*\{[^}]*background-color:\s*transparent/.test(css),
+    'C9e 页签条透明（本来就是中栏卡上的一层，再铺底色会比正文深一档）')
+  // 内嵌分栏不许自铺实色（2026-11-14 用户报「知识页右缘白条」）：
+  // ResizablePanel 折叠态那 12px 贴边条会把整个面板底色铺上，模块面变透后就成了白条。
+  const rp = read('src/components/shared/ResizablePanel.tsx')
+  assert(/bare\?:\s*boolean/.test(rp) && /bare \? '' : translucent \?/.test(rp),
+    'C9f ResizablePanel 支持 bare（不画自身底色，交给所在卡片）')
+  const pageEditor = read('src/modules/knowledge/components/PageEditor.tsx')
+  assert(/storageKey="knowledgeRailWidth"[\s\S]{0,320}?\n\s+bare\n/.test(pageEditor),
+    'C9g 知识页右栏（关联网络）传 bare —— 折叠 12px 贴边条不再显形')
+  // 自带实色分栏的模块必须整页实底（2026-11-14 用户拍板「AI 教学中间向两侧对齐」）：
+  // 否则同一页出现「两侧实、中间透出天空」三种底色。
+  assert(/\[data-wb='shell'\] \.kb-theme-surface--solid\s*\{[^}]*background-color:\s*var\(--bg-primary\)/.test(css),
+    'C9h .kb-theme-surface--solid = 整模块实底（模块内自带实色分栏时用）')
+  const aiTeach = read('src/modules/ai-teaching/index.tsx')
+  assert(/className="kb-theme-surface kb-theme-surface--solid[^"]*"/.test(aiTeach),
+    'C9i AI 教学根节点取整页实底（三条实色边栏 + 中间聊天栏同色）')
+  // 模块内「结构面」玻璃化（2026-11-14 用户点名 插件 / 设置 / 说说 / 书市）：侧栏与工具条不再铺实色。
+  assert(/html\.theme-daycycle \.kb-glass-chrome\s*\{[^}]*--kb-chrome-base/.test(css),
+    'C9j .kb-glass-chrome = 模块内结构面薄玻璃（低 alpha + 14px 模糊，基色可换）')
+  for (const [file, hint] of [
+    ['src/modules/plugins/index.tsx', '插件左栏'],
+    ['src/modules/settings/index.tsx', '设置左导航'],
+    ['src/modules/moments/index.tsx', '说说 写下此刻卡 / 搜索条'],
+    ['src/modules/bookmarket/index.tsx', '书市首启提示条'],
+    ['src/modules/bookmarket/DiscoverView.tsx', '书市吸顶搜索条'],
+  ]) {
+    assert(read(file).includes('kb-glass-chrome'), `C9k ${hint} 挂 kb-glass-chrome`)
+  }
 
   const app = read('src/App.tsx')
   assert(app.includes('startDaycycleEngine()') && app.includes('stopDaycycleEngine()'),

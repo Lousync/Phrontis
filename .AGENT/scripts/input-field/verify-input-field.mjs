@@ -35,6 +35,7 @@ const migrated = [
   ['日程 · 任务清单添加', 'src/modules/schedule/views/TaskListView.tsx', ['kb-field-control']],
   ['AI 助手 · 范围面板搜索', 'src/modules/ai-assistant/ScopePane.tsx', ['kb-field-control']],
   ['书市 · 搜索', 'src/modules/bookmarket/DiscoverView.tsx', ['kb-field-control']],
+  ['插件市场 · 搜索', 'src/modules/plugins/index.tsx', ['kb-field', 'kb-field-control']],
   ['设置 · 数值输入', 'src/modules/settings/components/fields/NumberField.tsx', ['kb-field-control']],
 ]
 for (const [label, file, classes] of migrated) {

@@ -2001,7 +2001,7 @@ input:focus, textarea:focus, select:focus {
    顶栏是**行内渲染**、不画分隔线、不设底色，与正文连成一整片 —— 与「浮层压在正文之上」
    是两种形态，故不做等价替换，直接退役。契约：workbench-shell 的 F8 / F8b / F8c 负向断言。 */
 
-/* ===== 摘录多色高亮（txt <mark> / pdf overlay 共用色板；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） ===== */
+/* ===== 摘录多色高亮（txt <mark> / pdf overlay 共用色板；真源 = phrontis-core/src/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） ===== */
 .kb-exc-y { --exc: #efb84c; }
 .kb-exc-g { --exc: #7fb844; }
 .kb-exc-b { --exc: #5d9bdc; }
@@ -3085,41 +3085,102 @@ html.theme-daycycle .kb-titlebar {
   border-bottom-color: color-mix(in srgb, var(--tb-fg) 14%, transparent);
 }
 
-/* ===== 昼夜动态主题 · 通透玻璃表面（2026-11-11，用户拍板「沉浸天空 + 通透」）=====
+/* ===== 昼夜动态主题 · 通透玻璃表面（2026-11-11 拍板「沉浸天空 + 通透」；2026-11-14 统一档位）=====
    只覆盖带语义类名的外壳 / 模块根，不动 popover / 输入框等需要实底的可读面。
-   层级关系：整窗场景 z=-1 → 面板背景 alpha → 模块 kb-theme-surface alpha。
-   主内容区用 26% + 58% 叠出约 69% 不透明；侧栏用 44% + 46% 叠出约 70%，
-   保证正文对比度，同时让天空 / 月亮 / 星星能从后面透出来。 */
+   层级关系：整窗场景 z=-1 → 工作台外壳卡（唯一底色层）→ 模块内容面（透明）。
+
+   ★ 2026-11-14 用户反馈「左栏 / 中间主体 / 右栏 三处底色透光度不一致」：
+   旧配方是三套各自叠两层的算式 —— 中间 26% + 58% ≈ 69%、左栏 44% + 46% ≈ 70%、
+   右栏只有 44%（**漏了内层内容面**）、图标条 48%；晨昏增益又对每层给了不同系数
+   （.45 / .55 / .8 / 1.0 / 1.2），所以增益一抬，三处的相对透明度各自漂移。
+   17:13（增益 23.29%）实测合成：左 84.6% / 中 88.1% / 右 62.6% —— 与肉眼观感一致。
+   现统一为「工作台内只有一层底色」，档位对齐用户认可的右栏：44% + 0.8 × 晨昏增益
+   （正午 44% / 17:13 62.6% / 黄昏峰值 76%）。按天空 sky.mid 背衬模拟，
+   正文对比度全时段 ≥ 7.0（契约见 .AGENT/scripts/daycycle/verify-daycycle.mjs B2b）。
+   改通透度只改下面这一行 `--wb-glass-bg`。图标条同档但底色换成 `--activitybar-bg`；
+   状态栏保留原 52% + 0.5b（底色本来就是更深的 `--bg-tertiary`，17:13 合成 63.6% ≈ 面板 62.6%）。 */
+html.theme-daycycle {
+  --wb-glass-bg: color-mix(in srgb, var(--bg-primary) calc(44% + var(--dc-glass-boost, 0%) * .8), transparent);
+}
 html.theme-daycycle .kb-app-root {
   background-color: transparent;
 }
+/* 无壳模块（popout 独立窗口等，外层没有工作台卡片兜底）仍由自己承担面板重量 */
 html.theme-daycycle .kb-theme-surface {
   background-color: color-mix(in srgb, var(--bg-primary) calc(58% + var(--dc-glass-boost, 0%)), transparent);
 }
-html.theme-daycycle .kb-theme-surface-translucent {
-  background-color: color-mix(in srgb, var(--bg-primary) calc(46% + var(--dc-glass-boost, 0%) * .55), transparent);
+/* 工作台壳内：模块内容面 / 页签条一律让出去 —— 再叠一层就会「卡 + 面」相乘，
+   比外壳深一档，正是本次三处不一致的来源。范围只到 [data-wb='shell'] 之内，
+   弹层（portal 到 body）与独立窗口不受影响。 */
+html.theme-daycycle [data-wb='shell'] .kb-theme-surface,
+html.theme-daycycle [data-wb='shell'] .kb-theme-surface-translucent,
+html.theme-daycycle .kb-pagebar {
+  background-color: transparent;
 }
-html.theme-daycycle .kb-dc-center {
-  background-color: color-mix(in srgb, var(--bg-primary) calc(26% + var(--dc-glass-boost, 0%) * .45), transparent);
+/* 整模块选「实底」（2026-11-14 用户拍板「AI 教学中间向两侧对齐」）：
+   模块内部自带实色分栏的（AI 教学三条 ResizablePanel 边栏 = 实色 --bg-primary），
+   若只把模块面做成透明，同一个页面就会出现三种底色 —— 两侧实、中间透出天空。
+   这类模块由自己承担整页底色，故整块取 --bg-primary；其它主题本来就是实色，无变化。 */
+html.theme-daycycle [data-wb='shell'] .kb-theme-surface--solid {
+  background-color: var(--bg-primary);
 }
-html.theme-daycycle .kb-dc-empty {
-  background-color: color-mix(in srgb, var(--bg-primary) calc(44% + var(--dc-glass-boost, 0%) * 1.2), transparent);
+/* ===== 昼夜主题 · 模块内「结构面」玻璃化（2026-11-14 用户点名：插件 / 设置 / 说说 / 书市）=====
+   这些整窗模块（suppressSides）的外壳卡是唯一底色层，但页面里的**侧栏 / 工具条 / 分区条**
+   过去一律铺实色（`bg-secondary` / `bg-primary` / `bg-warning`），在半透明卡上就成了一块块
+   实心奶油 —— 和「沉浸天空 + 通透」的主题语言冲突。
+   这里给一层**薄**玻璃：alpha 很低（正午约 11%、黄昏约 22%），只比正文面实一点点
+   （正午 50.7% → 56.9%），天空照样透上来；配 14px 轻模糊，压住从下面滚过的内容。
+   结构分隔仍由元素自己的 `border-r` / `border-b` 负责，不靠底色差。
+   底色可用 `--kb-chrome-base` 换（书市首启提示条沿用它自己的 warning 色）。
+   ★ 只给「结构面」用：输入框 / 弹层 / 内容卡片保持实底，别把可读面也做透。 */
+html.theme-daycycle .kb-glass-chrome {
+  background-color: color-mix(in srgb, var(--kb-chrome-base, var(--bg-secondary)) calc(10% + var(--dc-glass-boost, 0%) * .3), transparent);
+  backdrop-filter: blur(14px) saturate(1.04);
+  -webkit-backdrop-filter: blur(14px) saturate(1.04);
+}
+html.theme-daycycle .kb-dc-center,
+html.theme-daycycle .kb-dc-empty,
+html.theme-daycycle .kb-dc-side {
+  background-color: var(--wb-glass-bg);
 }
 html.theme-daycycle .kb-dc-side {
-  background-color: color-mix(in srgb, var(--bg-primary) calc(44% + var(--dc-glass-boost, 0%) * .8), transparent);
   backdrop-filter: blur(16px) saturate(1.06);
   -webkit-backdrop-filter: blur(16px) saturate(1.06);
 }
 html.theme-daycycle .kb-activitybar {
-  background-color: color-mix(in srgb, var(--activitybar-bg) calc(48% + var(--dc-glass-boost, 0%) * .5), transparent);
+  background-color: color-mix(in srgb, var(--activitybar-bg) calc(44% + var(--dc-glass-boost, 0%) * .8), transparent);
   backdrop-filter: blur(14px) saturate(1.06);
   -webkit-backdrop-filter: blur(14px) saturate(1.06);
 }
-html.theme-daycycle .kb-pagebar {
-  background-color: color-mix(in srgb, var(--bg-secondary) calc(42% + var(--dc-glass-boost, 0%) * .5), transparent);
-}
 html.theme-daycycle .kb-statusbar {
   background-color: color-mix(in srgb, var(--bg-tertiary) calc(52% + var(--dc-glass-boost, 0%) * .5), transparent);
+}
+/* Edge 式页签的激活条目：底色必须跟内容面同一配方。
+   `--wb-glass-bg` 压在外壳卡上 = 「卡 + 填充」两层，比正文面深一档 —— 正好读出「当前页」的隆起；
+   两侧 8px 内凹弧也必须同配方，否则那两枚角会变成两块**不透明**奶油色贴在半透明卡上（原本是 var(--bg-primary) 实色）。 */
+html.theme-daycycle .kb-edge-tab-active { background: var(--wb-glass-bg); }
+html.theme-daycycle .kb-edge-tab-active::before {
+  background: radial-gradient(circle at 0 0, transparent 7.5px, var(--wb-glass-bg) 8px);
+}
+html.theme-daycycle .kb-edge-tab-active::after {
+  background: radial-gradient(circle at 100% 0, transparent 7.5px, var(--wb-glass-bg) 8px);
+}
+
+/* 系统「降低透明度」偏好（无障碍 §12）：工作台外壳顶成实底。
+   统一档位后壳内内容面已透明，可读性只剩这一层承担，必须能变成实色。
+   刻意放在玻璃块**之后** —— 同特异性靠顺序取胜，不跟上面的规矩抢 !important。 */
+@media (prefers-reduced-transparency: reduce) {
+  html.theme-daycycle .kb-dc-center,
+  html.theme-daycycle .kb-dc-empty,
+  html.theme-daycycle .kb-dc-side,
+  html.theme-daycycle .kb-activitybar,
+  html.theme-daycycle .kb-statusbar,
+  html.theme-daycycle .kb-glass-chrome,
+  html.theme-daycycle .kb-pagebar {
+    background-color: var(--bg-primary);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 /* 整窗噪点：feTurbulence 噪声叠加，消渐变色带 + 加质感（Stripe / Linear 手法）。

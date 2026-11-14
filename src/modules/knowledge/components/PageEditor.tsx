@@ -2637,7 +2637,9 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
         />
       )}
 
-      {/* Right: 关联 + 反向链接 — 与左侧栏同款 ResizablePanel（拖拽调宽 / 拖过半程吸边收起 / 从边缘拖出展开） */}
+      {/* Right: 关联 + 反向链接 — 与左侧栏同款 ResizablePanel（拖拽调宽 / 拖过半程吸边收起 / 从边缘拖出展开）
+          ★ bare（2026-11-14）：本栏是**页面内**分栏，不是卡片 —— 自己铺底色的话，昼夜主题下半透明的卡片上
+          会多出一条更实的白条（折叠态那 12px 贴边条尤其明显，用户报「知识页右缘白条」）。 */}
       <ResizablePanel
         storageKey="knowledgeRailWidth"
         defaultWidth={224}
@@ -2646,6 +2648,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
         visible={showBacklinks}
         side="right"
         collapsedWidth={12}
+        bare
         onSnapClose={() => setShowBacklinks(false)}
         onSnapOpen={() => setShowBacklinks(true)}
       >

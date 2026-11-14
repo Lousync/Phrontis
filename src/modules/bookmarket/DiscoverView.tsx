@@ -97,7 +97,7 @@ export function DiscoverView({ q, setQ, srcFilter, setSrcFilter, sources, loadin
         <h1 className="m-0 text-[22px] font-medium kb-track-display">书市</h1>
       </div>
 
-      <div className={`sticky top-0 z-[5] px-4 pb-3 pt-1.5 bg-[var(--bg-primary)] kb-scroll-edge ${stuck ? 'kb-scroll-edge--on' : ''}`}>
+      <div className={`sticky top-0 z-[5] px-4 pb-3 pt-1.5 bg-[var(--bg-primary)] kb-glass-chrome kb-scroll-edge ${stuck ? 'kb-scroll-edge--on' : ''}`}>
         <div className="mx-auto flex h-[50px] max-w-[640px] items-center gap-2.5 rounded-[13px] border border-[var(--border-color)] bg-[var(--input-bg)] pl-3.5 pr-2 transition-colors focus-within:border-[var(--accent)]">
           <Search size={17} className="flex-none text-[var(--text-muted)]" />
           <input

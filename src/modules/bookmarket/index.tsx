@@ -330,7 +330,11 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
           文案是 2026-09-22 §九 ④ 订正过的口径：不可读的格式标「暂不支持」，
           而**不是**旧的「EPUB 依赖二期引擎」（epub 引擎早已落地，旧文案是错的）。 */}
       <Collapsible open={hintOpen} className="relative z-[1] flex-none" innerClassName="">{() => (
-        <div className="flex items-center gap-2 border-b border-[var(--border-color)] bg-[var(--warning-bg)] px-3.5 py-2 text-[12px] text-[var(--text-secondary)]">
+        <div
+          className="flex items-center gap-2 border-b border-[var(--border-color)] bg-[var(--warning-bg)] kb-glass-chrome px-3.5 py-2 text-[12px] text-[var(--text-secondary)]"
+          /* 提示条保留 warning 底色语义，只是把它做薄（--kb-chrome-base 换基色，见 index.css 的 .kb-glass-chrome） */
+          style={{ '--kb-chrome-base': 'var(--warning-bg)' } as React.CSSProperties}
+        >
           <Info size={14} strokeWidth={1.7} className="flex-none" />
           <span>
             <b className="font-medium text-[var(--text-primary)]">只下载书架打得开的格式（epub / pdf / txt / fb2 / fbz / cbz）。</b>

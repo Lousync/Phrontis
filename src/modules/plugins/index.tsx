@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, Search, FolderOpen, Download, Loader2,
+import { RefreshCw, Search, FolderOpen, Download, Loader2, X,
   CheckCircle2, AlertTriangle, ArrowLeft, ShieldCheck, ShieldAlert, Shield, Boxes,
   History, Trash2, ScrollText, Package } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
@@ -868,7 +868,7 @@ export function PluginsModule() {
   return (
     <div className="kb-theme-surface flex h-full">
       {/* 左侧面板 */}
-      <div className="w-[280px] shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col">
+      <div className="w-[280px] shrink-0 bg-[var(--bg-secondary)] kb-glass-chrome border-r border-[var(--border-color)] flex flex-col">
         <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
           <PluginIcon size={12} />
           插件
@@ -889,21 +889,35 @@ export function PluginsModule() {
         </div>
 
         <div className="px-2 pb-2 flex gap-1.5 shrink-0">
-          <div className="flex-1 flex items-center gap-1.5 px-2.5 py-1.5 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-md">
-            <Search size={12} className="text-[var(--text-disabled)] shrink-0" />
+          {/* 组合输入框按 docs/input-field-pattern.md 的 B 形态：外壳 .kb-field 只画一道框 +
+              内部控件 .kb-field-control 把全局 input 的边框归零（2026-11-14 用户报「框中框」）。
+              带值出清除钮，刷新 / 从文件安装按钮同高对齐（h-[30px]） */}
+          <div className="kb-field flex h-[30px] min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2">
+            <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') setSearch('') }}
               placeholder={tab === 'installed' ? '搜索已安装插件' : '搜索市场插件'}
-              className="flex-1 bg-transparent outline-none text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
+              className="kb-field-control min-w-0 flex-1 text-[12.5px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                data-tip="清除" aria-label="清除"
+                className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
           {tab === 'market' ? (
-            <button onClick={() => loadMarket(true)} disabled={marketLoading} className="p-2 rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors" data-tip="刷新市场" aria-label="刷新市场">
+            <button onClick={() => loadMarket(true)} disabled={marketLoading} className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)]" data-tip="刷新市场" aria-label="刷新市场">
               <RefreshCw size={12} className={marketLoading ? 'animate-spin' : ''} />
             </button>
           ) : (
-            <button onClick={handleInstallFromFile} disabled={busy} className="p-2 rounded-md border border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors" data-tip="从本地 ZIP 安装" aria-label="从本地 ZIP 安装">
+            <button onClick={handleInstallFromFile} disabled={busy} className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-lg border border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)]" data-tip="从本地 ZIP 安装" aria-label="从本地 ZIP 安装">
               <FolderOpen size={12} />
             </button>
           )}

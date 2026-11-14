@@ -2472,7 +2472,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   )
 
   return (
-    <div className="kb-theme-surface h-full flex flex-col min-h-0 relative">
+    /* kb-theme-surface--solid（2026-11-14）：本模块**内部自带实色分栏**（左课程树 / 中栏右侧工件 / 右进度素材
+       三条 ResizablePanel 都是实底 `--bg-primary`）。昼夜主题把模块面带透明后，中间那栏会透出天空，
+       同页出现「两侧实、中间透」的三种底色（用户反馈「AI 教学区也有些奇怪」）。
+       拍板：中间向两侧对齐 —— 整页取实底，模块自己承担底色（其它主题本来就是实底，无变化）。 */
+    <div className="kb-theme-surface kb-theme-surface--solid h-full flex flex-col min-h-0 relative">
       {/* v3.8.0 §二：顶栏瘦身 —— 去掉会话页签与课程分段器（会话导航归左栏列表、课程切换归中栏视图切换器）；
           工作区 chip 改为面包屑「AI教学 / 工作区 / 会话名」，右侧仅留工具组 */}
       {activeWs ? (
