@@ -74,7 +74,7 @@ export function registerSummaryHandlers(): void {
       pomodoroMinutes,
       // 完成的日程任务数（按完成时间 updated_at 归日,转本地日期）
       scheduleDone: vaultTodosAll().filter((r) => r.status === 'done' && localDay(r.updated_at) >= start && localDay(r.updated_at) <= end && localDay(r.updated_at) !== '').length,
-      // 每习惯明细：次数 / 完成率 / 最长连续（判定策略在 lib/kbStore/habitStats.ts，纯函数）
+      // 每习惯明细：次数 / 完成率 / 最长连续（判定策略在 phrontis-core/src/kbStore/habitStats.ts，纯函数）
       habitDetails: habitPeriodStats(vaultHabitsAll(), records, start, end),
     }
   })

@@ -268,7 +268,7 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
 | **列表项逐个进出场** | 每项一个合成层，一次进 50 项 = 50 层显存峰值 | stagger 最多前 8 项（delay ≤ 8×30ms），其余同时进场；**禁止给列表项常驻 will-change** |
 
 ### 6. 落码时的硬约束
-1. 只动 `transform` / `opacity`（`.kb-collapse` 的 grid-rows 是唯一例外，已验证成本可接受）；
+1. 只动 `transform` / `opacity`（`.kb-collapse` 与 `.kb-rail-secs` 的 grid-rows 是仅有的两处例外，已验证成本可接受）；
 2. 不给列表项、卡片、弹层加常驻 `will-change`（confetti.ts 那次性使用是正确姿势）；
 3. 主题切换禁用通配选择器过渡，统一 View Transition + 容器级降级；
 4. 遮罩层与 backdrop-filter 层解耦；

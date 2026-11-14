@@ -5,7 +5,7 @@ import { readerStateGetBook, readerStateListProgress, readerStatePatchBook } fro
 
 /**
  * 阅读状态 IPC 注册转发层（书架升级全格式阅读器一期，方案 §S2.3）。
- * handler 只做转发 + 广播，逻辑全在 lib/kbStore/readerStateVaultRepo.ts（真相源）。
+ * handler 只做转发 + 广播，逻辑全在 phrontis-core/src/kbStore/readerStateVaultRepo.ts（真相源）。
  *
  * 通道清单：
  *   readerState:get    读单本（txt）书状态

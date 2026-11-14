@@ -700,7 +700,7 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
  * 还得在此补一条「图标 + 说明」—— 否则 `DESK_MODULES` 会展开出 undefined（C3 契约断言覆盖）。
  */
 export const DESK_MODULES: ModuleDef[] = TILE_MODULE_IDS
-  // v3.17.0 背单词暂不开放：磁贴定义保留，只是不进桌面入口 / 添加面板；3.18.0 由总闸恢复
+  // v3.17.0 背单词暂不开放：磁贴定义保留，只是不进桌面入口 / 添加面板；适配完成后由总闸恢复
   .filter((tab) => VOCAB_ENTRY_ENABLED || tab !== 'vocab')
   .map((tab) => ({
     tab,

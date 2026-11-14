@@ -6,7 +6,7 @@ import { excerptExportToNote, getExportEntry } from 'phrontis-core/kbStore/excer
 
 /**
  * 摘录 IPC 注册转发层（书架阅读器 · 摘录先行批次）。
- * handler 只做转发 + 广播，逻辑全在 lib/kbStore/excerptVaultRepo.ts（真相源）。
+ * handler 只做转发 + 广播，逻辑全在 phrontis-core/src/kbStore/excerptVaultRepo.ts（真相源）。
  *
  * 通道清单：
  *   excerpt:list        单本书全部摘录（at 升序）

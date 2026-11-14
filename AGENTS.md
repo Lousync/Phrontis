@@ -4,7 +4,7 @@
 
 体感对标 VS Code：即时反馈（<100ms）· 不卡主线程 · 操作可逆 · 减少认知负荷。
 
-> **本文件是工程规则的唯一维护处**，各工具入口文件（`CLAUDE.md`、`.cursor/rules`）都指向这里，改规则改这一份。
+> **本文件是工程规则的唯一维护处**，各工具入口文件（如 `CLAUDE.md`）都指向这里，改规则改这一份。
 > **写作口径：本文件只放「规则 + 指针」。** 机制解释、操作手法、单模块实现细节一律进 skill 或 `docs/` —— 本文件每轮都注入，写在这里等于每轮付一遍钱。
 
 ## 三条核心不变量
@@ -19,9 +19,10 @@
 
 ## 当前进行中的工作
 
-- **背单词功能的软件适配与优化**（延后到 v3.18.0）：v3.17.0 已合入代码 / IPC / AI 工具 / 静态资源，但用户入口由 `src/lib/featureFlags.ts` 的 `VOCAB_ENTRY_ENABLED = false` 关闭；适配 / 优化与遗留问题见 `docs/vocab-module-plan.md` §9，其中「读单词功能疑似有问题」登记为 `docs/pending-fixes.md` **B-48**。
+- **背单词功能的软件适配与优化**（延后中，目标版本待定——原计划 v3.18.0 已过期未开放）：v3.17.0 已合入代码 / IPC / AI 工具 / 静态资源，但用户入口由 `src/lib/featureFlags.ts` 的 `VOCAB_ENTRY_ENABLED = false` 关闭；适配 / 优化与遗留问题见 `docs/vocab-module-plan.md` §9，其中「读单词功能疑似有问题」登记为 `docs/pending-fixes.md` **B-48**；原型反馈台账见 `docs/vocab-native-feedback.md`。
 - **背单词原生模块化**（暂缓）：目标与分阶段计划见 `docs/vocab-module-plan.md` §10；当前仍用 iframe，不急于实施。
-- 用户问「还有什么工作」时，默认先回答：**背单词功能的软件适配与优化（v3.18.0）**；再按需展开 §9 / B-48。
+- **插件生态与交互补齐批次**（待排期）：指令表面板 P3、页面 ⋮ 菜单批 1c、插件 API v2 P3–P7、AI 学堂中心界面、AI 教学体验问题 5 条——登记在 `docs/pending-fixes.md` **B-55～B-59**，方案原文在 DP。
+- 用户问「还有什么工作」时，默认先回答：**背单词功能的软件适配与优化（延后中）**；再按需展开 §9 / B-48。
 
 ## 技术栈
 
@@ -42,14 +43,15 @@
 electron/
   main/index.ts        窗口管理（frameless + 自绘标题栏 + 单实例）
   preload/             IPC 桥接（contextBridge）
-  database/repositories/   IPC handler 注册层（21 文件 / 29 个 registerXxxHandlers），
-                       一律转发给 lib/kbStore/ —— 目录名里的 database 是历史遗留
-  lib/kbStore/         Vault JSON 实现层 = 真相源（*VaultRepo.ts / jsonStore / mdStore /
-                       knowledgeIndex / graphIndex / ignoreFile / welcomeDoc）
-  lib/                 其余主进程业务：agentService·aiTools·builtinTools·llmService·
-                       mcpManager·pluginRegistry·pluginHostGateway·pluginSigning·
+  database/repositories/   IPC handler 注册层（34 文件 / 33 个 registerXxxHandlers），
+                       一律转发给 phrontis-core 的 kbStore —— 目录名里的 database 是历史遗留
+  lib/                 主进程业务：agentService·aiTools·builtinTools·llmService·
+                       mcpManager·mcpService·pluginRegistry·pluginHostGateway·pluginSigning·
                        workspaceManager·pathGuard·helpService·updateService·lanShare
   devbridge/           开发期调试桥（KNOWBASE_DEV_BRIDGE=1 → 端口 7465）
+../phrontis-core/     （file: 本地包，2026-11 外迁）Vault JSON 实现层 = 真相源：src/kbStore/
+                       下是 *VaultRepo.ts / jsonStore / mdStore / knowledgeIndex / graphIndex /
+                       ignoreFile / welcomeDoc —— 主仓一律经 `phrontis-core/kbStore/*` 导入
 src/
   App.tsx              Tab 宿主：**Tab 首挂后 display:none 保活，切换不卸载**
   modules/             功能模块 —— **清单唯一真相源是 `src/lib/appModules.ts`，别在此处手抄**
@@ -68,43 +70,42 @@ src/
 > 判据型问题（布局 / 滚动 / 配色 / 沙箱报错 / git ref）先读对应 skill：`web-layout-scroll-verify`、`windows-sandbox-ops` 等，此处不重复机制。
 
 ### 数据与 IPC
-1. 主进程写盘后**必须** `windowBus.broadcastDataChanged(scope)` —— 唯一的界面刷新通道。`data:notify` 语义不同（排除发送方），别混用。写文件走 `jsonStore.writeJsonOrThrow`。
+1. 主进程写盘后**必须** `windowBus.broadcastDataChanged(scope)` —— 唯一的界面刷新通道。`data:notify` 语义不同（排除发送方），别混用。写文件走 phrontis-core `kbStore/jsonStore` 的 `writeJsonOrThrow`。
 2. **AI 工具读写模块数据：走 repo 抽出的 export 业务函数，不要给 `.knowbase` 开写白名单**（`isAiWritableFile` 对点目录恒 false）。主进程 AI 工具拿不到 `ipcRenderer`，故 IPC handler 只是转发层，两边共用同一实现。
 3. AI 写工具 `requires: 'write'` 会被权限系统**预过滤出模型视野**——那不是报错，是设计。排查顺序：settings.json 权限 → plugin-audit.json → 磁盘。
 4. 自动保存三件事：内容与 id 原子绑定 · 防抖窗口清空必须置 null · update 带 `expectedUpdatedAt` 做冲突检测（参考 `PasswordVault.tsx`）。
 5. 撤销栈 `fileOpHistory.ts` 两个编辑区共用；`renameWorkspacePath` 有 `existsSync(to)` 保护。
-6. `.ignore` 过滤只插在 `scanMarkdownFiles` 一处，全链路即生效（不要让每处查询各自过滤）。
-7. `TodoItem` 播完动画才回调（520 / 920ms），父组件用乐观更新接管。
+6. `.ignore` 过滤只插在 `scanVaultFiles`（phrontis-core `kbStore/knowledgeIndex`）一处，全链路即生效（不要让每处查询各自过滤）。
 
 ### 渲染层
 8. **dev 主进程没有热重载** —— 改了 `electron/` 必须重启 dev。
 9. `-webkit-user-drag: none` 会被继承，拖拽源要挂 `.kb-draggable`；日程类拖拽用 **pointer events**（HTML5 拖放会静默失败）；pointer 手势结束会补发 click，需要 `dragGuard` 250ms 窗口兜底 + 手柄上 `stopPropagation`。
 10. `kbview://` 是独立 scheme + iframe sandbox，**绝不 srcdoc / blob**；白名单三处必须同步。欢迎页只渲染仓库根 `欢迎.html`（合成 id `kb-welcome-doc`；收藏 / 改名 / 排序一律拒绝）。
-    **唯一例外：电子书内容帧**（epub 等）—— 引擎分页必须读 `iframe.contentDocument`（跨源恒 `null` → 分页全废），故内容帧只能同源 = `blob:`。★ 配套两条硬约束：**sandbox 永不含 `allow-scripts`**、**`script-src` 永不含 `'unsafe-inline'`** —— 上游引擎**不做内容净化**（内联 `<script>` / `onerror` 属性原样存活），这两条是仅有的防线，契约有负向断言锁。机制与升级手法见 `src/vendor/foliate/README.md`。**取内容帧只能走 CDP**（帧在 closed shadow root 内，`window.frames` / `querySelector` 都数不到它）—— 手法见 `probes/probe-epub-reader.mjs` 头注。
+    **唯一例外：电子书内容帧**（epub 等）—— 引擎分页必须读 `iframe.contentDocument`（跨源恒 `null` → 分页全废），故内容帧只能同源 = `blob:`。★ 配套两条硬约束：**sandbox 永不含 `allow-scripts`**、**`script-src` 永不含 `'unsafe-inline'`** —— 上游引擎**不做内容净化**（内联 `<script>` / `onerror` 属性原样存活），这两条是仅有的防线，契约有负向断言锁。机制与升级手法见 `src/vendor/foliate/README.md`。**取内容帧只能走 CDP**（帧在 closed shadow root 内，`window.frames` / `querySelector` 都数不到它）—— 手法见 `.AGENT/scripts/workbench-shell/probes/probe-epub-reader.mjs` 头注。
 11. 长列表用 `content-visibility`（`.kb-cv` / `.kb-cv-sm`，**加在「列表项」上**，估值 120px / 60px 一项）——只有几十行的短列表**不要**加（估值会抬虚滚动高度、滚动条乱跳）；`React.memo` 要 props 引用稳定；effect 依赖数组注意 TDZ（把数组整体后移）。
     **模块根节点必须 `h-full`，不能写 `flex-1`** —— 槽位容器是块级 div，`flex-1` 在里面是死属性，表象是「界面能显示，但滚轮没反应」。机制与判据见 skill `web-layout-scroll-verify`。
-12. 冗余说明文字一律按 `docs/help-disclosure-pattern.md` 处理：bar 类用 swap-bar、信息卡用 hover 展开卡、强引导首启可见 +「知道了」记忆。**文案只收不删，禁醒目标签。**
-13. **所有操作都必须带动效** —— 面板开合 / 列表增删 / 弹层进出 / 按钮与开关反馈 / 视图与 Tab 切换 / 状态变更提示，一律走 `docs/ui-animation-plan.md` 已定的令牌与工具类（`.kb-view-in` / `.kb-overlay` / `.kb-pop` / `.kb-collapse` / `.kb-chevron` / `.kb-item-in(-out)` / `.kb-micro-pop` / `.kb-toast-in(-out)`），**不要另造过渡、不要用 `transition-all` 临时凑**；缺对应工具类时**先补基建（`src/styles/index.css` + 更新该文档）再落码**。硬约束：① 只动 `transform` / `opacity` / `grid-rows`（后者仅 `.kb-collapse`，已验证），拖拽跟手不加动画，全部带 `prefers-reduced-motion` 兜底；② 主题切换禁用通配 `*` 过渡，走 View Transition + 容器级降级；③ Tailwind v4 的 `rotate-*` / `translate-*` 收不到 `transition-transform`，一律用 `.kb-chevron`；④ 弹层走「首子元素继承」规则，调用方只挂一个类；⑤ 折叠容器外层 grid 常驻 DOM、只懒挂内层子树，用「延迟卸载 + open 类切换」而非条件渲染。
+12. 冗余说明文字一律按 DP `Phrontis/已实现设计文档/help-disclosure-pattern.md` 处理：bar 类用 swap-bar、信息卡用 hover 展开卡、强引导首启可见 +「知道了」记忆。**文案只收不删，禁醒目标签。**
+13. **所有操作都必须带动效** —— 面板开合 / 列表增删 / 弹层进出 / 按钮与开关反馈 / 视图与 Tab 切换 / 状态变更提示，一律走 `docs/ui-animation-plan.md` 已定的令牌与工具类（`.kb-view-in` / `.kb-view-fade` / `.kb-overlay` / `.kb-pop` / `.kb-collapse` / `.kb-chevron` / `.kb-item-in(-out)` / `.kb-micro-pop` / `.kb-toast-in(-out)`），**不要另造过渡、不要用 `transition-all` 临时凑**；缺对应工具类时**先补基建（`src/styles/index.css` + 更新该文档）再落码**。硬约束：① 只动 `transform` / `opacity` / `grid-rows`（后者仅 `.kb-collapse` / `.kb-rail-secs`，已验证），拖拽跟手不加动画，全部带 `prefers-reduced-motion` 兜底；② 主题切换禁用通配 `*` 过渡，走 View Transition + 容器级降级；③ Tailwind v4 的 `rotate-*` / `translate-*` 收不到 `transition-transform`，一律用 `.kb-chevron`；④ 弹层走「首子元素继承」规则，调用方只挂一个类；⑤ 折叠容器外层 grid 常驻 DOM、只懒挂内层子树，用「延迟卸载 + open 类切换」而非条件渲染。
 14. 日程列清单有三处手工重复（`TodoColumn` / `TODO_COLUMNS` / `switch(col)`）：**加列漏 case = patch 静默丢弃、IPC 照样成功**，表象是「按钮点了没反应」。加列必须补跑 `.AGENT/scripts/schedule-reminder/verify-snooze-persist.mjs` 的 `COLUMN_CASES`。
 15. 错题本 `source_space` 推导（`quizRepo.vaultResolveSource`）：上溯**必须走到 space 才 break**，notebook 只赋值不 break。演示数据工具 `.AGENT/scripts/demo-seed/`。
 
 ### AI 工具
 16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 16 个常驻 + ondemand 53 个默认折叠（2026-11-09 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。（`builtin.time.now` 是唯一例外：核心只读、三 AI 面处处可用——让模型能定位"今天几号/现在几点"。）
-17. 结果侧只做两件事：**拿得少**（默认值 / 上限）、**丢得早**（`MAX_TOOL_RESULT_CHARS=24000` 摘要替代 + `KEEP_RECENT_TOOL_RESULTS=3`）。压缩必须是纯函数且幂等，否则打散 prompt cache。
+17. 结果侧只做两件事：**拿得少**（默认值 / 上限）、**丢得早**（结果上限与保留窗口由 `TOOL_RESULT_PROFILES` 分档控制，见 `electron/lib/agentService.ts`；旧常量名 `MAX_TOOL_RESULT_CHARS` / `KEEP_RECENT_TOOL_RESULTS` 已删除，别再引用）。压缩必须是纯函数且幂等，否则打散 prompt cache。
 18. 新模块接入 AI 工具的接线清单：`DataChangeScope` 加该模块 scope + 对应面板挂 `useDataChanged`（否则表象是「AI 说改好了、界面没反应」）；提供 `*ResolveOrCreate(name)` 命名桥；查询工具**不得**有建标签这类副作用；新写工具同步补 `builtin.tool.request` 的 description 清单。
 19. 出题 → 答题闭环：组卷落成知识库 `.md`，页内每题一个 ` ```quiz ` 围栏；答错自动回流错题本，**题号必须重排 1..N**（`snapshot.no` 是原页序号，沿用会把错题记到别的题上）。契约 `.AGENT/scripts/quiz-tools/verify-quiz-fence.mjs`。
 
 ### 安全与构建
 20. Vite 分包：`manualChunks` **禁止兜底 `return 'vendor'`**；只切大依赖（monaco / pdfjs / heic-to 的宿主组件 lazy），业务模块静态 import；改完必须重算首屏静态闭包。
 21. **同一文件禁止并行 Edit** —— 并行会静默互相覆盖，而工具仍回 "Successfully edited"。同文件串行、不同文件才可并行；改完 grep 复核关键标识。
-22. **`electron/database/` 不是死代码**：目录名未改，现在是 IPC handler 注册层（29 个 `registerXxxHandlers()`，转发给 `lib/kbStore`），**别删**。`grep sql.js` 只会命中注释。
+22. **`electron/database/` 不是死代码**：目录名未改，现在是 IPC handler 注册层（33 个 `registerXxxHandlers()`，转发给 phrontis-core 的 kbStore），**别删**。`grep sql.js` 只会命中注释。
 23. 沙箱构建两类故障（EPERM 报错退出 / 永不返回）与退路 → skill `windows-sandbox-ops` §6、§7。
 24. **`CHANGELOG.md` 是「应用内更新说明」的唯一源** —— 改完必须重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs` 生成 `electron/lib/releaseNotes/data.ts`（忘跑 = 页面显示上一版内容，无任何报错；契约脚本 §4 会拦）。触发规则（仅 major.minor 变化时自动打开 / 首装不弹 / **页面成功展示后**才推进基线）的纯函数在 `electron/lib/releaseNotes/judge.ts`（零依赖独立文件，专为让脚本 import）——**改规则必须同步补 `.AGENT/scripts/release-notes/verify-release-notes.mjs` 的用例表**，别把规则写回 `index.ts`。
 
 ### 交互
 
-25. **中央模态弹窗只留给严重 / 不可逆警告** —— 常规确认（AI 执行确认、普通二次确认、设置与表单、结果反馈）一律行内化：行内确认卡 / 滑出抽屉 / Toast / 角标脉动，替代模式与判定标准见 `docs/ui-interaction-patterns.md`。存量模态不强制回改，新代码与改到的代码一律遵守。
-26. **避免不必要的辅助标签和说明，让布局本身发挥解释作用** —— 层级、分组、间距、留白能说清的，不另加标签 / 角标 / 说明行；确需解释的文字按铁律 12 的披露口径处理（`docs/help-disclosure-pattern.md`），不上来就堆注解。
+25. **中央模态弹窗只留给严重 / 不可逆警告** —— 常规确认（AI 执行确认、普通二次确认、设置与表单、结果反馈）一律行内化：行内确认卡 / 滑出抽屉 / Toast / 角标脉动，替代模式与判定标准见 DP `Phrontis/已实现设计文档/ui-interaction-patterns.md`。存量模态不强制回改，新代码与改到的代码一律遵守。
+26. **避免不必要的辅助标签和说明，让布局本身发挥解释作用** —— 层级、分组、间距、留白能说清的，不另加标签 / 角标 / 说明行；确需解释的文字按铁律 12 的披露口径处理（DP `Phrontis/已实现设计文档/help-disclosure-pattern.md`），不上来就堆注解。
 
 ---
 
@@ -137,7 +138,7 @@ npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本�
 - **打包产物规范**（2026-10-08 拍板）：`npm run pack`（= `node scripts/pack.mjs`）产物统一落仓库根 **`packs/`**，**目录名＝当前版本号**（如 `packs/3.4.1`）；**版本号没抬就重复打包**时自动追加 `-1`/`-2`…（如 `packs/3.4.1-1`，**不覆盖**上一份；**取最大后缀 +1，删过中间产物也不回填**）。`scripts/publish-release.py` 的 `--dir` 缺省即去 `packs/<版本>[-N]` 取**后缀最大**者，无需再手传。旧的 `dist-electron/` 为历史目录（已弃），electron-builder 的 `build.directories.output` 基础值已改 `packs`，实际版本子目录由 `scripts/pack.mjs` 覆盖。
 - **脚本输出一律不用 emoji**（`scripts/` 与 `.AGENT/scripts/` 下的 `.py` / `.mjs` / `.bat` 都算，`print` 与 `console.log` 同规）。**Windows 控制台默认 GBK**，Python 脚本 `print` 到 emoji 会抛 `UnicodeEncodeError` —— 活干完了却报失败，还会吞掉退出码（2026-09-29 `scripts/publish-release.py` 发布成功后崩在收尾那句）。用纯文字标记：`[OK]` / `[FAIL]` / `PASS` / `FAIL`。存量脚本不强制回改，**新写与改到的脚本一律遵守**。
 - **新建 worktree 后必须给它一个桌面启动器**：桌面文件名走 `Phrontis-dev-<后缀>.bat`，内容只是薄壳，真逻辑仍在版本控制的 `scripts/start-desktop.bat`（自定位）。生成 / 清点 / 清扫一律走 `.AGENT/scripts/worktree-launcher/desktop-launcher.mjs`（`create --worktree <绝对路径>` / `list` / `clean`），别手搓。两条硬约束：① **脚本文件名与文件内容一律纯 ASCII、禁中文，行尾必须 CRLF** —— cmd.exe 按 OEM 代码页解析 .bat，中文会打坏解析、LF 会让它读串行（同一理由见 `scripts/start-desktop.bat` 顶部）；② **worktree 销毁时必须同步删掉这个桌面脚本**，否则桌面留死链：启动器发现目标树不存在会自删，`desktop-launcher.mjs clean` 批量清残留（先 `list` 看哪些标 STALE）。
-- **新功能落地 / 老功能用户可见行为变更后，收尾时必须提醒开发者同步 AI 手册**：`resources/help/*.md` 是 AI 回答「软件怎么用」的唯一语料（`builtin.help.search` 检索），功能与文档不同步 = AI 照旧文档说错话且无任何报错。提醒口径：本次改动涉及哪个模块、`resources/help/` 哪几篇可能受影响、是否需要改写（写作规范与重编流程见 `.AGENT/help-rewrite/README.md`，检索验收跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`）。纯内部重构（无用户可见行为变化）不需要提醒。**Linux 版例外**：用户明确不维护 help 手册（见 `docs/linux-port-plan.md` 决策 #13），Linux 专属改动不再提醒。
+- **新功能落地 / 老功能用户可见行为变更后，收尾时必须提醒开发者同步 AI 手册**：`resources/help/*.md` 是 AI 回答「软件怎么用」的唯一语料（`builtin.help.search` 检索），功能与文档不同步 = AI 照旧文档说错话且无任何报错。提醒口径：本次改动涉及哪个模块、`resources/help/` 哪几篇可能受影响、是否需要改写（写作规范与重编流程见 `.AGENT/help-rewrite/README.md`，检索验收跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`）。纯内部重构（无用户可见行为变化）不需要提醒。**Linux 版例外**：用户明确不维护 help 手册（见 DP `Phrontis/方案与调研/linux-port-plan.md` 决策 #13），Linux 专属改动不再提醒。
 
 ## 提示与设置
 
@@ -149,21 +150,13 @@ npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本�
 
 | 要了解什么 | 去哪 |
 |---|---|
-| 重构总纲（R0–R7、决策 D1–D9） | `docs/rework-master-plan.md` |
 | AI 教学模块 | `docs/ai-teaching-module-rework.md` |
 | UI 变更流水 | `docs/ui-updates.md` |
 | 动效方案与落地进度 | `docs/ui-animation-plan.md` |
-| 帮助披露规范 | `docs/help-disclosure-pattern.md` |
-| 交互确认与弹窗限制（行内化模式清单） | `docs/ui-interaction-patterns.md` |
 | 悬停提示（Tooltip）令牌 / 迁移口径 / 插件图案 | `docs/tooltip-design.md` |
 | 输入框 / 搜索框画法（单控件 vs 组合框、焦点 / 错误 / 禁用态） | `docs/input-field-pattern.md` |
-| 更新说明机制（触发规则 / 数据三层） | `docs/release-notes-design.md` |
-| 主题氛围特效（四季粒子 / 丁达尔，等看板） | `docs/theme-fx-design.md` |
-| 昼夜动态主题（daycycle：纯函数 / 引擎 / 契约） | `docs/daycycle-theme-plan.md` |
-| 待修 bug 清单 | `docs/pending-fixes.md`（旧验收记录 `verification-issues-*` 与真机验证记录 2026-09-23 已转入 DP `Phrontis/过程记录/`） |
-| v3.4.0 正式版体验反馈 | `docs/v3.4.0-feedback.md`（`F-n` 缺陷/落差 · `N-n` 新需求，编号各从 1 起；beta 前身已归档 DP `Phrontis/过程记录/v3.4.0-beta-feedback.md`） |
-| AI 教学互动性改造计划（3.5.0） | `docs/ai-teaching-interactivity-plan.md` |
-| 设计文档 / 原型去哪了 | `docs/DESIGN-ARCHIVE.md` —— 已落码或已搁置的方案与原型统一归档在独立库 **DesignProcess** |
+| 待修 bug 清单 | `docs/pending-fixes.md`（旧验收记录、真机验证记录、各版本反馈台账与 2026-11-14 结构批次归档件均转入 DP `Phrontis/`，检索以 `docs/DESIGN-ARCHIVE.md` 清单为准） |
+| 设计文档 / 原型去哪了 | `docs/DESIGN-ARCHIVE.md` —— 已落码或已搁置的方案、规范与原型统一归档在独立库 **DesignProcess** |
 | 手机端（Phrontis Mobile） | 独立仓库 `E:\Projects\Phrontis-mobile`（远端 `Lousync/Phrontis-mobile`，私有）—— 方案在其 `docs/design.md`，可交互原型在其 `prototype/index.html`；桌面侧待办是「手机伴侣」服务（lanShare 演化，见其方案 §2.2/§8） |
 
 **已评估暂缓、勿重复调研**：语音输入 ASR（方案已论证到落码级；设计稿与同类搁置项在 DP `Phrontis/搁置功能与想法/`）。

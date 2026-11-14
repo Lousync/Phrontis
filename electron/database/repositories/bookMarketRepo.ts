@@ -11,7 +11,7 @@ import { deleteBookEverywhere } from '../../lib/bookDelete'
 
 /**
  * 书市 IPC 注册转发层（方案 §2.3）。
- * handler 只做转发 + 广播，逻辑全在 lib/kbStore 与 lib/bookMarket（真相源）。
+ * handler 只做转发 + 广播，逻辑全在 phrontis-core 的 kbStore 与主仓 lib/bookMarket（真相源）。
  *
  * 通道清单（`<domain>:<action>`，与 `excerpt:list` / `readerState:patch` 同格式）：
  *   bookMarket:listSources      书源清单（**只报 hasCredential 布尔**，永不回传凭据本体）→ { sources }

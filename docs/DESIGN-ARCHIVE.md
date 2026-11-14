@@ -27,7 +27,7 @@
    - 方案**已搁置 / 已作废 / 已暂缓**，不再作为开工依据；
    - 属过程证据（原型、视觉稿、迭代截图、命名与文案），且对应工作已收官。
 2. **归档动作**：从主仓库移到 DesignProcess 对应目录，随该仓库自动提交推送；同时在本文档清单中登记。
-3. **保留在主仓库的**：总纲（rework-master-plan / ai-teaching-module-rework）、**仍在推进的方案**（plugin-api-v2-*、rework-plugin-openness、rework-toolbox-as-plugins、ui-animation-plan）、活跃记录（ui-updates）、待修台账（pending-fixes）、常驻规范（help-disclosure-pattern）。旧的 `verification-issues-*` 与真机验证记录自 2026-09-23 起转入 `Phrontis/过程记录/`。
+3. **保留在主仓库的**（2026-11-14 结构批次后重写）：AI 教学总纲（ai-teaching-module-rework）、仍在推进的方案（long-material / rail-segments / simplify / constraints-write / pomodoro）、活跃记录（ui-updates）、待修台账（pending-fixes）、常驻规范（ui-animation-plan / tooltip-design / input-field-pattern）、进行中文档（knowledge-feed-topics / vocab-module-plan / vocab-native-feedback）。**规范与总纲不再是留仓豁免**——已落码机制的设计原文一律入 DP，铁律与工作流引用 DP 路径。旧的 `verification-issues-*`、真机验证记录与版本反馈台账已转入 `Phrontis/过程记录/`。
 4. **被代码注释当规范引用的文档不回迁归档**：`.AGENT/docs/读写分工设计.md` 与 `.AGENT/docs/去库化迁移方案.md` 被 6 处代码注释 + 3 处文档引用（见下），视同常驻规范留在主仓库。
 5. **不再设二级归档区**：原 `docs/archive/`（2026-09-07 建立的本地暂存归档）已于 2026-09-12 整体并入 DesignProcess。本地只保留"活跃文档"一层，完成即一步到位进 DesignProcess，避免两处归档面职责重叠。
 6. **已知取舍**：归档会让主仓库内的相对链接失效（总纲正文按名引用已归档文档）。这是既有事实，主仓库侧不做链接维护，检索以本清单为准。
@@ -187,7 +187,7 @@
 | 文档 | 判定依据 |
 |---|---|
 | share-card-design.md | 文档头「已实现（2026-09-29）」；`src/components/share-card/` 落码 + 契约 + 探针 |
-| dashboard-tile-grid-design.md | 已落码：`src/modules/dashboard/tileGrid.ts` + `index.tsx:20` 引用 |
+| dashboard-tile-grid-design.md | **已退役**（2026-11-14 看板首页重做）：磁贴栅格 / 编辑态删除（`cards.tsx` / `tileGrid.ts` 已移除），版式改为一页「今日纸」；设计演进见 `docs/home-view-proto` 原型与 `docs/dashboard-home-plan.md` |
 | pet-design.md | 文档头「已实施 + 已验收」；三轮改版全落码（含布局改版与切换宠物） |
 | bookshelf-reader-upgrade-design.md | 一期（pdf+txt）已实施；二期四格式（epub/fb2/fbz/cbz）**全部落码**（`BookKind` 六格式齐备），真源已转 `.claude/plans/b-epub-formats.md`；本文 §5/§6 只对一期成立，使命终结 |
 
@@ -261,6 +261,7 @@
 | 2026-09-11 | 图标重设计全过程（决策记录 + 终稿 + 过程稿） | `Phrontis/视觉与品牌/图标重设计/` |
 | 2026-09-12 | `name-compare.html`（定名候选对比）、`phrontis-copy-brief.md`、`readme-draft.md`、`Phrontis-plugins-README.md`、`欢迎.html`、`knowledge-recorder-icon-redesign.png` | `Phrontis/视觉与品牌/` |
 | 2026-09-12 | `outputs/icon-final`、`icon-final-noshadow`、`icon-redesign` 三目录 | **去重删除**——与 DP 内 `图标重设计/final-带影版`、`final-无影版`、`过程稿` 目录级零差异（`diff -rq` 确认） |
+| 2026-11-14 | `whale-girl-review/`（README + assets + `dsh-survey.html` + `fukuro*.html`，桌宠形象设计评审材料） | `Phrontis/视觉与品牌/whale-girl-review/`（自 `tmp/` 迁出，桌宠已落码） |
 
 ## 过程记录归档
 
@@ -395,6 +396,92 @@
 
 > **本批后主仓 `docs/` 从 42 份降到 25 份。**
 
+### 2026-11-14 主仓归档（14 份文档）
+
+| 文件 | 去向 | 判定依据 |
+|---|---|---|
+| `ai-image-gen-plan.md` | 已实现设计文档 | 对话内生图两阶段均已落码（v3.6.0，落码记录 §12） |
+| `ai-outline-inline-plan.md` | 已实现设计文档 | 已落码（2026-10-14，差异记录 §8） |
+| `ai-settings-v2-plan.md` | 已实现设计文档 | 已落地（2026-10-14 多处 ✅） |
+| `ai-teaching-picker-rework.md` | 已实现设计文档 | 已实施（3.26.0，契约 28/28） |
+| `ai-teaching-sources-before-outline-plan.md` | 已实现设计文档 | 已实施（2026-10-27，方案 B） |
+| `ai-teaching-stepwise-teaching.md` | 已实现设计文档 | 已落码（2026-11-10），无代码 / 活跃文档引用 |
+| `attachments-in-vault-plan.md` | 已实现设计文档 | 已实现（3.9.2，契约 55/55 + 探针 14/14） |
+| `companion-realtime-sync-plan.md` | 已实现设计文档 | 桌面侧已落码（2026-11-08）；协议权威在 Phrontis-mobile `docs/design.md` |
+| `daycycle-theme-plan.md` | 已实现设计文档 | v3.23.0 落码 + 11-11 升级 + 11-13 修复全部发布（AGENTS.md 指针行同步移除） |
+| `desktop-integration-plan.md` | 已实现设计文档 | 阶段 1 已落码 + 阶段 2 GNOME 扩展已交付独立仓 |
+| `quiz-answer-extract-plan.md` | 已实现设计文档 | 已落地（2026-11-03） |
+| `quiz-short-answer-answer-state-plan.md` | 已实现设计文档 | 已实施（2026-10-28，Phase 1–4 完成） |
+| `vault-identity.md` | 已实现设计文档 | 已实现（契约 39 条 + 5 变异） |
+| `desktop-integration-handoff.md` | 过程记录 | 决策交接表全部「已完成」，纯过程证据 |
+
+- **代码注释出处注随迁失效（按规则 6 接受）**：`ai-image-gen-plan`（16 处）· `daycycle-theme-plan`（9 处）· `ai-settings-v2-plan`（3 处）· `ai-outline-inline-plan`（2 处）· `companion-realtime-sync-plan`（1 处）——均为「vX.Y 落码，见方案 §N」式历史溯源，非活规范引用。
+- **批注**：`batch1` / `batch3` 两份验收单已全部闭环（open=0），转入归档候选待拍板；`pomodoro-upgrade-plan.md` 标题与 v3.24.0 内容对应但状态行写「2026-11-13 开始落码」，待确认是否新一轮后再定；`v3.16.1-plan.md` 的「目录移动 / 逐文件取消」后续项尚未转 `pending-fixes.md`，转完即可归。
+
+### 2026-11-14 原型归档（2 件）
+
+| 文件 | 去向 | 判定依据 |
+|---|---|---|
+| `ai-teaching-header-tabs.html` | 原型 | ui-updates §40 设计（页签区按 `courseEnabled` 整段收起）未按原文落地，被课程化主线 R6 形态取代；无活跃方案按名引用，DP 无重名 |
+| `ai-teaching-nav-declutter.html` | 原型 | §40 的 `courseView` 左栏形态零命中代码，被 R6「课程大纲树」形态取代；引用面同上 |
+
+> **本批后主仓 `docs/prototypes/` 剩 4 件**：`ui-animation-prototype.html`（随动画规范留）、`ai-learn-center.html` / `ai-learn-bottom-bar.html`（随 ai-learn-center-design 留）、`ai-teaching-course-mode.html`（随活跃 course-mode-plan 留）。
+
+### 2026-11-14 原型归档补批（4 件 · 用户拍板全量清仓）
+
+| 文件 | 去向 | 判定依据 |
+|---|---|---|
+| `ui-animation-prototype.html` | 原型 | 动效规范的基线原型，规范已活跃维护、令牌全部落码；引用失效按规则 6 登记 |
+| `ai-learn-center.html` | 原型 | ai-learn-center-design（留仓）的配套原型；设计主体待拍板，原型先归过程证据 |
+| `ai-learn-bottom-bar.html` | 原型 | 同上 |
+| `ai-teaching-course-mode.html` | 原型 | course-mode-plan（活跃）设计期原型；课程化已按 R6 形态落地多轮，原型使命完成 |
+
+> **此后主仓 `docs/prototypes/` 目录清空移除**——主仓不再存放原型；新原型按工作流放本地工作区（`tmp/`），收官随方案入 DP。
+
+### 2026-11-14 补充批次：版本反馈台账与验收单（10 份 → 过程记录）
+
+| 文件 | 判定依据 |
+|---|---|
+| `v3.5.0-feedback.md` | 条目全部闭环（open=0） |
+| `v3.15.3-feedback.md` | 调查 + 修复闭环 |
+| `v3.16.1-feedback.md` | 4 条全部闭环 |
+| `v3.19.0-feedback.md` | 条目全部闭环 |
+| `batch1-real-machine-verification.md` | 验收单全部跑完（2026-10-14 批「待跑」口径已过时，本批更正） |
+| `batch3-real-machine-verification.md` | 同上 |
+| `v3.4.0-feedback.md` | 归档前勾选复核：N-1 / N-3 / F-17 / F-6 / F-1 五条按实况补勾（各有落码 / 结案 / 搁置随迁证据，见该文件头部归档处置注）；F-15 转 `pending-fixes.md` B-54 |
+| `v3.9.0-feedback.md` | F-4 拍板不修（2026-10-16）补勾；其余闭环 |
+| `v3.13.0-feedback.md` | F-1 收口复核（②③已修有代码标注），遗留两点转 `pending-fixes.md` B-53 后归档 |
+| `v3.15.2-feedback.md` | F-1 / F-2 / F-3 已随 v3.15.2 当版修复（CHANGELOG 逐字对应，勾选漂移修正） |
+
+> **台账清空后**：主仓 `docs/` 剩 36 份，版本反馈类台账全部转 DP `Phrontis/过程记录/`（与 `v3.4.0-beta-feedback.md` 同区）；滚动台账仅剩 `pending-fixes.md`（规则 3 留仓），其新增 **B-53 / B-54** 承接两份台账的全部未决事项。
+
+### 2026-11-14 结构批次：规范 / 总纲 / 方案清仓（20 份 · 用户拍板「docs/ 只留滚动与进行中文档」）
+
+| 文件 | 去向 | 判定依据 |
+|---|---|---|
+| `ai-assistant-scope-rail-plan.md` | 已实现设计文档 | 已全部落地（F-3 批量入口 ScopePane 实测在码，F-4 拍板不改） |
+| `intel-module-plan.md` | 已实现设计文档 | v3.12.0 主体 + 修订 v2（14 源 + 自定义 RSS）均已落码（`customSources` 实测在） |
+| `intel-translate-plan.md` | 已实现设计文档 | 已落码（`intelStore` 实装 + 契约 `verify-translate-pure`） |
+| `command-registry-plan.md` | 已实现设计文档 | P0/P1/P2 已落码；P3 未决转 `pending-fixes.md` B-56 |
+| `page-menu-capability-plan.md` | 已实现设计文档 | 批 1a–4 已落码；批 1c 未决转 `pending-fixes.md` B-55 |
+| `help-disclosure-pattern.md` | 已实现设计文档 | 常驻规范随结构批次入 DP；铁律 12 / 26 指针同步改指 DP |
+| `ui-interaction-patterns.md` | 已实现设计文档 | 常驻规范随结构批次入 DP；铁律 25 指针同步改指 DP |
+| `release-notes-design.md` | 已实现设计文档 | 机制已落码（judge.ts / 契约）；指针表行移除 |
+| `ai-learn-center-design.md` | 已实现设计文档 | §7.3/7.5 已落码；学堂中心界面未决转 `pending-fixes.md` B-58（原「自述不归档」由本批拍板解除） |
+| `rework-plugin-openness.md` | 方案与调研 | R7 方向拍板已收官落码，细化由 plugin-api-v2-design 承接 |
+| `rework-toolbox-as-plugins.md` | 方案与调研 | 工具箱插件化评估未执行（挂起） |
+| `plugin-api-v2-design.md` | 方案与调研 | P3–P7 待做转 `pending-fixes.md` B-57 |
+| `plugin-api-v2-reference.md` | 方案与调研 | 随 API 休眠；重启插件工作从 DP 取 |
+| `theme-fx-design.md` | 方案与调研 | 定稿等看板，重启从这份开始（指针表行移除） |
+| `intel-recommend-plan.md` | 方案与调研 | 暂缓挂起 |
+| `rework-master-plan.md` | 方案与调研 | R0–R7 全收官，决策索引转 DP（指针表行移除） |
+| `linux-port-plan.md` | 方案与调研 | 决策日志转 DP；工作流「决策 #13」引用同步改指 DP |
+| `ai-teaching-course-mode-plan.md` | 方案与调研 | R6–R12 落地，滚动计划稿随批转 DP |
+| `ai-teaching-ux-feedback-2026-10-28.md` | 过程记录 | 5 条问题未落码，转 `pending-fixes.md` B-59 |
+| `page-split-followups.md` | 过程记录 | 分屏遗留交接随批归档 |
+
+> **本批后主仓 `docs/` 从 36 份降到 16 份**：AI 教学总纲 + 进行中方案（long-material / rail-segments / simplify / constraints-write / pomodoro）+ 常驻规范（ui-animation-plan / tooltip-design / input-field-pattern）+ 活跃记录（ui-updates / pending-fixes）+ 进行中文档（knowledge-feed-topics / vocab×2）+ 本清单。
+
 ## 已知引用失效（接受）
 
 以下活跃文档仍按旧路径引用已归档文件，按规则 6 不再维护链接：
@@ -402,6 +489,10 @@
 - `docs/rework-master-plan.md`、`.AGENT/docs/去库化迁移方案.md` 等引用已归档的 rework-* 文档
 - `docs/ai-teaching-module-rework.md` 正文按名引用已归档的 `ai-teaching-prototype.html` / `ai-teaching-layout-builder.html` / `ai-teaching-layout-user-v1.json`
 - `scripts/publish-knowledge-pack.py:23` 写的是 `docs/knowledge-pack-answer-format.md`，该路径**早已失效**（真实文件现位于 DP `Phrontis/内容与素材/`）
+- 2026-11-14 批归档件在代码注释中的出处注（`ai-image-gen-plan` / `daycycle-theme-plan` / `ai-settings-v2-plan` / `ai-outline-inline-plan` / `companion-realtime-sync-plan`，共 31 处）按规则 6 接受失效，检索以本清单为准
+- 2026-11-14 台账批归档后，`docs/ai-assistant-scope-rail-plan.md`、`docs/linux-port-plan.md`、`docs/ai-teaching-module-rework.md`、`docs/ui-updates.md`、`src/components/workbench/useStripScroll.tsx`、`.AGENT/help-rewrite/README.md` 中对 `v3.4.0-feedback` / `v3.9.0-feedback` / `v3.13.0-feedback` / `v3.15.2-feedback` / `batch1|batch3-real-machine-verification` 的按名引用失效（规则 6）
+- 2026-11-14 原型补批后，`docs/ui-animation-plan.md`、`docs/ai-learn-center-design.md`、`docs/ai-teaching-course-mode-plan.md` 对 `docs/prototypes/` 四件原型的按名引用失效（规则 6，检索以本清单为准）
+- 2026-11-14 结构批次后，剩余文档（ui-animation-plan / tooltip-design / simplify / rail-segments / long-material / constraints-write / ui-updates）与代码注释（settings.ts / HelpHint.tsx / ReadingSidePanel.tsx / AiLearn / App.tsx / AboutView.tsx / terminal 等）对本批 20 份的按名引用失效（规则 6，检索以本清单为准）
 
 ## 反向说明：留在主仓库的"旧位置"文档
 
@@ -410,15 +501,6 @@
 - `.AGENT/docs/读写分工设计.md` ← `electron/database/repositories/knowledgeRepo.ts:23`、`electron/lib/kbStore/knowledgeVaultRepo.ts:11`、`src/modules/editor/index.tsx:387`、`src/modules/knowledge/index.tsx:658`、`docs/knowledge-query-design.md:184`、`docs/onboarding-rework-design.md:5`
 - `.AGENT/docs/去库化迁移方案.md` ← `electron/lib/kbStore/blogVaultRepo.ts:8`、`electron/lib/kbStore/bookmarkVaultRepo.ts:5`、`docs/rework-master-plan.md:87`
 
-## 待归档：AI教学学习流 v2 原型（2026-10-17 登记）
+## 待归档：AI教学学习流 v2 原型（2026-10-17 登记 → **2026-11-14 确认已散失**）
 
-学习流 v2（折行泳道 / 只展开当前章 / 章间主干 / 拖拽锁 + 插入位 / 右栏三层）的验收原型仍在 `tmp/`（`tmp/` 不进 git，**文件随时可能被清**）：
-
-| 文件 | 说明 |
-|---|---|
-| `E:\Projects\KnowledgeRecorder\tmp\aiteach-flow-proto-v2\index.html` | 单文件可交互原型，含「现状 / 只补断链 / 全量推荐 / 依赖图」四档对照（已验收口径 = 全量推荐档） |
-| `E:\Projects\KnowledgeRecorder\tmp\aiteach-flow-proto-v2\dom-smoke.mjs` | 零依赖 DOM 桩冒烟（无浏览器也能跑四档读数与交互入口，拦白屏级错误） |
-| `E:\Projects\KnowledgeRecorder\tmp\aiteach-flow-v380\index.html` | v1（行铺版）原型，仅供对照；已落码并退役 |
-| `E:\Projects\KnowledgeRecorder\tmp\flow-v2-verify\` | 落码后的**运行时验证载体**（真实 Chromium + 真实 React，58 断言）：折行几何 / 折叠条 / 主干锚点 / 拖拽锁 / 插入位 / 落点写盘 / 视口守卫 —— 与原型不同，它属「验收工具」而非设计稿 |
-
-归档建议：`Phrontis/原型/` 收两份 `index.html` + 冒烟脚本；`Phrontis/过程记录/` 收 `flow-v2-verify/` 的断言清单与 `report.txt`（本轮未动 DP 仓，登记于此待归）。
+本节原登记的四项 `tmp/` 产物（`aiteach-flow-proto-v2/` 的原型与冒烟脚本、`aiteach-flow-v380/index.html` 对照版、`flow-v2-verify/` 运行时验证载体）在 2026-11-14 清点时**均已不存在**——`tmp/` 不进 git，登记时预警的「文件随时可能被清」已成真。学习流 v2 本身已落码（simplify 线 P0–P3），设计过程材料无存档，重启时从实现反写。

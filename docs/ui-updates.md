@@ -2627,3 +2627,106 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`verify-topics.mjs` 增 6 项（搜索常驻 / 结构结果区 / 展开仅在结构 / 负向断言「不再点了切视图」/ 内联新建 / 主题过滤）；`probe-feed.mjs` 增 5 项真实 DOM 断言（K4c–K4h、K5e）。
 
 **验收**：双 tsc 0 错；`npm run build` 通过；`verify-topics.mjs` 全绿；`probe-feed.mjs` 30/30（含结构查找结果、Esc 回树、内联新建不跳视图）；帮助手册与 CHANGELOG 已同步，`verify-help-retrieval.mjs` 174/174。
+
+## 2026-11-14 · 工作台三处底色透光度统一（左 / 中 向右侧栏靠）
+
+**现状 / 用户反馈**：昼夜主题下，左栏、中间主体、右栏三块卡片的底色透光度肉眼可见不一致（截图对比 17:13）。代码核实：三处各是**不同层数 + 不同系数**的半透明配方，不是一个旋钮。
+
+| 区域 | 外壳层 | 内容面 | 17:13 合成 |
+|---|---|---|---|
+| 左栏 | `.kb-dc-side` 44% + 0.8b | `.kb-theme-surface-translucent` 46% + 0.55b | 84.6% |
+| 中间主体 | `.kb-dc-center` 26% + 0.45b | 模块 `.kb-theme-surface` 58% + 1.0b | 88.1% |
+| 右栏 | `.kb-dc-side` 44% + 0.8b | **无** | 62.6% |
+| 图标条 | 48% + 0.5b | 无 | 59.7% |
+
+（b = `--dc-glass-boost`，17:13 = 23.29%）
+
+**根因**：① 右栏从来没收过内层内容面（`WorkbenchRightPanel` 根节点刻意不画底色，docked `ChatBody` 同样无底色），只有外壳一层 —— 而 v3.23.0 的口径「侧栏 44% + 46% ≈ 70%」只对左栏成立；② 晨昏增益对每层用不同系数（.45 / .55 / .8 / 1.0 / 1.2），增益一抬三处各自漂移；③ 只有侧栏 / 图标条带 `backdrop-filter`，中间主体不带，同 alpha 下观感再分一层。结构性的不一致不只昼夜主题有（浅色 / 深色主题里左 92% / 中 100% / 右 72%），只是根容器不透明，肉眼看不出来。
+
+**改动点**（用户拍板「左中向右靠」）：
+- 新增单一旋钮 `--wb-glass-bg`（`html.theme-daycycle`）= `44% + 0.8 × --dc-glass-boost`，档位对齐右栏原值（正午 44% / 17:13 62.6% / 黄昏峰值 76%）。左栏 / 中栏 / 右栏 / 空态共用它；图标条只换语义底色（`--activitybar-bg`）、同一档。
+- 工作台壳内不再叠第二层：`[data-wb='shell'] .kb-theme-surface`、`.kb-theme-surface-translucent`、`.kb-pagebar` 一律 `background-color: transparent`。范围只到壳内 —— 弹层（portal 到 body）与 popout 独立窗口仍由 `.kb-theme-surface`（58% + 1.0b）自己承担面板重量。
+- Edge 式页签的激活条目（`.kb-edge-tab-active` + 两侧 8px 内凹弧）改跟 `--wb-glass-bg` 同配方：压在外壳卡上 = 卡 + 填充两层，比正文面深一档，正好读出「当前页」的隆起；不改的话那两枚角是 `var(--bg-primary)` 实色，会在半透明卡上贴出两块不透明奶油色。
+- 无障碍：`prefers-reduced-transparency: reduce` 下把外壳卡顶成 `var(--bg-primary)` 实底（壳内内容面已透明，可读性只剩这层），并去掉 blur。放在玻璃块之后靠顺序取胜，不抢 `!important`。
+- 契约 `verify-daycycle.mjs`：B2b 的 composite 模型从「26% + 58% ≈ 69%」改为单层 `44% + 0.8b`（背衬天空占比随之从 31% 变 56% − 0.8b，正文对比度全时段 ≥ 7.0）；C9 拆成 C9–C9e，锁单一旋钮、三处同档、壳内内容面透明、图标条同档、页签条透明。
+
+**遗留（未改，待拍板）**：AI 助手整页与审查面板的根节点自画 `bg-[var(--bg-primary)]`（`src/modules/ai-assistant/index.tsx:555`、`ReviewPane.tsx:129`），番茄钟浮层同样（`PomodoroPanel.tsx:273`）—— 这些整页 / 整层仍是实底，会和其余模块的 62.6% 不同档。
+
+**2026-11-14 追加：知识页右缘白条**（同一批改动的连带暴露）。用户截图：知识页右边贴一条白竖条。探针定位 = `PageEditor` 的「关联网络」右栏（`storageKey="knowledgeRailWidth"`，`collapsedWidth={12}`）在**折叠态**渲染的贴边条；`ResizablePanel` 折叠分支把整个面板底色铺在这 12px 上，且未传 `translucent` ⇒ 实色 `--bg-primary`（实测 `rgb(245,234,210)`，宽 12px、高满卡片）。改前模块面 88% 不透明且同色，看不出来；模块面变透后即显形。
+- 修法：`ResizablePanel` 新增 `bare`（不画自身底色，交给所在卡片 / 模块表面；展开态靠手柄 1px 分隔线 + 分区头 `border-b` 仍有结构感）。知识页右栏传 `bare`；其它主题下模块面本就是不透明 `--bg-primary`，`bare` 视觉零变化。
+- 契约：`verify-daycycle.mjs` 增 C9f / C9g。
+- 复验：CDP 探针在真实 DOM 上按行取色，卡片右缘 949–961 那条 `(245,234,210)` 竖带已消失，整卡一色。
+- **同根因未动**：AI 教学三条边栏（`src/modules/ai-teaching/index.tsx:2607 / 3481 / 3529`）折叠贴边条同样自铺实色，要改同样加 `bare`（但展开态也会跟着变透明，故等用户点头）；页面底部工具条 `PageEditor.tsx:2486` 也是实色 `--bg-primary`（带 `border-t`，观感像工具条，未动）。
+
+## 2026-11-14 · AI 教学整页取实底（中间向两侧边栏对齐）
+
+**现状 / 用户反馈**：昼夜主题下 AI 教学页同一个卡片里出现三种底色 —— 左课程树（248px）、中栏右侧工件分栏（420px）、右进度/素材栏（300px）都是 `ResizablePanel` 自铺的**实色** `--bg-primary`，而中间聊天栏没有底色（挂在模块面 `.kb-theme-surface` 上）。模块面在壳内已被置透明 ⇒ 中间只剩外壳卡的 69%，直接透出天空/晚霞，两侧却是实心奶油色。实测（真机 CDP）：moduleRoot 透明、三条 rail `rgb(244,232,207)`、卡片 `alpha 0.698`。
+
+**拍板**：用户「将中间的透明度向两个侧边栏对齐」= 以两侧实色为准。
+
+**改动点**：
+- 新增 `.kb-theme-surface--solid` 语义类（昼夜主题下 `[data-wb='shell'] .kb-theme-surface--solid { background-color: var(--bg-primary) }`）：给「模块内自带实色分栏」的模块用，整页自己承担底色。其它主题模块面本来就是实色，零变化。
+- AI 教学根节点（`src/modules/ai-teaching/index.tsx:2479`）加该类 → 中间聊天栏与三条边栏同色（实测三处均 `rgb(244,232,207)`）。
+- 契约：`verify-daycycle.mjs` 增 C9h / C9i。
+- 反方向只差一行：若改成「全玻璃」，去掉这个类并给三条 `ResizablePanel` 加 `bare` 即可（知识页右栏已是 `bare` 的形态）。
+
+**验收**：web tsc 0 错；`npm run build` 通过；`verify-daycycle.mjs` 全绿；真机截图 `/tmp/opencode/shots/aiteach2.png`（三列同色，横切取色 63–841 全为 `rgb(244,232,207)`）。
+
+**备注**：`AiLearn`（AI 学堂）三栏本来就各自铺 `--bg-primary` / `--bg-secondary`，天然同色，无需处理。
+
+## 2026-11-14 · 模块内「结构面」玻璃化（插件 / 设置 / 说说 / 书市）
+
+**现状 / 用户反馈**：用户点名 5 张截图（回收站 / 插件 / 说说 / 书市 / 设置），要求除 AI 教学区（刚拍板取实底）之外，这些位置统一改成**贴合昼夜主题的透明玻璃**。
+
+**核实（真机 CDP，逐个模块扫不透明块）**：这 5 个整窗模块（`suppressSides`）的模块面在壳内都已是透明（实测 `rgba(0,0,0,0)`、外壳卡 alpha 0.714），所以天空能透出来；真正「实心」的是页面里自己铺实色的**结构面**：
+
+| 模块 | 实心块 | 位置 |
+|---|---|---|
+| 插件 | 左栏 280px `bg-secondary` | `src/modules/plugins/index.tsx:871` |
+| 设置 | 左导航 192px `bg-secondary` | `src/modules/settings/index.tsx:141` |
+| 说说 | 「写下此刻」卡 `bg-secondary`；搜索条 `bg-primary/85 + blur` | `src/modules/moments/index.tsx:910 / 965` |
+| 书市 | 首启提示条 `bg-warning-bg`；发现页吸顶搜索条 `bg-primary` | `src/modules/bookmarket/index.tsx:333`、`DiscoverView.tsx:100` |
+| 回收站 | **无** —— 三行只有 `border-b`，没有底色 | `src/modules/recycle/index.tsx:292` 起 |
+
+**改动点**：
+- 新增 `.kb-glass-chrome`（`src/styles/index.css`）：`alpha = 10% + 0.3 × --dc-glass-boost` 的薄玻璃 + `blur(14px) saturate(1.04)`，基色默认 `--bg-secondary`，可用 `--kb-chrome-base` 换（书市提示条换成 `--warning-bg`，保住 warning 语义）。合成不透明度只比正文面高约 6pp（正午 50.7% → 56.9%），天空照样透上来，同时 blur 压住从下面滚过的内容。结构分隔继续靠元素自己的 `border-r` / `border-b`，不靠底色差。
+- 七处调用点加该类（上表）；**输入框 / 弹层 / 内容卡片一律不动**（保持实底可读）。
+- 无障碍：`prefers-reduced-transparency: reduce` 下该类回落 `var(--bg-primary)` 实底并去掉 blur（加在昼夜玻璃块**之后**的同名 media 里，靠顺序取胜）。
+- 回收站无实心块，故无改动：它看上去平是因为该时段天空本身是均匀的淡青，50% 玻璃叠上去就成了淡奶油 —— 若要让渐变更明显，只能整体降 alpha（属主题级取舍，待拍板）。
+
+**验收**：web tsc 0 错；`npm run build` 通过；真机截图逐个复查（见下方待补）。
+
+## 2026-11-14 · 看板升为顶层视图并重做「今日纸」
+
+**背景**：看板此前是工作台左栏的一个书签（`WORKBENCH_BOOKMARKS` 首项），点开整窗铺满但**没有任何返回入口的语义**——左栏有 `↑ 看板 / 顶层`、AI 教学头部有 `↑ 看板` 面包屑、空态还有「回看板」按钮。同时版式是 6 列磁贴栅格（编辑态拖拽 / 拉角 / 隐藏托盘），首屏信息密度高但没有「今天该干什么」的结论。
+
+**决策**（原型 `tmp/home-view-proto/index.html#e`，方案 `docs/dashboard-home-plan.md`）：
+- 看板 = **应用顶层**：图标条最上面固定三枚「看板 / 工作台 / AI 教学」，分隔线之后才是功能面板；回看板只走最上面那枚，三处「返回」按钮全部删除。
+- 启动落看板；仍恢复 `openTabs`（看板右列工作台窗口要用），但不再把 `lastActiveTab` 当可见标签。
+- 版式换成「今日纸」：一句话结论 + 左月历 / 右今天时间线（打卡窄窗在下方一行、宽窗转右列）+ 近一年热力图；右列 = AI 教学窗口 / 工作台窗口 / 在读。
+- 磁贴编辑态整体退役：`cards.tsx` / `tileGrid.ts` / 旧 `Heatmap.tsx` 删除；`dashboardCards` / `dashboardBg` / `dashboardTileLayout` 三个设置键保留但不读（回滚数据还在）。插件看板控件的渲染面撤掉，声明面保留。
+
+**改动点**：
+- `src/components/shared/ActivityBar.tsx` 顶部固定三枚 + 分隔线 + `onBoard`。
+- `src/lib/appModules.ts`：`RAIL_MODULE_IDS` 去掉 `aiTeaching`，新增 `RAIL_PINNED_IDS`；`aiTeaching.bar` 改 false。
+- `src/lib/workbenchLayout.ts`：书签 / `RailModule` / `BOOKMARK_COLORS` 去掉 `dashboard`。
+- `src/App.tsx`：启动落看板；`case 'dashboard'` 去 `onBack`、改喂 `openTabs / lastTab / onOpenTab / onOpenWorkbench`；「回工作台」判定收口成 `goWorkbench`（图标条与看板窗口共用）。
+- `src/modules/dashboard/*`：容器 + 5 个新组件 + `summary.ts` 纯函数层；快照加 `calendar` / `course`，热力图 183 → 364 天。
+- 契约：重写 `verify-dashboard.mjs`；删除磁贴 / 插件控件两份旧契约。
+
+**验收**：web / node tsc 0 错；`npm run build` 通过；`verify-dashboard.mjs` 84 项全绿；`verify-workbench-shell.mjs` / `verify-startup-tab.mjs` 同步后全绿；真机 1280×820/963、1440×900、1920×1080、2560×1440 无滚动，1000×700 页面滚动且右列落下方。
+
+## 2026-11-14 · 插件市场搜索框去掉「框中框」并统一画法
+
+**现状 / 用户反馈**：插件市场（整窗模块）左侧栏的搜索框里套着一个小矩形 —— 外壳画了一道边框（`bg-primary` + `border` + `rounded-md`），内部 `<input>` 又吃到全局 `input` 的 `1px solid var(--border-color)`，两层叠成「框中框」；同时外壳自带 `py-1.5` 高度与右侧刷新 / 从文件安装按钮（`p-2`）不同高，一行三件没对齐。
+
+**改动点**（按 `docs/input-field-pattern.md` 的 B 形态，2026-11-14 那轮迁移漏了这处）：
+- 外壳改 `.kb-field`（唯一一道框 + `--input-bg` 底 + `:focus-within` 转 accent），`h-[30px] rounded-lg px-2`。
+- 内部 `input` 加 `.kb-field-control`（边框 / 背景 / 圆角 / 焦点框归零），字号 `12.5px`，图标 `Search size=13`。
+- 有值时出清除钮（`Esc` 也能清空）——与知识库左栏搜索同款。
+- 右侧刷新 / 从本地 ZIP 安装按钮统一 `h-[30px] w-[30px] rounded-lg grid place-items-center`，与输入框同高。
+- 契约 `verify-input-field.mjs` 的迁移清单补「插件市场 · 搜索」一行。
+
+**验收**：web tsc 0 错；`npm run build` 通过；`verify-input-field.mjs` 全绿（7 处组合框）；运行态截图确认只剩一道外框、焦点落在外壳、三件同高。
+
+**验收**：`npm run build` 通过；`verify-daycycle.mjs` 全绿（含新增 C9b–C9e）；`lightningcss` 解析 0 错。真机观感待用户在 dev 里过一遍四时段。

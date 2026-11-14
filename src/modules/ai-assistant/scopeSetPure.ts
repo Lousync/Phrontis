@@ -2,7 +2,7 @@
  * AI 助手作用域的「集合语义」纯函数（方案 `docs/ai-assistant-scope-rail-plan.md`）。
  *
  * 存储口径不变：前缀数组，`'A'` 覆盖 `A` 下**一切**（真源是主进程
- * `electron/lib/kbStore/vaultScope.ts` 的 `isWithinVaultScope`，这里只是渲染层的镜像判定，不碰 IPC）。
+ * `phrontis-core/src/kbStore/vaultScope.ts` 的 `isWithinVaultScope`，这里只是渲染层的镜像判定，不碰 IPC）。
  * 零依赖，契约脚本可直接 `import` 跑用例表。
  *
  * `kidsOf` 是注入的访问器而不是数组参数：目录子项在 `ScopePane` 里懒加载。

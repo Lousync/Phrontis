@@ -2011,7 +2011,7 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 
 **现象**：用户反馈「读单词功能似乎有些问题」；具体表现、复现步骤、影响范围待下次补充。
 
-**范围**：背单词模块（qwerty-learner 嵌入版）的发音 / 朗读相关。v3.17.0 已合入代码但关闭用户入口，计划 v3.18.0 开放后再复现。
+**范围**：背单词模块（qwerty-learner 嵌入版）的发音 / 朗读相关。v3.17.0 已合入代码但关闭用户入口（原计划 v3.18.0 开放，已过期未开放、目标版本待定），入口开放后再复现。
 
 **当前处理**：按用户明确要求，本次**只登记、不修复**；下次对话继续时先复现并定位。当前嵌入版为避免无音频设备环境（Linux/CI）下 Chromium 音频栈崩溃，默认关闭了发音播放、发音预取与按键音——这是**临时稳定性处理，不代表本问题已解决**。
 
@@ -2161,3 +2161,36 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 **修复**：新增 `src/components/shared/quizNavPure.ts` 的 `pickNextQuizCardIndex`（只在同一滚动容器 scope 内选下一张）；`QuizCard` 用 `closestScrollBox` 求当前卡所在栏的 scope，并在该容器内手算 `scrollTop` 居中（不再用会连带滚动祖先的 `scrollIntoView`）。右栏答题同理只在右栏内跳。
 
 **验证**：`.AGENT/scripts/quiz-tools/verify-quiz-nav.mjs` 11 项断言（跨栏更近题卡不选 / 同栏取最近 / 容差 / 无下一题 / 越界安全 / 组件接线静态检查）全过；`npx tsc --noEmit -p tsconfig.web.json` 0 错；`npm run build` 通过。
+
+## [ ] B-53 日程完成反馈：三档动效死代码清理 + 勾选框热区（2026-11-14，P3；v3.13.0-feedback F-1 收口转入）
+
+**背景**：v3.13.0 F-1 三层问题中②③已修（`TaskPanel.tsx:127` 主任务完成开关、`index.tsx:247` 勾选乐观更新 + 失败回滚 Toast，代码内均标注「v3.13.0 反馈 F-1」）。收口时遗留两点：
+
+1. **死代码**：`src/styles/index.css` 的 `kb-task-pop` / `kb-task-ripple` 等三档完成反馈原子动画 + `settings.ts` 的 `scheduleFeedbackLevel` 设置项（ui:true + anchor `schedule.feedback`）**无任何消费者**——当年由旧组件 `TodoItem` 按档位触发，日程 UI 重写删除 TodoItem 后整条链悬空。二选一待拍板：① `ScheduleTaskRow` 按档位重新接线复用动画；② 删除全部死样式 + 设置项（设置项删除属用户可见变更，发版说明需提及）。
+2. **勾选框热区**：`ScheduleTaskRow.tsx:44` 勾选框仍 `h-4 w-4`（16px），行体整行可点开修改态，点偏一丝即弹右栏（原 F-1 第①层，未动）。用户无再反馈可不动。
+
+## [ ] B-54 AI 助手读不到博客全文：缺 blog.read 阅读工具（2026-11-14，P3；v3.4.0-feedback F-15 转入，**处置方向待拍板**）
+
+**现象**：博客对 AI 只有 `blog.search`（120 字摘录）与 `blog.create-entry`；repo 层 `vaultGetEntryById` / `vaultListEntries({ date })` 现成但未暴露——AI 无法读全文、按日期问法零命中、多词查询几乎必空。
+
+**处置方向（原 F-15 照录，待拍板）**：★ 主修 = 新增 `builtin.blog.read`（按 id 或 date 返回全文，只读 + `maxChars` 上限 + `wordCount` 元信息；`.knowbase/blog` 对通用文件工具维持封闭，入口收敛为 blog.search + blog.read 专用通道，不破坏 N-2 搁置条目依赖的边界前提）；2. search 返回加 wordCount、excerpt 改命中关键词附近窗口；3. blog.read 支持 date 直取当天；4.（可单独一批）`vaultSearchEntries` 多词拆分 AND/OR。最小闭环 = 1 + 2 + 3，改动集中 `builtinTools.ts`（description 变更同步 `builtin.tool.request` 清单）。
+
+## [ ] B-55 页面 ⋮ 菜单批 1c：既有条目叫法统一与重排 + 菜单项 ↔ 真源双向登记（2026-11-14，P3；page-menu-capability-plan 批 1c 转入）
+
+**范围**（原方案照录）：非 md 分支既有条目**一条不动**的追加阶段已落码（批 1a–4）；本批做「重排 + 叫法统一」——页面→视图、非 md 四项归位、「在系统中打开」与文件树的「使用默认应用打开」并成一句，外加菜单项 ↔ 真源双向登记。**要连带改 3 份契约，单独一轮**。方案原文：DP `Phrontis/已实现设计文档/page-menu-capability-plan.md`。
+
+## [ ] B-56 指令表面板 P3：fuzzy 模糊匹配 + 面板接真源（2026-11-14，P3；command-registry-plan P3 转入）
+
+**范围**（原方案照录）：`fuzzy.ts` + 命令面板接真源（键帽 / recents / 门控）+ 契约 §2 双射断言；验收 = `fuzzy` 单测、真机面板双向实测、不新增动效令牌。P0/P1（真源化 + 设置页指令表）与 P2（手册表格生成区）均已落码。方案原文：DP `Phrontis/已实现设计文档/command-registry-plan.md`。
+
+## [ ] B-57 插件 API v2 P3–P7：UI/命令/事件通道 + 插件表迁移与下线（2026-11-14，P3；plugin-api-v2-design 待办转入）
+
+**范围**：P3 UI + 命令 + 事件（`kb.ui.*` / `kb.commands.*` / `kb.events.*`，slot 注册表 sidebar / statusBar / panel / settingsPage）→ P4 行为审计（v2 RPC 全落 `plugin_audit_log`，设置页按 method 过滤）→ P5 双写迁移工具（`scripts/migrate-plugin-tables.mjs`，读 `plugin_<id>_<table>` 写 `.knowbase/plugins/<id>/data/`）→ P6 设置页「建议迁移」提示 → P7 随 sql.js 退役下线 `contributes.tables`。**前置约束**：P5 前必须收敛「插件数据表 × 去库化」方向（原方案 §风险：不收敛则 P7 两难）。方案原文：DP `Phrontis/方案与调研/plugin-api-v2-design.md`。
+
+## [ ] B-58 AI 学堂中心界面（学习路径 / 进度 / 底栏）待拍板落码（2026-11-14，P3；ai-learn-center-design 主体转入）
+
+**范围**：§7.3/§7.5 帮助文档体系已落码（`helpService` / `builtin.help.search` / `resources/help` 40 篇）；未实施的是学堂中心界面本身——学习路径 / 进度 / 底栏（原型 `ai-learn-center.html` 已确认，随本批归 DP `Phrontis/原型/`）。方案原文：DP `Phrontis/已实现设计文档/ai-learn-center-design.md`。
+
+## [ ] B-59 AI 教学体验问题清单 5 条未落码（2026-11-14，P2；ai-teaching-ux-feedback 转入）
+
+**范围**：① 交接文档重复 + ask 选项卡出现「生成交接文档」；② 支线旁问新建后第一条消息发出去没效果；③~⑤ 全清单见原文（每条已带现象 / 口径 / 根因 / 建议修复 / 涉及文件 / 验收）。方案原文：DP `Phrontis/过程记录/ai-teaching-ux-feedback-2026-10-28.md`。

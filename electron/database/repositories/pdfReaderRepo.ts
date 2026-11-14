@@ -14,7 +14,7 @@ import {
 
 /**
  * PDF 阅读数据 IPC 注册转发层（v3.4.0 PDF 阅读体验整包，方案 §4）。
- * handler 只做转发 + 广播，逻辑全在 lib/kbStore/pdfReaderVaultRepo.ts（真相源）。
+ * handler 只做转发 + 广播，逻辑全在 phrontis-core/src/kbStore/pdfReaderVaultRepo.ts（真相源）。
  *
  * 通道清单：
  *   pdfReader:listBooks  扫 vault 书籍（scanVaultBooks 出口，pdf+txt）join 进度 + `.books/.meta.json`
@@ -49,7 +49,7 @@ export interface BookListItem {
   coverRef: string
   size: number
   mtime: number
-  /** 唯一真相源 = lib/kbStore/bookFormats.ts 的 BookKind（勿在此写字面量联合） */
+  /** 唯一真相源 = phrontis-core/src/kbStore/bookFormats.ts 的 BookKind（勿在此写字面量联合） */
   kind: BookKind
   lastPage: number
   /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母；txt / epub 恒 0（进度用 pct） */
@@ -58,7 +58,7 @@ export interface BookListItem {
   pct?: number
   hasProgress: boolean
   updatedAt: string | null
-  /** 扫描版探测结论（仅 pdf；缺省 = full）——类型真源 = lib/kbStore/scanDetect.ts */
+  /** 扫描版探测结论（仅 pdf；缺省 = full）——类型真源 = phrontis-core/src/kbStore/scanDetect.ts */
   scan?: ScanMode
 }
 
