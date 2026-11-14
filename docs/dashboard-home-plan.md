@@ -98,7 +98,7 @@ todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // �
 
 1. **磁贴看板整体退役**：`cards.tsx` / `tileGrid.ts` / 旧 `Heatmap.tsx` 删除；`dashboardCards` / `dashboardBg` / `dashboardTileLayout` 三个设置键**保留但不再读取**（回滚旧版时数据还在）。
 2. **插件看板控件**：看板不再渲染 `PluginFrame`；插件的声明面（manifest / 注册表 / `pluginListDashboardWidgets`）原样保留，只是没有消费方，未来可以放进工作台窗口。
-3. **月历 v1 只显示当月**：没有翻月箭头；翻月需要「按月取数」的新 IPC，留到 P1。
+3. ~~**月历 v1 只显示当月**~~（2026-11-14 补上）：已加左右翻月 + 「回到本月」，新 IPC `dashboard:getMonth`；同时把格子从被卡片高度拉长的长方形改成**正方形**（`aspect-square`，整块在左列垂直居中）。
 
 ## 7. 契约与验收
 
@@ -128,4 +128,4 @@ todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // �
 ## 8. 收尾待办
 
 - **AI 手册必须同步**：`resources/help/*.md` 里讲「看板 / 图标条 / 启动落点 / 怎么回看板 / 磁贴编辑」的段落已过时，按 `.AGENT/help-rewrite/README.md` 重编，并跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`。
-- P1 可选：翻月、热力图 hover 明细已在（保留 tooltip）、在读书继续阅读、空态文案。
+- ~~P1：翻月~~ 已做（2026-11-14）。剩余可选：热力图 hover 明细已在（保留 tooltip）、在读书继续阅读、空态文案。

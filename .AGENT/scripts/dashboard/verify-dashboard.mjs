@@ -21,7 +21,7 @@ import {
   buildHeatmap, levelOf, dayNo, keyOfNo, fmtMinutes, LEVEL_MIN,
 } from '../../../src/modules/dashboard/heatmapModel.ts'
 import {
-  verdictParts, verdictText, orderTimeline, buildMonthGrid, heatRange, dateLine, monthHead,
+  verdictParts, verdictText, orderTimeline, buildMonthGrid, heatRange, dateLine, monthHead, shiftMonth,
 } from '../../../src/modules/dashboard/summary.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -100,6 +100,57 @@ const T = (id, time, done = false) => ({ id, title: id, time, done })
   eq('D6 畸形输入 → 空数组（不抛错）', buildMonthGrid('2026-13'), [])
 }
 eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月', year: '2026' })
+
+// 翻月（2026-11-14）：整数序号平移，跨年 / 跨多个 / 反向 / 畸形输入都要对
+{
+  const cases = [
+    ['2026-11', 1, '2026-12', '往后一个月'],
+    ['2026-12', 1, '2027-01', '跨年往后'],
+    ['2026-01', -1, '2025-12', '跨年往前'],
+    ['2026-11', 0, '2026-11', '原地'],
+    ['2026-11', 14, '2028-01', '跨两年'],
+    ['2026-11', -12, '2025-11', '往前一年'],
+    ['2026-13', 1, '2026-13', '畸形月份原样返回'],
+    ['2026-1', 1, '2026-1', '非两位月份原样返回'],
+  ]
+  for (const [m, d, want, why] of cases) eq(`D8 shiftMonth ${why}`, shiftMonth(m, d), want)
+}
+
+// 正方形格子 + 翻月入口（2026-11-14 用户要求）：格子随列宽定尺寸，行高不再被卡片拉长
+{
+  const cal = read('src/modules/dashboard/MonthCalendar.tsx')
+  ok('D9 格子是正方形（aspect-square，不再用 1fr 行高分摊卡片高度）',
+    /aspect-square/.test(cal) && !/grid-rows-\[18px_repeat/.test(cal))
+  ok('D10 今天的高亮随格子缩放（inset 百分比，不写死 26px）',
+    /inset-\[9%\] rounded-full/.test(cal) && !/h-\[26px\]/.test(cal))
+  ok('D11 翻月：上下月按钮 + 点标题回本月 + 翻走后出现「回到本月」',
+    /shiftMonth\(view, -1\)/.test(cal) && /shiftMonth\(view, 1\)/.test(cal)
+    && /setView\(month\)/.test(cal) && /回到本月/.test(cal))
+  ok('D12 翻月取数走 dashboard:getMonth，当月仍吃快照（不再重复请求）',
+    /dashboardGetMonth\(view\)/.test(cal) && /view === month \? days/.test(cal))
+  ok('D13 翻月有淡入（复用 .kb-view-fade，且 key 跟随月份重放）',
+    /kb-view-fade/.test(cal) && /key=\{view\}/.test(cal))
+
+  const dashboard = read('src/modules/dashboard/index.tsx')
+  ok('D14 月历列宽 220–340（正方形边长由列宽决定，太窄看不清）',
+    /minmax\(220px,340px\)/.test(dashboard))
+
+  const repo = read('electron/database/repositories/dashboardRepo.ts')
+  ok('D15 dashboard:getMonth 已注册，且月份参数先过格式校验',
+    /ipcMain\.handle\('dashboard:getMonth'/.test(repo)
+    && /function isMonthKey/.test(repo)
+    && /\^\\d\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$/.test(repo))
+  ok('D16 翻月与快照同一统计口径（复用 dashboardMonthCounts，且排除已取消）',
+    /calendarOfMonth\(today: string\)[\s\S]{0,120}?dashboardMonthCounts\(today\.slice\(0, 7\)\)/.test(repo)
+    && /dashboardMonthCounts[\s\S]{0,400}?status === 'canceled'/.test(repo))
+
+  const preload = read('electron/preload/index.ts')
+  const ipc = read('src/lib/ipc.ts')
+  ok('D17 IPC 三层接线齐（preload / ipc.ts / types）',
+    /dashboardGetMonth: \(month: string\) => ipcRenderer\.invoke\('dashboard:getMonth'/.test(preload)
+    && /export const dashboardGetMonth = \(month: string\)/.test(ipc)
+    && /dashboardGetMonth: \(month: string\) => Promise<DashboardMonthCounts>/.test(read('src/types/index.ts')))
+}
 
 /* ================= E. 热力图区间 ================= */
 
@@ -212,7 +263,10 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
   ok('H6 热力图有月份刻度且跳过首个不完整月', /m\.start > 1/.test(heat))
   ok('H7 时间线宽度封顶 760（状态标签不会被推远）', /max-w-\[760px\]/.test(dash))
   ok('H8 宽窗打卡转右列（容器查询，不按视口写死）', /@min-\[660px\]:col-start-2/.test(dash))
-  ok('H9 月历行高随可用高度收缩（矮窗不滚动）', /repeat\(6,minmax\(0,1fr\)\)/.test(cal))
+  // 2026-11-14 改成正方形后，行高不再由卡片高度分摊；矮窗靠「列宽上限 340」兜住，
+  // 整块在列里垂直居中，多出来的高度留白（见 MonthCalendar 头注）。
+  ok('H9 月历正方形格子 + 垂直居中（矮窗不再把格子拉长）',
+    /aspect-square/.test(cal) && /justify-center/.test(cal) && !/repeat\(6,minmax\(0,1fr\)\)/.test(cal))
   ok('H10 两个模块窗口共用外壳（标题栏 + 内容 + 底部入口）', /function WindowShell/.test(win) && /打开工作台/.test(win))
   ok('H11 工作台窗口点一行直达对应标签', /onOpenTab\(tab\)/.test(win))
   ok('H12 动效全部复用既有令牌（kb-view-in / kb-item-in / kb-pop）',

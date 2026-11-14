@@ -217,8 +217,19 @@ export function dashboardSnapshot(getSetting: (key: string) => unknown = () => u
  * 那些没有日期的行在这里按 `date.slice(0,7)` 过滤掉，不会落进任何一天。
  */
 function calendarOfMonth(today: string): DashboardSnapshot['calendar'] {
-  const month = today.slice(0, 7)
+  return dashboardMonthCounts(today.slice(0, 7))
+}
+
+/**
+ * 任意一个月的每日计数（2026-11-14 翻月）—— 月历翻到别的月份时就调它。
+ *
+ * 与快照里的当月日历同一实现，口径必然一致（已取消的不画不计数、计划类任务按日期落格）。
+ * 参数由渲染层来，**必须**先过 `isMonthKey`：非法值会让 `vaultMonthTodos` 捞不到东西
+ * （静默空网格），更糟的是 `date.slice(0,7) !== month` 恒真却仍白读一遍全量待办。
+ */
+export function dashboardMonthCounts(month: string): DashboardSnapshot['calendar'] {
   const days: Record<string, { total: number; done: number }> = {}
+  if (!isMonthKey(month)) return { month: String(month ?? ''), days }
   for (const t of vaultMonthTodos(month)) {
     const date = typeof t.date === 'string' ? t.date : ''
     if (date.slice(0, 7) !== month) continue
@@ -229,6 +240,11 @@ function calendarOfMonth(today: string): DashboardSnapshot['calendar'] {
     if (t.status === 'done') slot.done++
   }
   return { month, days }
+}
+
+/** 'YYYY-MM'（月份 01–12）。渲染层传什么都可能，晚一步校验就是一次白读全量待办 */
+function isMonthKey(v: unknown): v is string {
+  return typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v)
 }
 
 /**
@@ -283,4 +299,6 @@ function courseSnapshot(getSetting: (key: string) => unknown): DashboardSnapshot
 
 export function registerDashboardHandlers(deps: { getSettingValue: (key: string) => unknown }): void {
   ipcMain.handle('dashboard:getSnapshot', () => dashboardSnapshot(deps.getSettingValue))
+  // 月历翻月（2026-11-14）：只回「这个月每天几件 / 做完几件」，正文仍留在日程模块
+  ipcMain.handle('dashboard:getMonth', (_e, month: string) => dashboardMonthCounts(month))
 }

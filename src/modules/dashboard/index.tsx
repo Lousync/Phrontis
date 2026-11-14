@@ -220,8 +220,10 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
                 style={{ animationDelay: '60ms' }}
               >
                 <div className="@container min-h-0 flex-1">
-                  <div className="grid h-full min-h-0 grid-cols-1 gap-3.5 @min-[720px]:grid-cols-[minmax(200px,300px)_minmax(0,1fr)] @min-[720px]:gap-[18px]">
-                    <div className="hidden min-h-0 @min-[720px]:flex">
+                  {/* 月历列宽 220–340：格子是正方形（边长由列宽决定，见 MonthCalendar），
+                      太窄会小到看不清、太宽会把时间线挤没 */}
+                  <div className="grid h-full min-h-0 grid-cols-1 gap-3.5 @min-[720px]:grid-cols-[minmax(220px,340px)_minmax(0,1fr)] @min-[720px]:gap-[18px]">
+                    <div className="hidden h-full min-h-0 @min-[720px]:flex">
                       <MonthCalendar
                         month={snap.calendar.month}
                         days={snap.calendar.days}

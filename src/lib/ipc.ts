@@ -507,6 +507,8 @@ export const shareCardSavePng = (data: Uint8Array, defaultName: string) => a().s
 // ===== 看板 =====
 /** 一次取全部卡片数据（主进程聚合，见数据库层 dashboardRepo.ts） */
 export const dashboardGetSnapshot = () => a().dashboardGetSnapshot()
+/** 月历翻月：任意一个月的每日计数（'YYYY-MM'；主进程侧校验格式） */
+export const dashboardGetMonth = (month: string) => a().dashboardGetMonth(month)
 
 // ===== Bookmark Nav =====
 export const bookmarkGetAll = () => a().bookmarkGetAll()

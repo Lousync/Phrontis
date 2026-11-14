@@ -155,3 +155,20 @@ export function monthHead(month: string): { title: string; year: string } {
   if (!m) return { title: month, year: '' }
   return { title: `${Number(m[2])} 月`, year: m[1] }
 }
+
+/**
+ * 'YYYY-MM' 平移若干个月（翻月）：`shiftMonth('2026-01', -1)` → `'2025-12'`。
+ *
+ * 用「年 × 12 + 月」的整数序号算，不碰 Date —— 跨年 / 闰月 / 时区都不会偏。
+ * 畸形输入原样返回（月历那边会退化成空网格，至少不会崩）。
+ */
+export function shiftMonth(month: string, delta: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(month)
+  if (!m) return month
+  const mon = Number(m[2])
+  if (mon < 1 || mon > 12) return month
+  const idx = Number(m[1]) * 12 + (mon - 1) + Math.trunc(delta)
+  const year = Math.floor(idx / 12)
+  const next = ((idx % 12) + 12) % 12 + 1
+  return `${String(year).padStart(4, '0')}-${String(next).padStart(2, '0')}`
+}

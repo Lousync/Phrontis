@@ -2181,6 +2181,14 @@ export interface AiTeachProfilePatchResult {
  * —— 两个 tsconfig 互不可见，沿用本仓「跨线类型各侧各声明一次」的做法，改一边要同步另一边。
  * 这里只声明渲染层**会读**的字段，比主进程那份少了内部实现细节。
  */
+/** 一个月的每日计数（月历翻月用；与 DashboardSnapshot.calendar 同构） */
+export interface DashboardMonthCounts {
+  /** 'YYYY-MM' */
+  month: string
+  /** 'YYYY-MM-DD' → 当日任务总数 / 已完成数 */
+  days: Record<string, { total: number; done: number }>
+}
+
 export interface DashboardSnapshot {
   /** 本地日 'YYYY-MM-DD'（由主进程给，避免两端算出不同的「今天」） */
   today: string
@@ -2746,6 +2754,8 @@ export interface ElectronAPI {
   shareCardSavePng: (data: Uint8Array, defaultName: string) => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
   /** 看板快照：主进程一次聚合全部卡片数据（见 DashboardSnapshot） */
   dashboardGetSnapshot: () => Promise<DashboardSnapshot>
+  /** 月历翻月：任意一个月的每日计数（'YYYY-MM'） */
+  dashboardGetMonth: (month: string) => Promise<DashboardMonthCounts>
   createHabit: (d: CreateHabitDTO) => Promise<Habit>
   updateHabit: (id: string, d: UpdateHabitDTO) => Promise<Habit>
   deleteHabit: (id: string) => Promise<void>
