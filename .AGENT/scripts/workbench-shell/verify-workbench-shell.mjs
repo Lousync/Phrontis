@@ -231,7 +231,7 @@ ok(!/\[\.\.\.openTabs\]\.reverse\(\)\.find/.test(srcApp),
   'C20c 负向：工作台按钮不再扫描 openTabs 落最后文档标签（一律回总览，见 M7）')
 
 /* ================= D. 批次4：右栏三段 / 工具入口区 / DayPanel 控件迁移（2026-09-17） ================= */
-console.log('\n=== D. 批次4：右栏三段 + 工具入口区 + DayPanel 迁移 ===')
+console.log('\n=== D. 批次4：右栏两段 + 工具入口区 + DayPanel 迁移 ===')
 const srcRight = stripComments(read('src/components/workbench/WorkbenchRightPanel.tsx'))
 const srcZone = stripComments(read('src/components/workbench/ToolLauncherZone.tsx'))
 const srcRegistry = stripComments(read('src/components/workbench/toolRegistry.tsx'))
@@ -292,16 +292,14 @@ ok(/checkedIds/.test(srcRight) && /RIGHT_PANEL_WIDGET_IDS\.filter\(\(id\) => !ch
 /* ================= E. 右栏优化轮：布局权重 + 工具侧栏适配左栏（2026-09-17） ================= */
 console.log('\n=== E. 右栏优化轮：布局权重 + 工具侧栏适配 ===')
 
-// E1 布局权重：中段「最近编辑」收缩，下段简略视图吃满
+// E1 布局权重（2026-11-14 用户反馈：中段「最近编辑」无用 → 整卡删除，余量全部归下段）
 ok(/h-\[196px\]/.test(srcRight) === false, 'E1 简略视图不再固定 196px（自适应+上限，超长才滚动）')
 ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col overflow-y-auto/.test(srcRight.replace(/\n/g, ' ')),
   'E1b 简略视图 = flex-1 吃满下段剩余（显示完常规内容量）')
-ok(/absorbSurplus \? 'grow basis-0 min-h-\[64px\]' : 'shrink max-h-\[212px\] min-h-\[36px\]'/.test(srcRight),
-  'E1c 最近编辑默认可收缩（让位宠物，不挤占下段）；仅 absorbSurplus 时转为增长项吸收余量')
-ok(/absorbSurplus \? 20 : 6/.test(srcRight) && /min-h-0 flex-1 overflow-y-auto px-1\.5 pb-1\.5/.test(srcRight),
-  'E1e absorbSurplus 联动（条目 6→20；列表常驻 flex-1 由卡高约束，卡缩小时滚动）')
-ok(!/if \(recent\.length === 0\) return null/.test(srcRight) && /近 7 天没有编辑记录/.test(srcRight),
-  'E1d 最近编辑常驻卡片（无记录显示空态文案，不再整卡消失——2026-09-17 反馈）')
+ok(!/recentEdited/.test(srcRight) && !/最近编辑/.test(srcRight) && !/<RecentEdited/.test(srcRight),
+  'E1c 「最近编辑」卡片已删除（DOM 标记 / 标题 / 组件引用三处都不留）')
+ok(!/absorbSurplus/.test(srcRight),
+  'E1d absorbSurplus 联动退役（该 prop 只为最近编辑卡吸收余量而存在）')
 
 // E2 工具侧栏真相源 + ToolHost 透传（2026-11-07：data-export 退役，4 → 3）
 ok(/TOOLS_WITH_SIDEBAR[^]*?\['habit-tracker', 'bookmark-nav', 'pdf-toolkit'\]/.test(srcRegistry.replace(/\n/g, ' ')),
@@ -349,8 +347,8 @@ for (const id of RIGHT_PANEL_WIDGET_IDS) {
 const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))
 ok(/data-wb="pomoRing"/.test(srcPomo) && /strokeDashoffset/.test(srcPomo) && /const RING_CIRC = 2 \* Math\.PI \* RING_R/.test(srcPomo),
   'E5c 专注态环形进度（SVG 环 + stroke-dashoffset 周长派生）')
-ok(/const ringMode = ps\.visible && ps\.phase === 'work'/.test(srcPomo),
-  'E5d 环仅专注阶段显形（就绪/休息保持横条，拍板口径）')
+ok(/const ringMode = ps\.phase === 'work' && mode !== 'idle' && mode !== 'rating'/.test(srcPomo),
+  'E5d 环仅专注阶段显形（待评分走专用块；就绪/休息保持横条）')
 ok(/data-wb="pomoControls"[^]*?grid w-full grid-cols-2/.test(srcPomo.replace(/\n/g, ' ')) && /col-span-2/.test(srcPomo),
   'E5e 控制钮等宽两列（就绪单钮跨两列，运行/暂停/完成 = 主钮 + 重置）')
 ok(/与工具箱同源/.test(srcRight) === false && /小控件均已隐藏/.test(srcRight),
@@ -423,18 +421,18 @@ ok(/effectiveWidget === 'pet' \? 'h-full w-full'/.test(srcRight),
   'P19 右栏给桌宠槽位 h-full（否则根节点 h-full 无高度可依，贴底失效）')
 
 // E6 底层 UI 统一（2026-09-17 第三轮反馈）：右栏外壳对齐左栏 + 番茄钟层级收敛
-ok(/side="right"[\s\S]{0,700}?className=\{sidesGone \|\| maximized \? 'rounded-none border-0' : 'm-1\.5 rounded-xl border border-\[var\(--border-color\)\] shadow-sm'\}/.test(srcShell),
-  'E6 右栏外壳 = 左栏同款卡片（m-1.5 + rounded-xl + border + shadow-sm，卡片装饰由外壳承担）')
+ok(/side="right"[\s\S]{0,900}?className=\{`kb-dc-side \$\{sidesGone \|\| maximized \? 'rounded-none border-0' : 'm-1\.5 rounded-xl border border-\[var\(--border-color\)\] shadow-sm'\}`\}/.test(srcShell),
+  'E6 右栏外壳 = 左栏同款卡片（kb-dc-side + m-1.5 + rounded-xl + border + shadow-sm，卡片装饰由外壳承担）')
 ok(/data-wb="rightPanel"[\s\S]{0,150}?className="flex min-h-0 flex-1 flex-col overflow-hidden"/.test(srcRight),
   'E6b 右栏内层不再重复画卡片（去 border/bg/圆角/shadow，仅作布局容器）')
 ok(!/maximized/.test(srcRight), 'E6c 右栏组件的 maximized prop 随卡片下移外壳而退役')
 ok(/<PomoWidget frameless \/>/.test(srcRight) && /frameless\?: boolean/.test(srcPomo),
   'E6d 番茄钟在右栏走 frameless（不再画自带卡片，消除卡中卡）')
 ok(!/排序：直接拖拽上方图标/.test(srcRight), 'E6e ⋯ 控件选显菜单不带底部排序说明文字（文案精简）')
-ok(/flex min-h-0 flex-col overflow-hidden \$\{absorbSurplus \? 'grow-\[99\] basis-0 max-h-\[480px\]' : 'flex-1'\} min-h-\[400px\]/.test(srcRight),
-  'E6f 下段容器 = min-h-400 保底（宠物永不被挤），absorbSurplus 时再封顶 max-h-480')
-ok(/absorbSurplus=\{winMax\}/.test(read('src/App.tsx')),
-  'E6g absorbSurplus 由 App 按 winMax 下发（策略在 App，右栏只表达「要不要吸收余量」）')
+ok(/flex min-h-0 flex-1 flex-col overflow-hidden min-h-\[400px\]/.test(srcRight),
+  'E6f 下段容器 = min-h-400 保底（宠物永不被挤）+ flex-1 吃满右栏剩余（最近编辑删除后不再封顶）')
+ok(!/absorbSurplus=\{winMax\}/.test(read('src/App.tsx')),
+  'E6g 余量策略收口：App 不再下发 absorbSurplus（无中段卡片可吸收余量）')
 
 // ===== F. 页面条置顶（v3.4.0「工作台中间栏头部层级优化」第一项，2026-09-18）=====
 // 形态：中间栏第一行 = 一条页面条（模块条目 + 编辑器页签组 + 知识库页签组），模块内部零头部行；

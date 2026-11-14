@@ -77,7 +77,6 @@ async function main() {
       rightPanelWrap: info(kids[kids.length - 1], '右栏 ResizablePanel 外壳'),
       rightCard: info(document.querySelector('[data-wb="rightPanel"]'), '右栏卡片(data-wb=rightPanel)'),
       toolsZone: info(document.querySelector('[data-wb="toolsZone"]'), '上段 入口区'),
-      recent: info(document.querySelector('[data-wb="recentEdited"]'), '中段 最近编辑'),
       bottomCard: info(document.querySelector('[data-wb="widgetBrief"]')?.parentElement, '下段 控件卡(widgetBrief 父)'),
       brief: info(document.querySelector('[data-wb="widgetBrief"]'), '简略视图容器'),
       pomoCard: info(document.querySelector('[data-wb="pomoMain"]')?.closest('div.rounded-2xl'), '番茄钟自带卡片'),

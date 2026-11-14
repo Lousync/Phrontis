@@ -2762,3 +2762,14 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`verify-dashboard.mjs` 新增 D8「shiftMonth 8 例」、D9–D17（正方形 / inset 高亮 / 翻月入口 / 取数分流 / 淡入 / 列宽 / IPC 与校验 / 同口径 / 三层接线）；H9 从「行高随高度收缩」改成「正方形 + 垂直居中」。
 
 **验收**：双端 tsc 0 错；`npm run build` 通过；`verify-dashboard.mjs` 105 项全绿；真机 1280×820 / 1440×900 / 1000×700：格子实测 42.4×42.4（正方形）、今天圆 35px、卡片高 485/358 时网格 275 高不溢出；翻月 11→10→7 月、回本月、12 月四步都正常，非当月无「今天」高亮。截图 `tmp/dashboard-impl-shots/cal-*.png`。
+
+## 2026-11-14 · 工作台右栏删除「最近编辑」卡片
+
+**现状 / 用户反馈**：工作台右侧边栏「小工具」态分上中下三段，中段是一张常驻的「🕘 最近编辑」卡片（近 7 天最多 6 条，窗口最大化时最多 20 条）。用户反馈这张卡已经没什么用，可以直接删除。
+
+**改动点**：
+- `src/components/workbench/WorkbenchRightPanel.tsx`：删除 `RecentEdited` 组件与 `relTime` / `REL_MS` 辅助；小工具态从三段变两段（工具入口区 + 控件切换条 / 简略视图），下段改 `flex-1` 吃满右栏剩余高度。
+- 连带退役 `absorbSurplus` prop —— 它只为「最近编辑」吸收余量而存在：`src/App.tsx` 不再按 `winMax` 下发，最大化时下段也不再封顶 `max-h-480`（余量直接归当前控件）。
+- 契约：`.AGENT/scripts/workbench-shell/verify-workbench-shell.mjs` 的 E1c / E1d / E6f / E6g 改为「卡片已删除 + 余量归下段」断言；探针 `probes/probe-right-panel-inspect.mjs` 去掉中段取样。顺手修正两条早已与实现脱节的存量断言（E5d 番茄钟环判定、E6 右栏外壳类名）——本轮跑契约前即 FAIL，与本改动无关。
+
+**验收**：双端 `tsc --noEmit` 0 错；`npm run build` 通过；`verify-workbench-shell.mjs` 273 项全绿。真机待验：右栏还原 / 最大化各看一眼（下段吃满、桌宠仍贴底、控件切换与 ⋯ 选显不变）。

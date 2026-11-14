@@ -82,6 +82,17 @@ export const RELEASE_NOTES = [
         ]
       },
       {
+        "title": "工作台 · 右栏收窄",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "「最近编辑」下线",
+            "rest": "右侧边栏小工具态不再有这张卡，工具入口区下面直接是小控件区；腾出的高度全部留给当前控件（最大化时也是控件区吃满，不再空一块）。",
+            "sub": []
+          }
+        ]
+      },
+      {
         "title": "内部",
         "kind": "internal",
         "items": [
@@ -108,6 +119,11 @@ export const RELEASE_NOTES = [
           {
             "lead": "",
             "rest": "契约：重写 `.AGENT/scripts/dashboard/verify-dashboard.mjs`（88 项）；删除磁贴 / 插件控件两份旧契约与 `cards.tsx` / `tileGrid.ts` / 旧 `Heatmap.tsx`；`verify-workbench-shell` / `verify-startup-tab` 同步书签集合与图标条成员。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作台右栏删除「最近编辑」卡，`absorbSurplus` 联动退役（下段 `flex-1` 吃满）；`verify-workbench-shell` 的 E1 / E6 相关断言改写。",
             "sub": []
           },
           {

@@ -2021,12 +2021,9 @@ export default function App() {
               right={
                 <WorkbenchRightPanel
                   dayPanelDetached={dayPanelDetached}
-                  absorbSurplus={winMax}
                   onDockDayPanel={() => { void window.api?.dayPanelDockBack?.() }}
                   onOpenTool={handleOpenTool}
                   onOpenPluginTool={handleOpenPluginTool}
-                  onOpenFile={(relPath) => handleOpenLooseFile(relPath)}
-                  onOpenPage={(pageId) => openKnowledgePageFromSearch(pageId)}
                   onOpenSchedule={() => handleTabChange('schedule')}
                   // 右栏 AI 态原位显示「用量 + 改动文件」面板（token 面板）的时机：
                   // aiChat（AI 对话整页）或 aiAssistant（左栏书签「AI助手」模块）激活中。

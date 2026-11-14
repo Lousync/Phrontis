@@ -23,6 +23,10 @@
 - **收进一枚入口**：日期行右端出一枚 `v3.29.0 有什么变化`，点进去还是原来那页（工作区里打开、看完「知道了」回到看板），读完入口自动消失。
 - **设置里改口**：「新版本时自动打开更新说明」改为「新版本时在看板提醒」；关掉 = 连这枚入口都不出现（之前存的值仍然生效，不会被重置）。中间版本号（x.y）变化才提醒，修正版不打扰。
 
+### 工作台 · 右栏收窄
+
+- **「最近编辑」下线**：右侧边栏小工具态不再有这张卡，工具入口区下面直接是小控件区；腾出的高度全部留给当前控件（最大化时也是控件区吃满，不再空一块）。
+
 ### 内部
 
 - `DashboardSnapshot` 新增 `calendar`（当月每日件事计数）与 `course`（最近工作区的当前知识点）；今日待办改为含已完成项（时间线画划线态）。
@@ -30,6 +34,7 @@
 - 月历翻月走新的 `dashboard:getMonth`（只回「这个月每天几件 / 做完几件」，与快照里的当月日历同一实现、同一口径）；月份参数在主进程侧先过 `YYYY-MM` 校验，不合法直接回空网格。
 - 使用热力图跨度 183 → 364 天；修 `heatmapModel` 跨年时「同月份号被合并」导致最后一个月刻度缺失（52 周区间里 11 月出现两次）。
 - 契约：重写 `.AGENT/scripts/dashboard/verify-dashboard.mjs`（88 项）；删除磁贴 / 插件控件两份旧契约与 `cards.tsx` / `tileGrid.ts` / 旧 `Heatmap.tsx`；`verify-workbench-shell` / `verify-startup-tab` 同步书签集合与图标条成员。
+- 工作台右栏删除「最近编辑」卡，`absorbSurplus` 联动退役（下段 `flex-1` 吃满）；`verify-workbench-shell` 的 E1 / E6 相关断言改写。
 - 更新说明判定与提醒形式解耦：`ReleaseNotesState.shouldAutoOpen` → `unread`（主进程只回答「有没有未读」，开关归渲染层）；`judge.shouldAutoOpenNotes` → `majorMinorChanged`；`verify-release-notes.mjs` 新增 §6「看板入口接线」10 项（删掉的自动跳页、关开关静默、点击回得来都是静默失败模式）。
 
 ## v3.28.0（2026-11-14）

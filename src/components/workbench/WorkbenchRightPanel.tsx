@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2, ReceiptText, CalendarDays, Radar } from 'lucide-react'
-import type { BookKind, KnowledgePage } from '../../types'
-import { getKnowledgePages } from '../../lib/ipc'
-import { useDataChanged } from '../../lib/dataChanged'
+import { Bot, BookOpen, MoreHorizontal, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2, ReceiptText, CalendarDays, Radar } from 'lucide-react'
+import type { BookKind } from '../../types'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { useSettings } from '../../lib/SettingsContext'
 import {
@@ -36,9 +34,8 @@ import type { PluginTool } from '../../lib/pluginService'
  * workbenchLayout.panelTabsHidden 持久化；隐藏激活 Tab 自动切到另一个）。插件可注册面板 Tab
  * 为后续扩展位。2026-09-29：「分享」作为第三态加入（卡片生成，见 components/share-card/）。
  *
- * **小工具态 = 上中下三段**：
+ * **小工具态 = 两段**：
  * - 上：🧰 工具箱工具入口区（ToolLauncherZone，方案 §10）；
- * - 中：🕘 最近编辑（常驻卡片，近 7 天最多 6 条；无记录显示空态文案）；
  * - 下：**控件切换条**（原型 v16 形态：一排彩色图标 + ⋯ 选显菜单 + 拖拽排序）+ 简略视图。
  *   2026-09-17 拍板：切换条与 ⋯ 菜单**同走挂载集**（挂载集 = workbenchLayout.RIGHT_PANEL_WIDGET_IDS，
  *   现为番茄钟 + 网址导航 + 桌宠 + 今日打卡），其余控件组件仍在 widgets/ 下由 DayPanel 消费；恢复某控件 = 往该常量加 id。
@@ -52,23 +49,6 @@ import type { PluginTool } from '../../lib/pluginService'
  * ⤢ = 打开 aiChat 标签（App 传 onExpandAiChat）。
  */
 
-const REL_MS = 7 * 24 * 60 * 60 * 1000
-
-function relTime(iso: string): string {
-  const t = new Date(iso).getTime()
-  if (!Number.isFinite(t)) return ''
-  const diff = Date.now() - t
-  if (diff < 0 || diff > REL_MS) return ''
-  const m = Math.floor(diff / 60000)
-  if (m < 1) return '刚刚'
-  if (m < 60) return `${m} 分钟前`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h} 小时前`
-  const d = Math.floor(h / 24)
-  if (d === 1) return '昨天'
-  return `${d} 天前`
-}
-
 interface Props {
   /** DayPanel 整体脱离为独立窗口中（DayPanel 系控件互斥显示「已在桌面」） */
   dayPanelDetached?: boolean
@@ -78,10 +58,6 @@ interface Props {
   onOpenTool: (toolId: string) => void
   /** 插件工具入口点击（App 开插件工具标签页） */
   onOpenPluginTool: (tool: PluginTool) => void
-  /** 最近编辑点击（vault 读源页面 → 编辑器打开） */
-  onOpenFile: (relPath: string) => void
-  /** 最近编辑点击（非 vault 读源页面 → 知识库定位打开） */
-  onOpenPage: (pageId: string) => void
   /** 今日任务控件「打开日程模块」 */
   onOpenSchedule: () => void
   /** 中间栏占用者 = AI 对话整页（aiChat）或 AI助手模块（aiAssistant）：右栏 AI 态改为显示用量面板；
@@ -113,9 +89,6 @@ interface Props {
   pendingAsk?: string | null
   /** 消费完成回执（App 清空，避免重挂载时重复投递） */
   onConsumePendingAsk?: () => void
-  /** 有富余高度时由「最近编辑」吸收（下段封顶）。策略由 App 决定（当前 = 窗口最大化）；
-   *  本组件只表达「要不要吸收余量」，不耦合窗口状态（E6c 口径）。 */
-  absorbSurplus?: boolean
 }
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
@@ -139,7 +112,7 @@ function PanelTabIcon({ id, size }: { id: string; size: number }) {
 const PANEL_TAB_TITLE: Record<string, string> = { widgets: '小工具', ai: 'AI', share: '分享' }
 const PANEL_TAB_LABEL: Record<string, string> = { widgets: '小工具', ai: 'AI 对话 / 面板', share: '分享卡片' }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiUsagePanel = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, scheduleActive = false, intelActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, pendingAccountingRule = null, onConsumeAccountingRule, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenSchedule, aiUsagePanel = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, scheduleActive = false, intelActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, pendingAccountingRule = null, onConsumeAccountingRule, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -401,21 +374,18 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           </div>
         </div>
 
-        {/* ---- 小工具态：上（工具入口区）/ 中（最近编辑）/ 下（控件条 + 简略视图） ---- */}
+        {/* ---- 小工具态：上（工具入口区）/ 下（控件条 + 简略视图） ---- */}
         {effectiveTab === 'widgets' ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <ToolLauncherZone onOpenTool={onOpenTool} onOpenPluginTool={onOpenPluginTool} />
 
-            <RecentEdited onOpenFile={onOpenFile} onOpenPage={onOpenPage} absorbSurplus={absorbSurplus} />
-
             {/* 下段：控件切换条（可拖拽排序 + ⋯ 选显）+ 简略视图。
-                2026-09-28 二轮：`absorbSurplus`（App 按窗口最大化给）时给下段**封顶**（grow 优先级高 +
-                max-h），多出来的高度改由中段「最近编辑」吸收，避免控件区（尤其桌宠）被撑成一大块留白；
-                未吸收时行为不变（下段 flex-1 吃满）——即「不许在最大化前挤占控件区」。
+                2026-11-14：原中段「最近编辑」卡片删除（用户反馈无用），余量全部由本段 flex-1 吃满
+                ——此前最大化时给下段封顶、由最近编辑吸收余量的策略一并退役。
                 层级：外壳卡(bg-secondary) → 本容器(bg-primary) → 控件内容 → 共两层带边框容器
                 （控件自身不画卡，如 PomoWidget frameless）。
                 内容区不再放文字标题——切换条选中图标即当前控件标识（2026-09-17 反馈：删冗余文字说明） */}
-            <div className={`flex min-h-0 flex-col overflow-hidden ${absorbSurplus ? 'grow-[99] basis-0 max-h-[480px]' : 'flex-1'} min-h-[400px]`}>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden min-h-[400px]">
               <div data-wb="widgetSwitch" className="flex shrink-0 items-center gap-0.5 px-2.5 pt-2">
                 {visibleWidgets.map((id) => {
                   const meta = WIDGET_META[id]
@@ -581,60 +551,6 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
         document.body,
         'wb-widget-menu',
       )}
-    </div>
-  )
-}
-
-/** 中段：🕘 最近编辑（常驻卡片——无记录也显示，只占标题 + 一行空态）。
- *  2026-09-28 二轮：`absorbSurplus` 时本卡改为增长项吸收余量（未吸收时仍 shrink-0 按内容高，
- *  绝不挤占下段控件区）；同时列表增高、条目上限放到 20 条，避免「卡变高了但里面还是空」。 */
-function RecentEdited({ onOpenFile, onOpenPage, absorbSurplus = false }: { onOpenFile: (relPath: string) => void; onOpenPage: (pageId: string) => void; absorbSurplus?: boolean }) {
-  const [pages, setPages] = useState<KnowledgePage[]>([])
-
-  const refresh = useCallback(async () => {
-    try {
-      const ps = await getKnowledgePages()
-      setPages(ps ?? [])
-    } catch { /* 索引未就绪时保持旧数据 */ }
-  }, [])
-
-  useEffect(() => { void refresh() }, [refresh])
-  useDataChanged('knowledge', refresh)
-
-  const recent = useMemo(() => {
-    const now = Date.now()
-    return pages
-      .filter((p) => {
-        const t = new Date(p.updatedAt).getTime()
-        return Number.isFinite(t) && now - t <= REL_MS && now - t >= 0
-      })
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, absorbSurplus ? 20 : 6)
-  }, [pages, absorbSurplus])
-
-  return (
-    <div data-wb="recentEdited" className={`flex flex-col overflow-hidden border-b border-[var(--border-color)] px-2.5 pb-1.5 pt-2 ${absorbSurplus ? 'grow basis-0 min-h-[64px]' : 'shrink max-h-[212px] min-h-[36px]'}`}>
-      <div className="flex shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11.5px] font-semibold text-[var(--text-secondary)]">
-        <History size={12} className="text-[var(--text-muted)]" />
-        最近编辑
-        <span className="ml-auto text-[10px] font-normal text-[var(--text-muted)]">近 7 天</span>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
-        {recent.length === 0 ? (
-          <div className="px-1.5 py-2.5 text-[11px] text-[var(--text-muted)]">近 7 天没有编辑记录</div>
-        ) : recent.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => (p.path ? onOpenFile(p.path) : onOpenPage(p.id))}
-            className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-[5px] text-left transition-colors hover:bg-[var(--bg-hover)]"
-            data-tip={p.path ?? p.title} aria-label={p.path ?? p.title}
-          >
-            <FileText size={11} className="shrink-0 text-[var(--text-muted)]" />
-            <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{p.title || p.path}</span>
-            <span className="shrink-0 text-[9.5px] text-[var(--text-muted)]">{relTime(p.updatedAt)}</span>
-          </button>
-        ))}
-      </div>
     </div>
   )
 }
