@@ -6,6 +6,7 @@ import { invalidateGraphIndex } from 'phrontis-core/kbStore/graphIndex'
 import { bookMetaPruneOrphans } from 'phrontis-core/kbStore/vaultBookMetaRepo'
 import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../main/windowBus'
 import { pushAppNotice } from './appNotice'
+import { DEFAULT_IGNORE_DIRS } from 'phrontis-core/kbStore/ignoreDefaults'
 
 /**
  * 仓库级文件系统监听（v3.2.0 条目 ④）——对标 VS Code 的 file watcher。
@@ -52,8 +53,9 @@ const SELF_WRITE_TTL_MS = 1500
  */
 const PRUNE_THROTTLE_MS = 30_000
 
-/** 不监听任何名字命中这些规则的路径（**不用 .ignore 规则过滤** —— 那是知识库扫描语义，铁律 6） */
-const IGNORED_SEGMENTS = new Set(['.knowbase', '.git', 'node_modules', '.DS_Store', 'Thumbs.db'])
+/** 不监听任何名字命中这些规则的路径（**不用 .ignore 规则过滤** —— 那是知识库扫描语义，铁律 6）。
+ *  P0-C：依赖/产物目录与索引共用同一份清单（`ignoreDefaults`），避免「索引跳了、watcher 还在刷」。 */
+const IGNORED_SEGMENTS = new Set<string>(['.knowbase', '.git', 'node_modules', '.DS_Store', 'Thumbs.db', ...DEFAULT_IGNORE_DIRS])
 
 /**
  * inotify 配额预检（Linux，2026-10-19 · 平台化阶段 1）。
@@ -95,6 +97,8 @@ let degradedNoticeSent = false
 let lastPruneAt = 0
 const pending = new Set<string>()
 const selfWritePaths = new Map<string, number>()
+/** 整棵子树的「我自己改的」标记（目录改名 / 整目录删除用）：rel 前缀命中即跳过 */
+const selfWriteTrees = new Map<string, number>()
 
 /** 忽略判定：路径任一段命中忽略集，或是原子写的临时物（`.kb-tmp-*` / `*.tmp`） */
 function isIgnoredRel(rel: string): boolean {
@@ -132,6 +136,25 @@ export function markSelfWrite(absPath: string): void {
   if (selfWritePaths.size > 200) {
     for (const [key, expireAt] of selfWritePaths) {
       if (expireAt <= now) selfWritePaths.delete(key)
+    }
+  }
+}
+
+/**
+ * 整棵子树的「我自己改的」登记（目录改名 / 整目录删除 / 批量移动目录）。
+ * 只登记目录路径本身不够：watch 会为目录内每个子项各报一次事件，
+ * 不按前缀抑制就会给正在编辑的子文件弹「已被外部修改」三选。
+ */
+export function markSelfWriteTree(absPath: string): void {
+  const cur = getCurrentVault()
+  if (!cur) return
+  const rel = relOf(cur.rootPath, absPath)
+  if (!rel) return
+  const now = Date.now()
+  selfWriteTrees.set(rel, now + SELF_WRITE_TTL_MS)
+  if (selfWriteTrees.size > 100) {
+    for (const [key, expireAt] of selfWriteTrees) {
+      if (expireAt <= now) selfWriteTrees.delete(key)
     }
   }
 }
@@ -187,6 +210,11 @@ function onFsEvent(filename: string | Buffer | null): void {
     if (isIgnoredRel(rel)) return
     const expireAt = selfWritePaths.get(rel)
     if (expireAt && expireAt > Date.now()) return
+    // 目录级操作（P0-A）：整棵子树的变更都算「我自己改的」
+    for (const [prefix, until] of selfWriteTrees) {
+      if (until <= Date.now()) { selfWriteTrees.delete(prefix); continue }
+      if (rel === prefix || rel.startsWith(`${prefix}/`)) return
+    }
     pending.add(rel)
   }
   scheduleFlush()

@@ -10,6 +10,18 @@ import type { MovePair } from './vaultMovePure'
 
 export type PlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool' | 'move-batch'
 
+/**
+ * 文件编码元信息（P0-A §3.2）：暂存 / 回滚都要按**原文件的编码与换行**写回，
+ * 否则确认模式「应用」一次就把 UTF-16 / CRLF 文件写坏，还看不出是谁干的。
+ */
+export interface FileCodecMeta {
+  encoding?: 'utf-8' | 'utf-16le' | 'utf-16be'
+  bom?: boolean
+  eol?: '\n' | '\r\n'
+  /** POSIX 权限位（回滚恢复可执行位） */
+  mode?: number | null
+}
+
 /** 回滚方向：逆序 + 反向（与 vaultMovePure.reverseMoves 同口径；此处内联避免纯模块运行时互引） */
 function reversePairs(moves: MovePair[]): MovePair[] {
   return moves.slice().reverse().map((m) => ({ from: m.to, to: m.from }))
@@ -26,6 +38,8 @@ export interface PlanOp {
   prev?: string | null
   /** 变更后内容（rename/trash 无） */
   next?: string | null
+  /** write/edit：原文件编码 / 换行 / 权限位（应用与回滚都按它写回） */
+  codec?: FileCodecMeta
   /** kind='tool'：工具注册名（如 builtin.knowledge.create-page） */
   tool?: string
   /** kind='tool'：所属模块 */
@@ -98,6 +112,8 @@ export interface FsAction {
   relPath: string
   /** write 专用：写入内容 */
   content?: string
+  /** write 专用：编码 / 换行 / 权限位（缺省 = UTF-8 + LF + 不恢复 mode） */
+  codec?: FileCodecMeta
   /** rename 专用：目标路径 */
   to?: string
   /** move-batch 专用：整批条目（回滚方向已逆序反向） */
@@ -125,11 +141,11 @@ export function actionForOp(op: PlanOp, mode: 'apply' | 'rollback'): FsAction | 
   switch (op.kind) {
     case 'write':
     case 'edit':
-      if (mode === 'apply') return { action: 'write', relPath: rel, content: op.next ?? '' }
+      if (mode === 'apply') return { action: 'write', relPath: rel, content: op.next ?? '', codec: op.codec }
       // 回滚：文件原本不存在（prev === null）→ 回收；否则写回旧内容
       return op.prev === null
         ? { action: 'trash', relPath: rel }
-        : { action: 'write', relPath: rel, content: op.prev ?? '' }
+        : { action: 'write', relPath: rel, content: op.prev ?? '', codec: op.codec }
     case 'rename':
       return mode === 'apply'
         ? { action: 'rename', relPath: rel, to: op.to ?? '' }

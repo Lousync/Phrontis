@@ -24,6 +24,7 @@ import { UsageRing, fmtTok } from '../UsageRing'
 import { buildQuotedBody } from './selQuotes'
 import { registerSelectionAskHost } from '../../../lib/assistantContext'
 import { ScopePane } from '../../../modules/ai-assistant/ScopePane'
+import { TrustGateCard } from './TrustGateCard'
 import type { AssistantChatController } from './useAssistantChat'
 import type { ChatSurface } from '../../../lib/chatCommands'
 import type { KnowledgePage, AgentSessionInfo } from '../../../types'
@@ -352,6 +353,9 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
           <NoProviderHint onGoSettings={goSettings} />
         ) : (
           <>
+            {/* P0-B 工作区信任卡：首次在仓库用写/命令时一次性问清（行内，不弹模态）。
+                日程助手与 AI 教学面不接（保持既有行为）。 */}
+            <TrustGateCard enabled={!scheduleMode && surface !== 'aiTeaching'} />
             {/* 抽屉容器：仅包住消息列表，不遮挡上下文徽章与输入框 */}
             <div className={`flex-1 min-h-0 relative ${LIST_WRAP[variant]}`}>
               {/* 遮罩：点击空白处收起抽屉（page 态不渲染——showDrawer=false） */}

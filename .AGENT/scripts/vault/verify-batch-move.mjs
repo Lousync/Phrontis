@@ -84,7 +84,7 @@ ok(!preflightMoves(Array.from({ length: MAX_BATCH_MOVES + 1 }, (_, i) => mv(`a${
 }
 {
   const r = preflightMoves([mv('a.pdf', 'ch2')], probe(['a.pdf'], dirs))
-  ok(!r.ok && r.conflicts[0].reason.includes('.md'), 'C7 非 .md/.txt 拒绝')
+  ok(!r.ok && /可移动范围|\.md/.test(r.conflicts[0].reason), 'C7 非 .md/.txt 拒绝（缺省策略）')
 }
 {
   const r = preflightMoves([mv('a.md', 'b.md')], P)
@@ -147,7 +147,9 @@ ok(/name: 'builtin\.vault\.move'/.test(bt), 'F1 注册 builtin.vault.move')
 ok(/name: 'builtin\.vault\.move'[\s\S]{0,1200}?tier: 'ondemand'/.test(bt), 'F2 tier=ondemand（默认折叠）')
 ok(/name: 'builtin\.vault\.move'[\s\S]{0,1200}?requires: 'write'/.test(bt), 'F3 requires=write')
 ok(/commitOrStage\(ctx, \(\) => \(\{ kind: 'move-batch'/.test(bt), 'F4 通过 commitOrStage 暂存为一条 op')
-ok(/vault\.move \/ vault\.trash/.test(bt), 'F5 builtin.tool.request 清单包含 vault.move')
+// v3.31.0 P0-D：tool.request 的硬编码清单已退役，改为「先查 builtin.tool.list」
+ok(/name: 'builtin\.tool\.list'/.test(bt) && /builtin\.tool\.list/.test(bt.slice(bt.indexOf("name: 'builtin.tool.request'"))),
+  'F5 tool.request 指向 builtin.tool.list（清单不再硬编码）')
 ok(/'builtin\.vault\.move'/.test(stage) && /HANDLER_STAGED_TOOLS/.test(stage),
   'F6 登记进 HANDLER_STAGED_TOOLS（否则确认模式直接看不到它）')
 ok(/MAX_BATCH_MOVE_ITEMS_PER_MESSAGE/.test(svc) && /batchMoveItems/.test(svc),

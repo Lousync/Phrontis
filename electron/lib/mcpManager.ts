@@ -27,6 +27,9 @@ export interface McpServerRow {
   endpoint: string; args_json: string
   enabled: number; status: string; last_error: string | null
   created_at?: string
+  /** 该 server 提供的工具是否只读（P0-D）：true → requires='read' 且不纳入确认模式写工具；
+   *  false/缺省 → 保守按写工具处理（会进变更方案、计入写入上限） */
+  readOnly?: boolean
 }
 
 /** MCP 服务器配置 = userData/data/mcp.json（数组顺序即原 created_at ASC 语义） */
@@ -114,7 +117,12 @@ class McpManagerImpl {
         description: String(t.description ?? ''),
         inputSchema: t.inputSchema,
       }))
-      // 注册进统一注册表：mcp.<serverId>.<toolName>，外部工具保守按非只读处理
+      // 注册进统一注册表：mcp.<serverId>.<toolName>
+      // P0-D（v3.31.0）：外部工具默认「按需装载 + 按写工具对待」——
+      //  · tier:'ondemand'：装一个 50 工具的 server 不再把 50 份 schema 常驻每轮；
+      //  · requires 缺省为 write → 确认模式会暂存、并计入写入上限；
+      //  · server 声明 readOnly:true 时才降级为只读。
+      const serverReadOnly = row.readOnly === true
       for (const t of tools) {
         // 工具名净化：MCP 侧允许任意字符，这里统一小写并替换非法字符，保证命名空间规则
         const safeName = t.name.toLowerCase().replace(/[^a-z0-9._-]/g, '-') || 'tool'
@@ -126,7 +134,9 @@ class McpManagerImpl {
           inputSchema: t.inputSchema as ToolJsonSchema,
           source: 'mcp',
           enabled: true,
-          readOnly: false,
+          readOnly: serverReadOnly,
+          requires: serverReadOnly ? 'read' : 'write',
+          tier: 'ondemand',
         }, async (args) => this.callTool(row.id, t.name, args))
       }
       this.connections.set(row.id, { client, toolNames: tools.map(t => t.name) })

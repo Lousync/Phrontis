@@ -930,6 +930,66 @@ export interface AiToolsListResult {
   usage: AiToolUsage
 }
 
+// ===== 工作区信任 + 仓库 AI 文件策略（P0-A/B，v3.31.0） =====
+
+export type AiTrustLevel = 'allow' | 'deny' | null
+
+export interface AiWorkspaceTrust {
+  fileWrite: AiTrustLevel
+  shellExec: AiTrustLevel
+}
+
+export interface AiWorkspaceTrustState {
+  rootId: string | null
+  trust: AiWorkspaceTrust
+  updatedAt: string | null
+}
+
+export type AiFilePreset = 'notes' | 'notes+code' | 'all-text' | 'custom'
+export interface AiFilePolicy {
+  preset: AiFilePreset
+  writeExts: string[]
+  denyPaths: string[]
+  allowDotDirs: string[]
+  maxReadBytes: number
+  maxWriteBytes: number
+}
+
+export interface AiPolicyOverride {
+  preset?: AiFilePreset
+  writeExts?: string[]
+  denyPaths?: string[]
+  allowDotDirs?: string[]
+  maxReadBytes?: number
+  maxWriteBytes?: number
+}
+
+export interface AiPolicyState {
+  effective: AiFilePolicy
+  overrides: AiPolicyOverride | null
+  defaults: AiFilePolicy
+}
+
+/** 三层权限的合成结果（面板一次性卡 / 设置页「当前工作区」用） */
+export interface AiPermissionState {
+  rootId: string | null
+  fileRead: boolean
+  fileWrite: boolean
+  exec: boolean
+  writeToolsVisible: boolean
+  execToolsVisible: boolean
+  needsTrustPrompt: boolean
+  /** 写文件 / 执行命令 是否仍待表态（一次性卡按它决定按钮动作） */
+  pendingFileTrust: boolean
+  pendingExecTrust: boolean
+  readOnlyMarked: boolean
+  globalFilePerm: 'off' | 'read' | 'write'
+  globalExec: boolean
+  /** 本工作区的原始授权值（null = 未表态） */
+  trust: AiWorkspaceTrust
+  policy: AiPolicyState
+}
+
 export interface AuditEntryInfo {
   id: string
   pluginId: string
@@ -2900,6 +2960,13 @@ export interface ElectronAPI {
   aiToolsInvoke: (name: string, args?: unknown) => Promise<AiToolInvokeResult>
   aiToolsGetUsage: () => Promise<AiToolUsage>
   aiToolsGetRecentAudit: (limit?: number) => Promise<AuditEntryInfo[]>
+  // 工作区信任 + AI 文件策略（P0-A/B）
+  aiTrustGet: () => Promise<AiWorkspaceTrustState>
+  aiTrustSet: (patch: Partial<AiWorkspaceTrust>) => Promise<AiWorkspaceTrustState>
+  aiTrustRevoke: () => Promise<AiWorkspaceTrustState>
+  aiPolicyGet: () => Promise<AiPolicyState>
+  aiPolicySet: (patch: AiPolicyOverride | null) => Promise<AiPolicyState>
+  aiPermissionGet: () => Promise<AiPermissionState>
   // MCP servers
   mcpListServers: () => Promise<McpServerInfo[]>
   mcpAddServer: (draft: McpServerDraft) => Promise<McpServerInfo>

@@ -4,11 +4,122 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：80
+ * 版本数：81
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.31.0",
+    "date": "2026-11-15",
+    "summary": "本版一句话：AI 终于能把仓库当文件夹用 —— 全部文本文件可读写、能按 glob 找文件、按正则搜内容、建/移/删目录；授权只需在面板顶部点一次。",
+    "groups": [
+      {
+        "title": "AI 助手 · 文件能力",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "写文件不再只限 .md/.txt",
+            "rest": "文本类代码与配置（json / yml / toml / ini / csv 等）都能由 AI 新建与修改，与实际能编辑的范围对齐。二进制、密钥（.pem/.key/id_rsa 等）、点目录（.git/.env/.attachments）仍然一律拒绝。",
+            "sub": []
+          },
+          {
+            "lead": "递归查找",
+            "rest": "新增 `vault.find`，用 glob（`/*.ts`、`src//*.tsx`）一次列出文件与目录，不必再逐层列目录。",
+            "sub": []
+          },
+          {
+            "lead": "搜索升级",
+            "rest": "支持正则、glob 限定、区分大小写、上下文行，返回命中行号与列号；默认跳过 node_modules 等依赖/产物目录与 `.ignore` 命中项。",
+            "sub": []
+          },
+          {
+            "lead": "按行读大文件",
+            "rest": "`vault.read` 支持 `startLine / endLine`，带行号返回，续读不必靠字符偏移猜位置。",
+            "sub": []
+          },
+          {
+            "lead": "目录操作",
+            "rest": "新增 `vault.mkdir`；`vault.rename` / `vault.move` / `vault.trash` 支持目录（删除目录需显式 `recursive` 并给出清单）。目录改名会保住知识库里的空间 / 笔记本类型。",
+            "sub": []
+          },
+          {
+            "lead": "编码保真",
+            "rest": "写回沿用原文件的 UTF-8 BOM / UTF-16 / CRLF 与权限位；`.bat/.cmd` 强制 CRLF；GBK 文件可读但明确拒绝写回（不做有损转码）。检测不了编码时拒写，不猜。",
+            "sub": []
+          },
+          {
+            "lead": "未分类页可读回",
+            "rest": "AI 自己建进 `.knowbase/_inbox` 的页面，现在读写都放行（其余 `.knowbase` 内部仍只读）。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "AI 助手 · 权限",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "一次性开启",
+            "rest": "首次在某个仓库用 AI 写文件 / 执行命令时，助手面板顶部出现一张行内卡 —— 点一次「一次性开启」，同时授予两项；「保持只读」则不再打扰。设置 → AI → 权限新增「当前工作区」，可随时改或撤销。授权只记在本机、按仓库区分，不随仓库文件走。",
+            "sub": []
+          },
+          {
+            "lead": "可写类型可选",
+            "rest": "仅笔记 / 笔记 + 代码 / 全部文本文件（默认）/ 自定义；仓库级策略存在 `.knowbase/config.json`，只能比全局更严。",
+            "sub": []
+          },
+          {
+            "lead": "命令仍逐条确认",
+            "rest": "信任只决定「能不能用」，每条终端命令依旧先确认。",
+            "sub": []
+          },
+          {
+            "lead": "新会话默认「先预览」",
+            "rest": "写操作先进变更方案、确认后才落盘；已有会话保留原来的偏好。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "AI 助手 · 扩展与性能",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "MCP / Skill 改为按需装载",
+            "rest": "不再把每个外部工具都塞进每一轮上下文；MCP 写工具重新纳入「先预览」与写入上限，服务器可声明只读。",
+            "sub": []
+          },
+          {
+            "lead": "按需工具可查",
+            "rest": "新增 `builtin.tool.list`，AI 先按关键词/模块查注册名再申请；申请工具的长清单不再写死在提示里，每轮成本随之下降。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "默认忽略目录（node_modules / dist / build / out / target / coverage / vendor 等）统一成一份清单，知识索引、文件监听、AI 遍历三处共用；`.ignore` 的 `!规则` 仍可恢复。索引同时跳过点文件。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本：`.AGENT/scripts/ai-harness/` 下 8 个（文件策略、编码、查找、搜索、目录移动、权限矩阵、默认忽略、MCP/Skill 装载）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "方案与取舍：`docs/agent-harness-alignment-plan.md`。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.30.1",
     "date": "2026-11-15",

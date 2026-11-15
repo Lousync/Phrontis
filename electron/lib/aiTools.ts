@@ -3,6 +3,9 @@ import { appendAudit, countMonthInvocations, listAudit, summarizeArgs } from './
 import { stageOp } from './aiAssistantPlan'
 import { summarizeToolOp } from './aiAssistantPlanPure'
 import { isHandlerStagedTool, isStageableWriteTool } from './aiAssistantStageable'
+import { getCurrentTrust, permissionStateOf, readWorkspaceTrust, revokeCurrentTrust, setCurrentTrust } from './workspaceTrust'
+import { getAiPolicyState, setAiPolicyOverrides } from './aiFilePolicy'
+import { broadcastDataChanged } from '../main/windowBus'
 
 /**
  * ToolRegistry —— AI Agent 统一工具注册表（方案见 .claude/plans/agent-tools-foundation.md 第四节）。
@@ -119,6 +122,8 @@ export type AiToolErrorCode =
   | 'MODULE_READONLY'
   | 'VAULTFILE_FORBIDDEN'
   | 'VAULTFILE_READONLY'
+  /** 工作区尚未授权（trust=null）：工具留在视野里，调用时明确告知用户去顶部一次性开启 */
+  | 'VAULTFILE_NEEDS_TRUST'
 
 export type AiToolInvokeResult = {
   ok: true
@@ -254,25 +259,32 @@ export function checkModulePermission(
 
 export type VaultFilePerm = 'off' | 'read' | 'write'
 
-const VAULT_FILE_LEVEL: Record<VaultFilePerm, number> = { off: 0, read: 1, write: 2 }
-
 /** 解析 aiVaultFilePerm 设置；非法/缺省 → read（保守可读、不可写） */
 export function parseVaultFilePerm(raw: unknown): VaultFilePerm {
   return raw === 'off' || raw === 'read' || raw === 'write' ? raw : 'read'
 }
 
 /**
- * vaultFile 域硬校验：工具所需文件域级别 > 用户授权级别 → 拒绝。
+ * vaultFile 域硬校验（三层权限的第二层）：工具所需文件域级别 > 用户授权级别 → 拒绝。
  * 返回 null 放行，否则为错误码（agent 预过滤 + invoke 硬校验双防线复用）。
+ *
+ * `VAULTFILE_NEEDS_TRUST` = 全局 `read` 且本仓库尚未表态（trust=null）：
+ * 这不是「拒绝」，而是「还没问」——工具必须留在模型视野里（否则用户看不到它、模型也无法
+ * 引导用户去点顶部的一次性卡），调用时才返回明确的提示。
  */
 export function checkVaultFilePermission(
   tool: Pick<AgentTool, 'vaultFile'>,
   getSettingValue: (key: string) => unknown
-): 'VAULTFILE_FORBIDDEN' | 'VAULTFILE_READONLY' | null {
+): 'VAULTFILE_FORBIDDEN' | 'VAULTFILE_READONLY' | 'VAULTFILE_NEEDS_TRUST' | null {
   if (!tool.vaultFile) return null
   const granted = parseVaultFilePerm(getSettingValue('aiVaultFilePerm'))
-  return VAULT_FILE_LEVEL[granted] >= VAULT_FILE_LEVEL[tool.vaultFile] ? null
-    : (tool.vaultFile === 'write' && granted !== 'off' ? 'VAULTFILE_READONLY' : 'VAULTFILE_FORBIDDEN')
+  if (granted === 'off') return 'VAULTFILE_FORBIDDEN'
+  if (tool.vaultFile === 'read') return null
+  const trust = readWorkspaceTrust()
+  if (trust.fileWrite === 'deny') return 'VAULTFILE_READONLY'
+  if (trust.fileWrite === 'allow') return null
+  // 未表态：全局 write = 历史上「默认可写」，保持不打扰；全局 read = 首次写时提示授权
+  return granted === 'write' ? null : 'VAULTFILE_NEEDS_TRUST'
 }
 
 // ===== 月度调用上限 =====
@@ -332,7 +344,9 @@ async function invokeTool(
         code: fileErr,
         message: fileErr === 'VAULTFILE_READONLY'
           ? '仓库文件对 AI 仅开放只读，写入类操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整为读写'
-          : '仓库文件已对 AI 关闭，本操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整',
+          : fileErr === 'VAULTFILE_NEEDS_TRUST'
+            ? '当前工作区尚未授权 AI 写文件。请在 AI 助手面板顶部点「一次性开启」，或到 设置 → AI → 权限 → 当前工作区 开启'
+            : '仓库文件已对 AI 关闭，本操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整',
       }
     }
   }
@@ -347,7 +361,7 @@ async function invokeTool(
         message: `工具「${tool.title}」无法安全预览，已阻止执行。请切换到「直接执行」后再试`,
       }
     }
-    const summary = `${tool.title}${tool.module ? ` · ${tool.module}` : ''}：${summarizeToolOp(name, cleanArgs)}`
+    const summary = `${tool.title}${tool.module ? ` · ${tool.module}` : ''}：${summarizeToolOp(name, cleanArgs)}${name.startsWith('mcp.') ? '（外部工具，不可自动回滚）' : ''}`
     const opId = stageOp(ctx.sessionId, {
       kind: 'tool',
       tool: name,
@@ -447,4 +461,41 @@ export function registerAiToolHandlers(deps: {
   ipcMain.handle('aiTools:invoke', (_e, name: string, args: unknown) => invokeTool(name, args, settingReader!))
   ipcMain.handle('aiTools:getUsage', () => getUsage(settingReader!))
   ipcMain.handle('aiTools:getRecentAudit', (_e, limit?: number) => listAudit(limit ?? 20, ['tool.invoke', 'tool.stage', 'mcp.invoke', 'llm.invoke']))
+
+  // ===== P0-B：工作区信任 + 仓库文件策略（三层权限的第二 / 第三层） =====
+  ipcMain.handle('aiTrust:get', () => getCurrentTrust())
+  ipcMain.handle('aiTrust:set', (_e, patch: unknown) => {
+    const p = (patch ?? {}) as Record<string, unknown>
+    const clean: { fileWrite?: 'allow' | 'deny' | null; shellExec?: 'allow' | 'deny' | null } = {}
+    if (p.fileWrite === 'allow' || p.fileWrite === 'deny' || p.fileWrite === null) clean.fileWrite = p.fileWrite
+    if (p.shellExec === 'allow' || p.shellExec === 'deny' || p.shellExec === null) clean.shellExec = p.shellExec
+    const next = setCurrentTrust(clean)
+    broadcastDataChanged('aiAssistant')
+    return next
+  })
+  ipcMain.handle('aiTrust:revoke', () => {
+    const next = revokeCurrentTrust()
+    broadcastDataChanged('aiAssistant')
+    return next
+  })
+  ipcMain.handle('aiPolicy:get', () => getAiPolicyState())
+  ipcMain.handle('aiPolicy:set', (_e, patch: unknown) => {
+    const next = setAiPolicyOverrides((patch ?? null) as never)
+    broadcastDataChanged('aiAssistant')
+    return next
+  })
+  ipcMain.handle('aiPermission:get', () => {
+    const globalFilePerm = parseVaultFilePerm(settingReader!('aiVaultFilePerm'))
+    const globalExec = settingReader!('terminal.aiExec') === true
+    const perms = parseModulePerms(settingReader!('aiModulePermissions'))
+    const terminalOff = (perms.terminal ?? 'read') === 'off'
+    const cur = getCurrentTrust()
+    return {
+      ...permissionStateOf(globalFilePerm, globalExec, terminalOff),
+      globalFilePerm,
+      globalExec,
+      trust: cur.trust,
+      policy: getAiPolicyState(),
+    }
+  })
 }

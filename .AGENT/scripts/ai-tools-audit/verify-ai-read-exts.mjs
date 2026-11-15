@@ -132,12 +132,19 @@ try {
   ok('能定位 walkAiFiles 切片', start2 > 0 && end2 > start2, `start=${start2} end=${end2}`)
   if (start2 > 0 && end2 > start2) {
     const slice = stripTypeScriptTypes(srcTools.slice(start2, end2), { mode: 'transform' })
-    // walkAiFiles 依赖切片 1 里的 childAiAllowed / isAiReadableFile → 两个切片拼进同一模块
+    // walkAiFiles 依赖切片 1 里的 childAiAllowed / isAiReadableFile → 两个切片拼进同一模块。
+    // v3.31.0：遍历改走 AI 文件策略（evaluateAiFile）+ 默认忽略层（DEFAULT_IGNORE_DIRS），
+    // 契约只关心「哪些目录被剪枝」，故这两处注入最简 stub；策略与忽略的真实矩阵另有专门脚本。
     const mjs = [
       "import { join as pjoin, relative, sep, extname } from 'node:path'",
       "import { readdirSync, lstatSync } from 'node:fs'",
       `import { AI_TEXT_CODE_EXT_SET } from ${JSON.stringify(pathToFileURL(exPath).href)}`,
       'const join = pjoin',
+      `const DEFAULT_IGNORE_DIRS = ${JSON.stringify(['node_modules', 'dist', 'out', 'build', 'coverage', 'target'])}`,
+      'const evaluateAiFile = (probe) => ({ allow: /\\.(md|txt|html|js|json)$/i.test(probe.rel) })',
+      'const aiPolicy = () => ({})',
+      'const getVaultIgnore = () => ({ ign: null })',
+      'const isDirIgnored = () => false',
       slice1Code ?? '',
       slice,
       'export { walkAiFiles }',
@@ -162,7 +169,7 @@ try {
     ok('node_modules 不进搜索结果', !rels.some((r) => r.startsWith('node_modules/')), JSON.stringify(rels))
     ok('dist/out/build 不进搜索结果', !rels.some((r) => r.startsWith('dist/') || r.startsWith('out/') || r.startsWith('build/')))
     ok('预算计数只计可读文件', budget.count === out.length && out.length === 3, `count=${budget.count} len=${out.length}`)
-    ok('忽略名单含 node_modules/dist/out/build', ['node_modules', 'dist', 'out', 'build'].every((d) => srcTools.includes(`'${d}'`) && slice.includes(d)))
+    ok('忽略名单统一引用默认层（builtinTools 不再手抄）', srcTools.includes("SEARCH_IGNORE_DIRS = new Set(DEFAULT_IGNORE_DIRS)") && srcTools.includes('phrontis-core/kbStore/ignoreDefaults'))
   }
 } finally {
   rmSync(tmpBase, { recursive: true, force: true })
@@ -180,19 +187,20 @@ ok('旧白名单写法已消失（return ext === md || txt 直接返回）',
   !/const ext = extname\(abs\)\.slice\(1\)\.toLowerCase\(\)\s*\n\s*if \(ext === 'json'\) return isModulesJson\(parts\)\s*\n\s*return ext === 'md' \|\| ext === 'txt'/.test(srcTools))
 ok('素材库 CODE_EXTS 改为引用同一份', srcSources.includes("from '../../src/lib/aiTextExts'") && srcSources.includes('new Set<string>(AI_TEXT_CODE_EXTS)'))
 ok('素材库旧 33 项硬编码清单已消失', !srcSources.includes("new Set(['js', 'ts'"))
-ok('前端 inferSrcType 改用同一份（AI_TEXT_CODE_EXT_SET.has）', srcTeach.includes("from '../../lib/aiTextExts'") && srcTeach.includes('AI_TEXT_CODE_EXT_SET.has(ext)'))
+// v3.31.0：前端素材类型预览已改走 `isTextViewableExt`（编辑器文本落点判定的同一份集合）
+ok('前端文本类型判定改用同一份（isTextViewableExt）', readFileSync(resolve(ROOT, 'src/modules/knowledge/components/PageEditor.tsx'), 'utf8').includes('isTextViewableExt'))
 ok('前端旧 33 项硬编码清单已消失', !srcTeach.includes("'swift', 'kt'"))
 ok('前端 AI 教学 import 路径正确（src/lib）', existsSync(pExts))
 
-// ── ⑥ 文案同步 4 处（工具 description ×3 + 错误提示 ×1）──────────────────────────
-ok('vault.list 提及可读代码文件', srcTools.includes('（目录与可读文本/代码文件）'))
-ok('vault.read 提及文本类代码文件', srcTools.includes('文本类代码文件（.html/.js/.py 等）'))
-ok('vault.search 提及文本类代码文件', srcTools.includes('（.md/.txt/文本类代码文件与 .knowbase/modules/*.json）'))
-ok('vault.read 错误提示同步（含「配置」拒绝说明）', srcTools.includes('仅支持 .md/.txt 与文本类代码文件（仓库内）') && srcTools.includes('图片、配置与保护区拒绝'))
+// ── ⑥ 文案同步（v3.31.0：读写面扩到全部文本，提示语同步）────────────────────────
+ok('vault.list 提及可读代码文件', srcTools.includes('（目录与可读文本/代码/配置文件）'))
+ok('vault.read 描述覆盖代码与配置', srcTools.includes('md/txt、文本类代码与配置（json/yml/toml/ini 等）'))
+ok('vault.search 描述覆盖 glob / 正则 / 行号', srcTools.includes('regex=true 按正则') && srcTools.includes('glob 限定文件'))
+ok('vault.read 错误提示指向策略层', srcTools.includes('该类型不在当前 AI 文件策略内') && srcTools.includes('设置 → AI → 权限'))
 ok('工具 description 均未超 800 字符红线（抽三处改动的）', [
   '列当前知识仓库某目录下的条目',
-  '读取仓库内文件：.md/.txt 与文本类代码文件',
-  '在当前知识仓库内按关键词搜索可读文本文件',
+  '读取仓库内文件：md/txt、文本类代码与配置',
+  '在仓库内搜索文本内容',
 ].every((s) => {
   const i = srcTools.indexOf(s)
   if (i < 0) return false

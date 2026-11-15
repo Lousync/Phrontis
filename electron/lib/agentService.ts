@@ -3,6 +3,7 @@ import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { randomUUID } from 'crypto'
 import { listTools, invokeToolInternal, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
 import { isConfirmModeHiddenTool } from './aiAssistantStageable'
+import { readWorkspaceTrust } from './workspaceTrust'
 import { isWithinVaultScope } from 'phrontis-core/kbStore/vaultScope'
 import type { ToolDescription, AiToolInvokeResult } from './aiTools'
 import { buildAttachedRefsInjection } from './aiAssistant/refSkeleton'
@@ -621,16 +622,25 @@ function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
     if (modeOpts?.confirmMode && isConfirmModeHiddenTool(t.name, t.requires)) return false
     const denied = checkModulePermission(t, reader)
     if (denied && t.module) deniedModules.add(t.module)
-    if (!denied && t.vaultFile && checkVaultFilePermission(t, reader)) {
-      deniedVaultFile = true
-      return false
+    if (!denied && t.vaultFile) {
+      const fileErr = checkVaultFilePermission(t, reader)
+      // 「尚未授权」（trust=null）不预过滤：工具留在视野里，调用时返回明确提示，
+      // 模型才能引导用户点顶部的一次性卡（见 aiPermissionPure 的取舍说明）。
+      if (fileErr && fileErr !== 'VAULTFILE_NEEDS_TRUST') {
+        deniedVaultFile = true
+        return false
+      }
     }
     if (denied) return false
-    // 终端模块总闸（docs/terminal-module-design.md §6）：terminalAiExec 关 = 执行工具完全不进视野。
-    // 独立于 aiModulePermissions 的产品开关（默认 false），故在权限门之后单独判。
-    if (t.module === 'terminal' && reader('terminal.aiExec') !== true) {
-      deniedModules.add('terminal')
-      return false
+    // 终端：模块总闸（terminal.aiExec）+ 工作区信任。信任只决定「能不能用」，
+    // 每条命令仍逐条确认（terminalService 的确认卡）——这是拍板过的两层分工。
+    if (t.module === 'terminal') {
+      const trust = readWorkspaceTrust()
+      const allowed = trust.shellExec === 'allow' || (trust.shellExec === null && reader('terminal.aiExec') === true)
+      if (!allowed) {
+        deniedModules.add('terminal')
+        return false
+      }
     }
     // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野。
     // 例外：显式白名单（`only`，如手册通道 / 日程助手）内的工具视为「已启用」——
@@ -655,7 +665,9 @@ function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
   const writeTools = new Set(tools.filter(t => t.requires === 'write').map(t => t.name))
   // 只读工具集合：并行批次判定用（Agent 循环第 1 层单轮密度；写/特殊工具另有名字排除兜底）
   const readOnlyTools = new Set(tools.filter(t => t.readOnly && t.requires !== 'write').map(t => t.name))
-  const skills = tools
+  // Skill 清单按**全部已注册**的 skill 计算：它们现在是 ondemand（默认不进 schema），
+  // 若从过滤后的 tools 里取，system prompt 会显示「0 个 Skill」，模型就不知道有这些能力包可申请。
+  const skills = all
     .filter(t => t.source === 'skill')
     .map(t => ({
       registryName: t.name,
@@ -1185,9 +1197,14 @@ async function runAgentLoop(
   const vaultFileHint = deniedVaultFile
     ? '\n\n【权限提示】仓库文件读写（vault.* 工具）当前被权限限制。若用户请求操作仓库内笔记文件（列目录/读文件/搜内容），请如实说明需在 设置 → AI → 权限 → 仓库文件 中开启后重试。'
     : ''
+  // P0-A/B（v3.31.0）：仓库文件面扩到全部文本文件；未分类页在 .knowbase/_inbox；
+  // 工作区未授权时工具仍在视野里，调用会返回明确提示，模型据此引导用户点顶部一次性卡。
+  const vaultScopeHint = '\n\n【仓库文件】vault.* 工具可读写仓库内文本类文件（md/txt、代码、json/yml 等配置），受本仓库策略与工作区授权限制；'
+    + '二进制、密钥与点目录（.git/.env/.attachments 等）一律拒绝。找文件用 vault.find（glob），按内容定位用 vault.search（支持正则与行号）。'
+    + '未分类知识页在 .knowbase/_inbox（可直接读写）；若写操作返回「当前工作区尚未授权」，请让用户在 AI 助手面板顶部点「一次性开启」。'
   // P3：存在被折叠的 ondemand 工具时，告知申请机制（写类工具默认不在视野）
   const toolsHint = toolsState.hasOnDemandHidden
-    ? '\n\n【扩展工具提示】写入类工具（写文件/建页面/写日记/建待办/打卡等）默认不在上方工具列表中。需要执行写操作时，先调用 builtin.tool.request 申请（tools 传逗号分隔的工具注册名），确认后本会话内持续可用；申请通过后按工具描述使用。不要申请当前任务用不到的工具。'
+    ? '\n\n【扩展工具提示】写类 / 终端 / MCP / Skill 等工具默认不在上方工具列表中（按需装载）。需要时先调 builtin.tool.list（可按 query/module 过滤）查注册名，再调 builtin.tool.request 申请（tools 传逗号分隔的注册名），确认后本会话内持续可用；申请通过后按工具描述使用。不要申请当前任务用不到的工具。'
     : ''
   // 执行纪律（2026-09-10 修）：写操作以"真实调用 + 拿到成功结果"为唯一完成判据。
   // 起因：日程模块权限为只读时，创建工具被预过滤出模型视野，模型无从调用却回复"创建成功"——
@@ -1456,7 +1473,7 @@ async function runAgentLoop(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，

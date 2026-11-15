@@ -41,6 +41,14 @@ export interface PreflightOptions {
    * 否则暂存后有人在该路径建了同名目录，会被二次解析成 `to/from.md` 搬错位置。
    */
   resolveDirTargets?: boolean
+  /** 是否允许移动目录（P0-A 起 vault.move 支持；缺省 false = 旧语义） */
+  allowDirs?: boolean
+  /**
+   * 源 / 目标的准入判定（P0-A：从「写死 .md/.txt」改为由 AI 文件策略决定）。
+   * 缺省 = 仅 .md / .txt 文件（与历史行为一致）。
+   */
+  allowSource?: (rel: string, kind: 'file' | 'dir') => boolean
+  allowTarget?: (rel: string, kind: 'file' | 'dir') => boolean
 }
 
 export type PreflightResult =
@@ -99,6 +107,13 @@ export function preflightMoves(
 ): PreflightResult {
   const protectedRoots = options.protectedRoots?.filter(Boolean) ?? ['AI教学']
   const resolveDirTargets = options.resolveDirTargets !== false
+  const allowDirs = options.allowDirs === true
+  const allowFile = (rel: string): boolean => options.allowSource
+    ? options.allowSource(rel, 'file')
+    : MOVE_EXTS.has(extOf(rel))
+  const allowTargetPath = (rel: string, kind: 'file' | 'dir'): boolean => options.allowTarget
+    ? options.allowTarget(rel, kind)
+    : MOVE_EXTS.has(extOf(rel))
   const list = Array.isArray(raw) ? raw : []
   const conflicts: MoveConflict[] = []
   const moves: MovePair[] = []
@@ -114,6 +129,8 @@ export function preflightMoves(
 
   const seenFrom = new Set<string>()
   const seenTo = new Set<string>()
+  // 全量 from（归一后）：用于「祖孙重叠 / 互相嵌套成环」的跨条预检
+  const normFroms = list.map((row) => normalizeVaultRel(row && typeof row === 'object' ? (row as Record<string, unknown>).from : ''))
 
   for (let i = 0; i < list.length; i++) {
     const index = i + 1
@@ -126,25 +143,39 @@ export function preflightMoves(
 
     if (!from) { push('from 缺失或路径非法（不能是绝对路径 / 含 .. / 隐藏首段）'); continue }
     if (!to) { push('to 缺失或路径非法（不能是绝对路径 / 含 .. / 隐藏首段）'); continue }
-    if (!MOVE_EXTS.has(extOf(from))) { push('from 必须是 .md / .txt 文件'); continue }
     if (isProtected(from, protectedRoots)) { push(`源位于受保护目录 ${protectedRoots.join(' / ')}，请走专用通道`); continue }
     if (isProtected(to, protectedRoots)) { push(`目标位于受保护目录 ${protectedRoots.join(' / ')}，请走专用通道`); continue }
     if (seenFrom.has(from)) { push('from 重复'); continue }
-    if (!probe.isFile(from)) { push('源不存在或不是文件'); continue }
+    const fromIsDir = probe.isDir(from)
+    const fromIsFile = probe.isFile(from)
+    if (fromIsDir && !allowDirs) { push('目录移动未启用'); continue }
+    if (!fromIsDir && !fromIsFile) { push('源不存在或不是文件/目录'); continue }
+    if (fromIsFile && !allowFile(from)) { push('源文件类型不在可移动范围（受 AI 文件策略限制）'); continue }
 
-    // to 是已存在目录 → 保留原文件名；否则按新文件名（必须 .md/.txt）
+    // to 是已存在目录 → 保留原名；否则按新路径（文件仍须命中可写类型，目录不强制扩展名）
     let target: string
     if (resolveDirTargets && probe.isDir(to)) target = to ? `${to}/${baseOfRel(from)}` : baseOfRel(from)
-    else if (MOVE_EXTS.has(extOf(to))) target = to
-    else { push('to 既不是已存在目录，也不以 .md / .txt 结尾'); continue }
+    else target = to
 
     if (target === from) { push('源与目标相同'); continue }
     if (target.toLowerCase() === from.toLowerCase()) { push('v1 不支持仅大小写不同的重命名'); continue }
-    if (!MOVE_EXTS.has(extOf(target))) { push('目标必须是 .md / .txt 文件'); continue }
+    if (fromIsDir && target.startsWith(`${from}/`)) { push('不能把目录移动到它自己的子目录里'); continue }
+    // 跨条预检（P0-A）：目录批量移动最容易出的两种静默灾难
+    //  ① 两条 from 互为祖孙（父搬走后子路径失效）；
+    //  ② 目标落在另一条移动的源子树里（搬完就成环，renameSync 甚至会把树越搬越深）。
+    const nestedFrom = normFroms.find((other, j) => j !== i && other && (other === from || other.startsWith(`${from}/`) || from.startsWith(`${other}/`)))
+    if (fromIsDir && nestedFrom) { push(`from 与另一条移动（${nestedFrom}）互为祖孙，请分开执行`); continue }
+    const cyc = normFroms.find((other, j) => j !== i && other && other !== from && target.startsWith(`${other}/`))
+    if (cyc) { push(`目标落在另一条移动的源（${cyc}）子树内，会成环`); continue }
+    if (fromIsDir) {
+      if (!allowTargetPath(target, 'dir')) { push('目标目录路径不在可写范围'); continue }
+    } else if (!allowTargetPath(target, 'file')) {
+      push('目标文件类型不在可写范围（受 AI 文件策略限制）'); continue
+    }
     const parent = parentOfRel(target)
     if (parent && probe.exists(parent) && !probe.isDir(parent)) { push('目标父路径被文件占用'); continue }
     if (seenTo.has(target.toLowerCase())) { push('解析后的目标路径重复'); continue }
-    if (probe.exists(target)) { push('目标已存在（v1 不覆盖）'); continue }
+    if (probe.exists(target)) { push('目标已存在（不覆盖）'); continue }
 
     seenFrom.add(from)
     seenTo.add(target.toLowerCase())

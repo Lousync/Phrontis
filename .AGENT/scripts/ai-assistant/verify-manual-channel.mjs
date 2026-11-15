@@ -60,7 +60,7 @@ check('agentService 把 tech 归入通用助手（非 manual）', /intent === 'm
 check('会话行加 mode 字段', /mode\?:\s*AgentSessionMode/.test(repo) || /mode\?:\s*'manual'\s*\|\s*'agent'/.test(repo), '')
 check('导出 setSessionMode', repo.includes('export function setSessionMode'), '')
 check('agentService 引用手册通道常量', svc.includes('MANUAL_CHANNEL_TOOL') && svc.includes('MANUAL_MAX_ROUNDS'), '')
-check('buildToolsPayload 支持白名单参数', /buildToolsPayload\(sessionId,\s*manual\s*\?/.test(svc), '')
+check('buildToolsPayload 支持白名单参数', /buildToolsPayload\(\s*sessionId,\s*manual \? \[MANUAL_CHANNEL_TOOL\]/.test(svc), '')
 check('手册通道 system 走 buildManualSystemPrompt', svc.includes('buildManualSystemPrompt()'), '')
 check('手册通道 effort 强制 off', /effort:\s*manual\s*\?\s*'off'/.test(svc), '')
 check('首条消息分类调用 classifyManualIntent', svc.includes('classifyManualIntent('), '')

@@ -275,6 +275,8 @@ export function refreshSkillRegistrations(): void {
       source: 'skill',
       enabled: true,
       readOnly: true,
+      // P0-D：每个启用的 Skill 都常驻一份 schema，装多了会把每轮成本顶起来 → 按需装载
+      tier: 'ondemand',
     }, (args) => ({ skillId: s.id, pluginId: s.pluginId, prompt: renderPrompt(s.prompt, args) }))
   }
 }

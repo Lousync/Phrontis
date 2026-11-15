@@ -106,13 +106,13 @@ console.log('\n=== D. 注入分叉（教学门控 + 助手段 + 术语表段） 
 const srcAg = stripComments(read('electron/lib/agentService.ts'))
 ok(/import \{ readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary \} from '\.\/assistantConstraints'/.test(srcAg),
   'D1 agentService 引入助手约束/术语表读取器')
-// 教学三层约束按 source 门控（修掉「教学全局要求漏进助手」的既有洞）
-ok(/const rawConstraints = source === 'aiTeaching' \? resolveConstraintsForInjection/.test(srcAg),
+// 教学三层约束按 source 门控（L2 起收敛为 scopeLayers 四层对象；口径不变：非教学源全空）
+ok(/const scopeLayers = source === 'aiTeaching'/.test(srcAg) && /: \{ global: '', workspace: '', unit: '', lesson: '' \}/.test(srcAg),
   'D2 教学会话约束层按 source 门控')
-ok(/const rawWs = source === 'aiTeaching' \? \(readWorkspaceConstraintsForSession/.test(srcAg),
-  'D3 教学工作区约束层按 source 门控')
-ok(/const rawGlobal = source === 'aiTeaching' \? \(readGlobalConstraints/.test(srcAg),
-  'D4 教学全局约束层按 source 门控（此前未门控 = 漏进助手对话）')
+ok(/global: readGlobalConstraints\(getSettingReader\(\)\)/.test(srcAg) && /workspace: readWorkspaceConstraintsForSession/.test(srcAg),
+  'D3 教学工作区 / 全局约束层按 source 门控')
+ok(/lesson: resolveConstraintsForInjection\(sessionId, getSettingReader\(\)\)/.test(srcAg),
+  'D4 课时层仍走 resolveConstraintsForInjection（最细一层不迁移）')
 // 助手段存在且只对助手生效、进入稳定前缀
 ok(/const assistantConstraintHint = source === 'aiTeaching' \? '' : \(\(\) => \{/.test(srcAg),
   'D5 助手要求注入段存在且教学源为零注入（独立第二份，措辞不复用教学口径）')
@@ -134,9 +134,10 @@ ok(/readOnly: true/.test(blogSearchDecl) && /module: 'blog'/.test(blogSearchDecl
   'E3 blog.search 只读 + 归 blog 模块（权限体系按模块预过滤）')
 ok(/vaultSearchEntries\(terms\)/.test(rawBt) && /import \{ vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries \} from 'phrontis-core\/kbStore\/blogVaultRepo'/.test(rawBt),
   'E4 复用 blogVaultRepo 的 vaultSearchEntries / vaultGetEntryById（与博客 UI 同一份 .knowbase/blog 数据；词表入参 = 正式版台账 F-15 处置4 多词 AND）')
+// v3.31.0 P0-D：清单硬编码退役 —— 申请入口改为「先查 builtin.tool.list」
 const reqDesc = rawBt.slice(rawBt.indexOf("name: 'builtin.tool.request'"), rawBt.indexOf("name: 'builtin.tool.request'") + 1200)
-ok(/blog\.search/.test(reqDesc),
-  'E5 builtin.tool.request 的 description 清单补 blog.search（铁律 18：ondemand 工具的申请指路）')
+ok(/builtin\.tool\.list/.test(reqDesc),
+  'E5 builtin.tool.request 指向 builtin.tool.list（按需工具不再逐个列名字）')
 const ksDesc = rawBt.slice(rawBt.indexOf("name: 'builtin.knowledge.search'"), rawBt.indexOf("name: 'builtin.knowledge.search'") + 700)
 ok(/builtin\.blog\.search/.test(ksDesc),
   'E6 knowledge.search description 声明边界（C 案：消除「搜过了就是没有 → 乱找日程」）')

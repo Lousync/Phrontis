@@ -127,7 +127,13 @@ export interface MoveBatchResult {
  */
 export function applyMoveBatch(rootPath: string, rootId: string, moves: MovePair[]): MoveBatchResult {
   // 应用前再预检一次：暂存到用户点「应用」之间，磁盘可能已变（目标被占 / 源被移走）
-  const pre = preflightMoves(moves, moveProbeOf(rootPath), { resolveDirTargets: false })
+  // 类型/策略在暂存时已按当时的仓库策略校验过；这里只关心「磁盘事实」，故放开类型约束。
+  const pre = preflightMoves(moves, moveProbeOf(rootPath), {
+    resolveDirTargets: false,
+    allowDirs: true,
+    allowSource: () => true,
+    allowTarget: () => true,
+  })
   if (!pre.ok) throw new Error(`批量移动预检失败：${formatMoveConflicts(pre.conflicts)}`)
   const resolved = pre.moves
   const done: MovePair[] = []
@@ -177,7 +183,14 @@ async function runAction(a: FsAction, rootPath: string, rootId: string): Promise
       // 直接执行路径 builtin.vault.write 会先 mkdir -p 再写，这里必须同口径；
       // 否则 writeWorkspaceFile 在目标旁写临时文件时直接 ENOENT（2026-11-09 实机报障）。
       mkdirSync(dirname(abs), { recursive: true })
-      writeWorkspaceFile(abs, a.content ?? '')
+      // P0-A：按暂存时记录的原文件编码 / 换行 / 权限位写回（缺省 UTF-8 + LF）
+      writeWorkspaceFile(abs, a.content ?? '', {
+        encoding: a.codec?.encoding,
+        bom: a.codec?.bom,
+        eol: a.codec?.eol,
+        relPath: a.relPath,
+        mode: a.codec?.mode ?? undefined,
+      })
       return
     }
     case 'rename':

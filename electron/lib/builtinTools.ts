@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
 import { readdirSync, lstatSync, readFileSync, statSync, mkdirSync } from 'fs'
 import { join, relative, extname, sep, dirname } from 'path'
-import { listTools, registerTool, getSettingReader, checkModulePermission } from './aiTools'
+import { listTools, registerTool, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
+import { readWorkspaceTrust } from './workspaceTrust'
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
 import { writeVisual, writeMindmap, writeImage } from './aiTeachingSources'
@@ -18,9 +19,9 @@ import { registerSources, assignSources, extractSource, getSources, type Registe
 import type { SourceAnchor } from '../../src/lib/aiTeachingSourcesPure'
 import type { ToolInvokeCtx } from './aiTools'
 import { assertCanRead, assertCanWrite, readPredicate } from './aiAssistantScope'
-import { commitOrStage, stageToolOp } from './aiAssistantCommit'
+import { commitOrStage, isPropose, stageToolOp } from './aiAssistantCommit'
 import { resolveKnowledgeTargetPure, type KnowledgeTarget } from './knowledgeTargetPure'
-import { summarizeToolOp } from './aiAssistantPlanPure'
+import { summarizeToolOp, type FileCodecMeta } from './aiAssistantPlanPure'
 import { applyMoveBatch } from './aiAssistantPlan'
 import { preflightMoves, formatMoveConflicts, summarizeMoves, MAX_BATCH_MOVES, type MoveProbe } from './vaultMovePure'
 import { isConfirmModeHiddenTool } from './aiAssistantStageable'
@@ -32,7 +33,7 @@ import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
 import { getKnowledgeIndex, getKnowledgeTextIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { getGraphIndex } from 'phrontis-core/kbStore/graphIndex'
-import { vaultGetPageById, vaultGetCategories, vaultCreatePage, vaultDirExists } from 'phrontis-core/kbStore/knowledgeVaultRepo'
+import { vaultGetPageById, vaultGetCategories, vaultCreatePage, vaultDirExists, vaultRenameCategory } from 'phrontis-core/kbStore/knowledgeVaultRepo'
 import { vaultGetTopics, vaultResolveOrCreateTopic, vaultPatchTopicMembers } from 'phrontis-core/kbStore/knowledgeTopicsRepo'
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp, helpCatalog } from './helpService'
@@ -72,6 +73,18 @@ import { quizDataStats } from './quizDataAdmin'
 import { AI_TEXT_CODE_EXT_SET } from '../../src/lib/aiTextExts'
 import { ensureKnowledgeDocFrontmatter, readFrontmatterId } from './quizDocPure'
 import type { ToolJsonSchema } from './aiTools'
+import {
+  assertAiDirWritable,
+  assertAiWritable as assertPolicyWritable,
+  evaluateVaultPath,
+  getAiFilePolicy,
+  statKind,
+} from './aiFilePolicy'
+import { evaluateAiDir, evaluateAiFile, type AiFilePolicy } from './aiFilePolicyPure'
+import { decodeTextFile, detectEol } from './textFileCodecPure'
+import { clampFindDepth, clampFindLimit, depthUnder, matchesFindPattern } from './vaultFindPure'
+import { DEFAULT_IGNORE_DIRS } from 'phrontis-core/kbStore/ignoreDefaults'
+import { getVaultIgnore, isDirIgnored } from 'phrontis-core/kbStore/ignoreFile'
 
 /**
  * 内置 AI 工具清单：给 AgentRunner 与外部 MCP 客户端的稳定契约。
@@ -212,6 +225,8 @@ function ruleSummary(ruleType: string, ruleDays: number[], weeklyTarget: number)
 
 const VAULT_DOT_DIR = '.knowbase'
 const VAULT_MODULES_DIR = 'modules'
+/** 未分类收件箱（P0-A §3.3）：AI 自己建的页必须读得回来 */
+const VAULT_INBOX_DIR = '_inbox'
 export const MAX_VAULT_FILE = 10 * 1024 * 1024 // read 文本 >10MB 拒（文档走 MAX_DOC_SIZE=80MB）
 export const MAX_VAULT_LIST_ENTRIES = 200
 
@@ -289,14 +304,14 @@ function isModulesJson(parts: string[]): boolean {
     parts[parts.length - 1].toLowerCase().endsWith('.json')
 }
 
-/** 子路径是否 AI 允许（目录枚举用）：点目录一律拒，.knowbase 仅 modules 子树放行 */
+/** 子路径是否 AI 允许（目录枚举用）：点目录一律拒，.knowbase 仅 modules / _inbox 子树放行 */
 export function childAiAllowed(root: string, childAbs: string): boolean {
   const parts = vaultRelParts(root, childAbs)
   if (parts.length === 0) return false
   const first = parts[0]
   if (first.startsWith('.')) {
     if (first !== VAULT_DOT_DIR) return false
-    return parts.length === 1 || parts[1] === VAULT_MODULES_DIR
+    return parts.length === 1 || parts[1] === VAULT_MODULES_DIR || parts[1] === VAULT_INBOX_DIR
   }
   return true
 }
@@ -313,11 +328,11 @@ export function isAiReadableFile(root: string, abs: string): boolean {
   return AI_TEXT_CODE_EXT_SET.has(ext)
 }
 
-/** 搜索遍历忽略的目录（v3.2.0 条目 9）：依赖/产物目录会吃光 400 个文件预算 → search 静默失效。
- *  只影响 search 遍历；AI 明确给出路径时 vault.read 仍可读这些目录内的文件 */
-const SEARCH_IGNORE_DIRS = new Set(['node_modules', 'dist', 'out', 'build'])
+/** 搜索/查找遍历忽略的目录（P0-C）：统一引用 phrontis-core 的默认忽略层，不再各处手抄一份。
+ *  用户 `.ignore` 的规则叠加在其上（`!node_modules` 可恢复）；显式给路径的 vault.read 不受影响。 */
+const SEARCH_IGNORE_DIRS = new Set(DEFAULT_IGNORE_DIRS)
 
-/** 递归收集可搜索文本文件（.knowbase 只深入 modules；隐藏区跳过；依赖/产物目录忽略；数量预算封顶） */
+/** 递归收集可搜索文本文件（.knowbase 只深入 modules/_inbox；隐藏区跳过；默认忽略 + .ignore；数量预算封顶） */
 interface SearchBudget {
   count: number
   /** 撞到文件数预算被截断（vault.search 的 scanTruncated 依据，§6.4） */
@@ -326,12 +341,20 @@ interface SearchBudget {
   skippedLarge: number
 }
 
-function walkAiFiles(root: string, dirAbs: string, out: string[], budget: SearchBudget): void {
+interface WalkOptions {
+  /** 显式忽略默认层与 .ignore（vault.list / find 的 includeIgnored） */
+  includeIgnored?: boolean
+  /** 最大层数（相对 walk 起点；0/undefined = 不限制，仅受调用方预算约束） */
+  maxDepth?: number
+}
+
+function walkAiFiles(root: string, dirAbs: string, out: string[], budget: SearchBudget, opts: WalkOptions = {}, depth = 0): void {
   const limits = vaultToolLimits()
   if (budget.count >= limits.searchFiles) {
     budget.truncated = true
     return
   }
+  const ign = opts.includeIgnored ? null : getVaultIgnore().ign
   let names: string[] = []
   try { names = readdirSync(dirAbs) } catch { return }
   for (const name of names) {
@@ -341,19 +364,25 @@ function walkAiFiles(root: string, dirAbs: string, out: string[], budget: Search
     }
     const full = join(dirAbs, name)
     if (!childAiAllowed(root, full)) continue
+    const rel = vaultRelParts(root, full).join('/')
     let st: ReturnType<typeof lstatSync>
     try { st = lstatSync(full) } catch { continue }
     if (st.isSymbolicLink()) continue
     if (st.isDirectory()) {
-      if (!SEARCH_IGNORE_DIRS.has(name.toLowerCase())) walkAiFiles(root, full, out, budget)
+      if (SEARCH_IGNORE_DIRS.has(name.toLowerCase())) continue
+      if (ign && isDirIgnored(ign, rel)) continue
+      if (opts.maxDepth !== undefined && opts.maxDepth > 0 && depth + 1 >= opts.maxDepth) continue
+      walkAiFiles(root, full, out, budget, opts, depth + 1)
       continue
     }
     if (!st.isFile()) continue
+    if (ign && ign.ignores(rel)) continue
     if (st.size > limits.searchFileMax) {
       budget.skippedLarge++
       continue
     }
-    if (!isAiReadableFile(root, full)) continue
+    // 读准入走策略层（配置类 / 代码 / 收件箱都可见；二进制扩展名自然拒绝）
+    if (!evaluateAiFile({ rel, op: 'read', size: st.size }, aiPolicy()).allow) continue
     budget.count++
     out.push(full)
   }
@@ -377,15 +406,73 @@ export function isAiDocFile(root: string, abs: string): boolean {
   return ext === 'pdf' || ext === 'pptx'
 }
 
-/** 写前守卫：writable 判定 + 大小 + mtime 冲突（expectedMtimeMs 来自 vault.read 基线） */
-export function assertAiWritable(root: string, abs: string, expectedMtimeMs: unknown): void {
-  if (!isAiWritableFile(root, abs)) {
-    throw new Error('该位置不可写：AI 仅可新建/修改仓库内普通 .md/.txt 文件（.knowbase 内部数据只读保护）')
+/** 欢迎页（仓库根 `欢迎.html`）：可原地编辑，但不能改名 / 移动 / 删除（与知识库的合成页口径一致） */
+const WELCOME_DOC_REL = '欢迎.html'
+function isWelcomeDocRel(rel: string): boolean {
+  return rel.replace(/\\/g, '/').replace(/^\.\//, '') === WELCOME_DOC_REL
+}
+
+/** 当前生效的仓库文件策略（默认预设 + 仓库覆盖；每次调用读一次 config.json，量很小） */
+function aiPolicy(): AiFilePolicy {
+  return getAiFilePolicy()
+}
+
+/** encoding 入参归一：未知值按未传处理（避免模型传 "utf8"/"UTF-8" 被当成非法编码） */
+function normalizeEncodingArg(raw: unknown): 'utf-8' | 'utf-16le' | 'utf-16be' | 'gbk' | undefined {
+  const s = String(raw ?? '').trim().toLowerCase().replace(/[_\s]/g, '-')
+  if (!s) return undefined
+  if (s === 'utf-8' || s === 'utf8') return 'utf-8'
+  if (s === 'utf-16le' || s === 'utf16le') return 'utf-16le'
+  if (s === 'utf-16be' || s === 'utf16be') return 'utf-16be'
+  if (s === 'gbk' || s === 'gb2312' || s === 'gb18030') return 'gbk'
+  return undefined
+}
+
+/** 按仓库相对路径找知识库分类（目录改名走分类通道以保住 space / notebook 类型） */
+function findCategoryByPath(rel: string): { id: string; name: string } | null {
+  try {
+    const norm = rel.replace(/\\/g, '/').replace(/\/+$/, '')
+    const hit = vaultGetCategories().find((c) => String(c.path ?? '').replace(/\\/g, '/').replace(/\/+$/, '') === norm)
+    return hit ? { id: hit.id, name: hit.name } : null
+  } catch {
+    return null
   }
-  let existing = false
-  let size = 0
-  try { const st = statSync(abs); existing = st.isFile(); size = st.size } catch { /* 新建 */ }
-  if (existing && size > MAX_VAULT_FILE) throw new Error(`文件过大（${size} 字节 > 10MB），拒绝写入: ${abs}`)
+}
+
+/** 整目录删除清单（确认卡上给出「删多少」，超过上限直接拒绝） */
+const DIR_TRASH_MAX_ENTRIES = 5000
+
+function dirTrashManifest(root: string, rel: string): { files: number; pages: number; sample: string[]; tooLarge: boolean } {
+  const abs = resolveSafe(root, rel)
+  const sample: string[] = []
+  let files = 0
+  let pages = 0
+  let tooLarge = false
+  const walk = (dirAbs: string): void => {
+    if (tooLarge) return
+    let names: string[] = []
+    try { names = readdirSync(dirAbs) } catch { return }
+    for (const name of names) {
+      const full = join(dirAbs, name)
+      let st: ReturnType<typeof lstatSync>
+      try { st = lstatSync(full) } catch { continue }
+      if (st.isSymbolicLink()) continue
+      if (st.isDirectory()) { walk(full); continue }
+      if (!st.isFile()) continue
+      files++
+      if (name.toLowerCase().endsWith('.md')) pages++
+      if (sample.length < 5) sample.push(vaultRelParts(root, full).join('/'))
+      if (files > DIR_TRASH_MAX_ENTRIES) { tooLarge = true; return }
+    }
+  }
+  if (abs) walk(abs)
+  return { files, pages, sample, tooLarge }
+}
+
+/** 写前守卫：策略准入（P0-A）+ 大小 + mtime 冲突（expectedMtimeMs 来自 vault.read 基线） */
+export function assertAiWritable(root: string, abs: string, expectedMtimeMs: unknown, extraSize?: number): void {
+  const v = assertPolicyWritable(root, abs, extraSize)
+  const existing = v.exists
   const expected = Number(expectedMtimeMs)
   if (existing && Number.isFinite(expected) && expected > 0) {
     const c = detectConflict(abs, expected)
@@ -2179,11 +2266,54 @@ export function registerBuiltinTools(): void {
     return { ok: true, message: `筛选已生效：${[kind === 'paper' ? '仅论文' : kind === 'chinese' ? '仅中文' : '', kw ? `关键词「${kw}」` : ''].filter(Boolean).join(' + ') || '无'}` }
   })
 
+  // builtin.tool.list —— 列出按需（未常驻）工具，供模型按名字申请
+  registerTool({
+    name: 'builtin.tool.list',
+    title: '列出按需工具',
+    description: '按关键词/模块列出当前权限允许的「按需工具」（写类、模块写操作、终端、MCP、Skill 等默认不常驻）。先用本工具查名字，再用 builtin.tool.request 申请。返回 name/title/requires',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '按名称/标题/描述过滤，如 vault、schedule、quiz' },
+        module: { type: 'string', description: '按模块过滤，如 schedule / knowledge' },
+        limit: { type: 'number', description: '返回上限，默认 40' },
+      },
+      required: [],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'core',
+  }, (args) => {
+    const q = str(args.query).trim().toLowerCase()
+    const mod = str(args.module).trim()
+    const limit = clamp(Math.floor(num(args.limit, 40)), 1, 100)
+    const reader = getSettingReader()
+    const all = listTools()
+      .filter((t) => t.enabled && t.tier === 'ondemand')
+      .filter((t) => !mod || t.module === mod)
+      .filter((t) => !checkModulePermission(t, reader))
+      .filter((t) => !q || `${t.name} ${t.title} ${t.description}`.toLowerCase().includes(q))
+    const rows = all.slice(0, limit).map((t) => ({
+      name: t.name,
+      title: t.title,
+      requires: t.requires ?? 'read',
+      module: t.module || undefined,
+      source: t.source,
+    }))
+    return {
+      total: all.length,
+      truncated: all.length > rows.length,
+      tools: rows,
+      hint: rows.length === 0 ? '没有匹配的按需工具（常驻工具已在系统工具列表中）' : undefined,
+    }
+  })
+
   // builtin.tool.request —— 申请启用按需工具（本会话内持久；启用集合由 agentService 按会话维护）
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.move / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / knowledge.topics / knowledge.topic.assign / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.constraints.write / course.constraints.read / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: '写类与模块写操作、终端、MCP、Skill 等工具默认不在列表中。先调 builtin.tool.list（可按关键词/模块过滤）查到注册名，再用本工具申请（逗号分隔，本会话内持续可用）。只申请确实需要的，不要一次全申请',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2229,6 +2359,23 @@ export function registerBuiltinTools(): void {
         })
         continue
       }
+      // vault 文件域（P0-B）：deny / 全局 off 拒绝申请；「尚未授权」允许申请（调用时再提示）
+      if (t.vaultFile) {
+        const fileErr = checkVaultFilePermission(t, reader)
+        if (fileErr && fileErr !== 'VAULTFILE_NEEDS_TRUST') {
+          denied.push({ name: n, module: t.module ?? '', reason: fileErr === 'VAULTFILE_READONLY' ? '仓库文件只读' : '仓库文件已关闭' })
+          continue
+        }
+      }
+      // 终端：信任未授予时不允许「申请成功」（下一轮它仍不在视野里）
+      if (t.module === 'terminal') {
+        const trust = readWorkspaceTrust()
+        const allowed = trust.shellExec === 'allow' || (trust.shellExec === null && reader('terminal.aiExec') === true)
+        if (!allowed) {
+          denied.push({ name: n, module: 'terminal', reason: '需先在面板顶部开启「执行命令」' })
+          continue
+        }
+      }
       enabled.push(n)
     }
     const deniedHint = denied.length
@@ -2252,7 +2399,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.list',
     title: '列仓库目录',
-    description: '列当前知识仓库某目录下的条目（目录与可读文本/代码文件）；隐藏区(.knowbase 内部非 modules)不出现。用于让 AI 了解仓库结构',
+    description: '列当前知识仓库某目录下的条目（目录与可读文本/代码/配置文件）；.knowbase 内部只显示 modules 与 _inbox。只想找文件时用 vault.find（glob 递归）更快',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2288,8 +2435,10 @@ export function registerBuiltinTools(): void {
       try { st = lstatSync(full) } catch { continue }
       if (st.isSymbolicLink()) continue
       if (st.isDirectory()) all.push({ name, type: 'dir' })
-      // P1：文档文件（pdf/pptx）一并可见（vault.read 已收编其读取），否则 AI 无法发现它们
-      else if (st.isFile() && (isAiReadableFile(root, full) || isAiDocFile(root, full))) all.push({ name, type: 'file', size: st.size })
+      // P0-A：文本类（含配置）与文档文件一并可见（准入走策略层；显式列目录不受忽略规则影响）
+      else if (st.isFile() && (evaluateAiFile({ rel: vaultRelParts(root, full).join('/'), op: 'read', size: st.size }, aiPolicy()).allow || isAiDocFile(root, full))) {
+        all.push({ name, type: 'file', size: st.size })
+      }
     }
     all.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name, 'zh-Hans-CN'))
     // §6.3：total 是目录真实条目数（不再是返回数）；超页用 offset 续取
@@ -2297,19 +2446,135 @@ export function registerBuiltinTools(): void {
     return { path: rel || '.', total: all.length, offset, hasMore: offset + entries.length < all.length, entries }
   })
 
+  // 14b. builtin.vault.find —— 按 glob / 深度列仓库内文件与目录（替代反复 vault.list）
+  registerTool({
+    name: 'builtin.vault.find',
+    title: '查找仓库文件',
+    description: '按 glob 模式递归查找仓库内文件与目录（如 "*.ts" / "src/**/*.tsx" / "docs/"），返回扁平相对路径清单。默认跳过 node_modules 等忽略目录与 .ignore 命中项（includeIgnored=true 可含）。比逐层 vault.list 快得多',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '起始目录（仓库相对，省略=仓库根）' },
+        pattern: { type: 'string', description: 'glob 模式：* 段内、** 跨目录、? 单字符；省略=列目录树' },
+        depth: { type: 'number', description: '最大层数，默认 8（最多 20）' },
+        limit: { type: 'number', description: '结果上限，默认 500（最多 2000）' },
+        includeIgnored: { type: 'boolean', description: '包含默认忽略目录与 .ignore 命中项' },
+        dirsOnly: { type: 'boolean', description: '只返回目录' },
+      },
+      required: [],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    requires: 'read',
+    vaultFile: 'read',
+  }, (args, ctx) => {
+    const rel = str(args.path).trim()
+    const pattern = str(args.pattern).trim()
+    const depth = clampFindDepth(args.depth)
+    const limit = clampFindLimit(args.limit)
+    const includeIgnored = args.includeIgnored === true
+    const dirsOnly = args.dirsOnly === true
+    assertCanRead(rel, ctx)
+    const root = vaultRootPath()
+    const baseAbs = resolveSafe(root, rel)
+    if (!baseAbs) throw new Error(`路径非法或越出仓库: ${rel || '.'}`)
+    if (statKind(baseAbs) !== 'dir') throw new Error(`目录不存在: ${rel || '.'}`)
+    const inScope = readPredicate(ctx)
+    const ign = includeIgnored ? null : getVaultIgnore().ign
+    const baseRel = vaultRelParts(root, baseAbs).join('/')
+    const out: Array<{ relPath: string; type: 'file' | 'dir'; size?: number }> = []
+    let truncated = false
+    const walk = (dirAbs: string, dirRel: string, level: number): void => {
+      if (truncated) return
+      let names: string[] = []
+      try { names = readdirSync(dirAbs) } catch { return }
+      for (const name of names) {
+        if (out.length >= limit) { truncated = true; return }
+        const full = join(dirAbs, name)
+        if (!childAiAllowed(root, full)) continue
+        const childRel = dirRel ? `${dirRel}/${name}` : name
+        let st: ReturnType<typeof lstatSync>
+        try { st = lstatSync(full) } catch { continue }
+        if (st.isSymbolicLink()) continue
+        const type: 'file' | 'dir' = st.isDirectory() ? 'dir' : 'file'
+        if (type === 'dir') {
+          if (ign && isDirIgnored(ign, childRel)) continue
+          if (matchesFindPattern({ rel: childRel, type }, pattern)) out.push({ relPath: childRel, type })
+          if (level + 1 < depth) walk(full, childRel, level + 1)
+          continue
+        }
+        if (dirsOnly) continue
+        if (ign && ign.ignores(childRel)) continue
+        if (!evaluateAiFile({ rel: childRel, op: 'read', size: st.size }, aiPolicy()).allow && !isAiDocFile(root, full)) continue
+        if (!inScope(childRel)) continue
+        if (!matchesFindPattern({ rel: childRel, type }, pattern)) continue
+        out.push({ relPath: childRel, type, size: st.size })
+      }
+    }
+    walk(baseAbs, baseRel, 0)
+    out.sort((a, b) => (a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.relPath.localeCompare(b.relPath, 'zh-Hans-CN')))
+    return {
+      path: rel || '.',
+      pattern: pattern || undefined,
+      total: out.length,
+      truncated,
+      entries: out,
+    }
+  })
+
+  // 14c. builtin.vault.mkdir —— 新建目录（已存在则报错，不自动加后缀）
+  registerTool({
+    name: 'builtin.vault.mkdir',
+    title: '新建仓库目录',
+    description: '在仓库内新建目录（父链不存在会一并创建）。目录已存在时报错，不会自动改名加 (1)。受仓库 AI 文件策略约束（点目录与 .knowbase 禁止）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '仓库内相对目录路径' },
+      },
+      required: ['path'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    vaultFile: 'write',
+  }, async (args, ctx) => {
+    const rel = str(args.path).trim()
+    if (!rel) throw new Error('缺少必填参数: path')
+    assertCanWrite(rel, ctx)
+    const root = vaultRootPath()
+    const abs = resolveSafe(root, rel)
+    if (!abs) throw new Error(`路径非法或越出仓库: ${rel}`)
+    assertAiDirWritable(root, rel)
+    if (statKind(abs) !== 'none') throw new Error(`路径已存在: ${rel}`)
+    return commitOrStage(ctx, () => ({ kind: 'mkdir', relPath: rel }), () => {
+      mkdirSync(abs, { recursive: true })
+      notifyVaultTreeChange(`${rel}/.keep`)
+      broadcastDataChanged('knowledge')
+      return { ok: true, created: rel }
+    })
+  })
+
   // 15. builtin.vault.read —— 读仓库内文本文件与文档（P1 收编原 docs.read-text，按扩展名分派）
   registerTool({
     name: 'builtin.vault.read',
     title: '读仓库文件',
-    description: '读取仓库内文件：.md/.txt 与文本类代码文件全文（.knowbase/modules/*.json 只读）与 .pdf/.pptx 文本提取。path 与 id 二选一。超长文件分页续读：文本用 offset+hasMore/nextOffset；pdf/pptx 用 pages="12-41" 区间。返回 mtimeMs 供写回冲突校验。图片/保护区拒绝；文本 >10MB、pdf/pptx >80MB 拒绝',
+    description: '读取仓库内文件：md/txt、文本类代码与配置（json/yml/toml/ini 等）、.knowbase/modules/*.json 只读、.knowbase/_inbox 未分类页；.pdf/.pptx 提取文本。path 与 id 二选一。续读：文本用 offset+hasMore/nextOffset，或 startLine/endLine 按行读（带行号，便于定位大文件）；pdf/pptx 用 pages="12-41"。返回 mtimeMs（写回冲突基线）与 encoding/eol（写回时原样传回可保真）。图片/密钥/点目录拒绝',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '仓库内相对文件路径（如 笔记/内存管理.md 或 资料/课件.pptx）；与 id 二选一' },
-        id: { type: 'string', description: '知识页 frontmatter id（与 path 二选一，knowledge.search 返回的即此 id）' },
+        path: { type: 'string', description: '仓库内相对路径（与 id 二选一）' },
+        id: { type: 'string', description: '知识页 frontmatter id（与 path 二选一）' },
         maxChars: { type: 'number', description: '本次最多返回字符，默认 16000' },
-        offset: { type: 'number', description: '文本字符偏移（续读）：hasMore=true 时用返回的 nextOffset 继续读' },
-        pages: { type: 'string', description: 'pdf/pptx 页码区间（续读）：如 "12-41" 或 "12"；返回 nextPage 供续读' },
+        offset: { type: 'number', description: '字符偏移续读：hasMore=true 时用 nextOffset' },
+        startLine: { type: 'number', description: '按行读起点（1-based，优先于 offset）' },
+        endLine: { type: 'number', description: '按行读终点（闭区间；省略时 400 行）' },
+        numberLines: { type: 'boolean', description: '按行读取时加行号（默认 true）' },
+        encoding: { type: 'string', enum: ['utf-8', 'utf-16le', 'utf-16be', 'gbk'], description: '显式编码（GBK 等必须传；默认自动识别 UTF-8/UTF-16）' },
+        pages: { type: 'string', description: 'pdf/pptx 页码区间：如 "12-41" 或 "12"' },
       },
       required: [],
     },
@@ -2406,19 +2671,52 @@ export function registerBuiltinTools(): void {
         hint: truncated ? `文档共 ${out.pages} 页，只返回了开头 ${maxChars} 字符；用 pages="1-${out.pages}" 分页续读` : undefined,
       }
     }
-    if (!isAiReadableFile(root, abs)) {
-      throw new Error(`文件不可读：仅支持 .md/.txt 与文本类代码文件（仓库内）与 .knowbase/modules/*.json（只读）；图片、配置与保护区拒绝: ${rel}`)
+    const readEval = evaluateVaultPath(root, abs, 'read')
+    if (!isAiDocFile(root, abs) && !readEval.allow) {
+      throw new Error(`文件不可读：${readEval.reason ?? '该类型不在当前 AI 文件策略内'}；可在 设置 → AI → 权限 → 当前工作区 调整: ${rel}`)
     }
     const maxChars = clamp(Math.floor(num(args.maxChars, limits.readDefault)), 200, limits.readMax)
     const offset = clamp(Math.floor(num(args.offset, 0)), 0, Number.MAX_SAFE_INTEGER)
-    const text = readFileSync(abs, 'utf-8')
+    const buf = readFileSync(abs)
+    const dec = decodeTextFile(buf, { encoding: normalizeEncodingArg(args.encoding) })
+    if (!dec.ok) throw new Error(`${dec.error}: ${rel}`)
+    const text = dec.text
+    const base = {
+      path: rel,
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+      encoding: dec.encoding,
+      bom: dec.bom || undefined,
+      eol: dec.eol === '\r\n' ? 'crlf' : 'lf',
+    }
+    // 行区间读取（模型定位大文件用）：startLine/endLine 为 1-based，闭区间
+    const startLine = Math.floor(num(args.startLine, 0))
+    const endLine = Math.floor(num(args.endLine, 0))
+    if (startLine > 0 || endLine > 0) {
+      const lines = text.split('\n')
+      const from = Math.max(1, startLine || 1)
+      const to = clamp(endLine || from + 400, from, lines.length)
+      const slice = lines.slice(from - 1, to)
+      const wantNumbers = args.numberLines !== false
+      const content = wantNumbers
+        ? slice.map((ln, i) => `${String(from + i).padStart(5, ' ')}| ${ln}`).join('\n')
+        : slice.join('\n')
+      return {
+        ...base,
+        content,
+        startLine: from,
+        endLine: to,
+        totalLines: lines.length,
+        hasMore: to < lines.length,
+        nextStartLine: to < lines.length ? to + 1 : undefined,
+        truncated: from > 1 || to < lines.length,
+      }
+    }
     // §6.1 字符分页：hasMore/nextOffset 让模型自己续读
     const content = text.slice(offset, offset + maxChars)
     const nextOffset = offset + content.length
     return {
-      path: rel,
-      size: st.size,
-      mtimeMs: st.mtimeMs,
+      ...base,
       content,
       offset,
       nextOffset,
@@ -2428,16 +2726,21 @@ export function registerBuiltinTools(): void {
     }
   })
 
-  // 16. builtin.vault.search —— 仓库内内容搜索（文本 grep 语义）
+  // 16. builtin.vault.search —— 仓库内内容搜索（关键词 / 正则 / glob 过滤，带行号与上下文）
   registerTool({
     name: 'builtin.vault.search',
     title: '搜索仓库内容',
-    description: '在当前知识仓库内按关键词搜索可读文本文件内容，返回命中文件与上下文摘录。结果带 hasMore（offset 续取）与 scanTruncated（因文件数/大小预算没扫完，不代表没有更多命中）',
+    description: '在仓库内搜索文本内容：默认关键词（空格=AND）；regex=true 按正则（行内任意位置）；glob 限定文件（如 "**/*.ts"）。返回每个文件的命中行号、列号与上下文行。默认跳过 node_modules 等忽略目录与 .ignore 命中项（includeIgnored=true 可含）。scanTruncated=true 表示因预算没扫完，不代表没有更多命中',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '关键词，空格分隔为 AND' },
-        limit: { type: 'number', description: '命中上限, 默认20' },
+        query: { type: 'string', description: '关键词（空格分隔为 AND）或正则（regex=true）' },
+        regex: { type: 'boolean', description: 'true=把 query 当正则表达式（长度 ≤200）' },
+        caseSensitive: { type: 'boolean', description: '区分大小写，默认 false' },
+        glob: { type: 'string', description: '只搜匹配该 glob 的文件，如 "**/*.ts" / "*.md"' },
+        contextLines: { type: 'number', description: '命中行前后各带几行上下文，默认 0（最多 5）' },
+        includeIgnored: { type: 'boolean', description: '包含默认忽略目录与 .ignore 命中项' },
+        limit: { type: 'number', description: '命中文件上限, 默认20' },
         offset: { type: 'number', description: '命中偏移（续取）：hasMore=true 时用 offset+limit 续取' },
       },
       required: ['query'],
@@ -2452,31 +2755,86 @@ export function registerBuiltinTools(): void {
     const limits = vaultToolLimits()
     const limit = clamp(Math.floor(num(args.limit, 20)), 1, limits.searchHits)
     const offset = clamp(Math.floor(num(args.offset, 0)), 0, 1_000_000)
+    const includeIgnored = args.includeIgnored === true
+    const caseSensitive = args.caseSensitive === true
+    const contextLines = clamp(Math.floor(num(args.contextLines, 0)), 0, 5)
+    const globPat = str(args.glob).trim()
     const inScope = readPredicate(ctx)
-    const terms = q.split(/\s+/).filter(Boolean)
-    if (terms.length === 0) throw new Error('缺少关键词 query')
+    if (!q) throw new Error('缺少关键词 query')
+    let re: RegExp | null = null
+    let terms: string[] = []
+    if (args.regex === true) {
+      if (q.length > 200) throw new Error('正则过长（>200 字符），请缩小范围')
+      try { re = new RegExp(q, caseSensitive ? '' : 'i') } catch (e) {
+        throw new Error(`正则语法错误：${String((e as Error)?.message ?? e).slice(0, 120)}`)
+      }
+    } else {
+      terms = q.split(/\s+/).filter(Boolean)
+      if (terms.length === 0) throw new Error('缺少关键词 query')
+    }
     const root = vaultRootPath()
     const files: string[] = []
     const budget: SearchBudget = { count: 0, truncated: false, skippedLarge: 0 }
-    walkAiFiles(root, root, files, budget)
-    // §6.4：命中都是小对象，全量收集后切片才能给出真实 hasMore
-    const allHits: Array<{ relPath: string; excerpt: string; size: number }> = []
+    walkAiFiles(root, root, files, budget, { includeIgnored })
+    const allHits: Array<{
+      relPath: string
+      size: number
+      excerpt: string
+      matches: Array<{ line: number; column: number; text: string; before?: string[]; after?: string[] }>
+    }> = []
     for (const f of files) {
       let text = ''
       try { text = readFileSync(f, 'utf-8') } catch { continue }
-      const lower = text.toLowerCase()
-      if (!terms.every(t => lower.includes(t.toLowerCase()))) continue
+      if (text.includes('\u0000')) continue // 伪文本（扩展名像文本但内容二进制）
       const relPath = vaultRelParts(root, f).join('/')
       if (!inScope(relPath)) continue
+      if (globPat && !matchesFindPattern({ rel: relPath, type: 'file' }, globPat)) continue
+      const lines = text.split('\n')
+      const matches: Array<{ line: number; column: number; text: string; before?: string[]; after?: string[] }> = []
+      for (let i = 0; i < lines.length && matches.length < 5; i++) {
+        const raw = lines[i].replace(/\r$/, '')
+        let column = -1
+        if (re) {
+          const m = re.exec(raw)
+          if (m) column = m.index + 1
+        } else {
+          const lower = raw.toLowerCase()
+          let at = -1
+          let ok = true
+          for (const t of terms) {
+            const hit = lower.indexOf(t.toLowerCase())
+            if (hit < 0) { ok = false; break }
+            if (at < 0 || hit < at) at = hit
+          }
+          if (ok) column = at + 1
+        }
+        if (column < 0) continue
+        const entry: { line: number; column: number; text: string; before?: string[]; after?: string[] } = {
+          line: i + 1,
+          column,
+          text: raw.length > 240 ? `${raw.slice(0, 240)}…` : raw,
+        }
+        if (contextLines > 0) {
+          const from = Math.max(0, i - contextLines)
+          const to = Math.min(lines.length, i + contextLines + 1)
+          entry.before = lines.slice(from, i).map((l) => l.replace(/\r$/, ''))
+          entry.after = lines.slice(i + 1, to).map((l) => l.replace(/\r$/, ''))
+        }
+        matches.push(entry)
+      }
+      if (matches.length === 0) continue
       allHits.push({
         relPath,
-        excerpt: buildExcerpt(text.replace(/\s+/g, ' '), terms) || text.replace(/\s+/g, ' ').slice(0, 100),
         size: text.length,
+        excerpt: buildExcerpt(text.replace(/\s+/g, ' '), re ? [q] : terms) || text.replace(/\s+/g, ' ').slice(0, 100),
+        matches,
       })
     }
     const hits = allHits.slice(offset, offset + limit)
     return {
       query: q,
+      regex: re ? true : undefined,
+      glob: globPat || undefined,
       total: allHits.length,
       offset,
       hasMore: offset + hits.length < allHits.length,
@@ -2493,14 +2851,15 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.write',
     title: '写入仓库文件',
-    description: '新建/覆写仓库内 .md/.txt（原子写；覆写需带 vault.read 的 expectedMtimeMs）。小改动优先 vault.edit。教材 / 知识库正文建议传 ensureId:true，落盘时自动补稳定 frontmatter id（已有 id 原样保留）；内容格式可先 vault.read 一个既有 .md 参考',
+    description: '新建/覆写仓库内任意文本文件（md/txt、代码、json/yml/toml 等，受本仓库 AI 文件策略约束；原子写，覆写需带 vault.read 的 expectedMtimeMs）。小改动优先 vault.edit。沿用原文件编码/BOM/换行与权限位；非 UTF-8 文件需显式传 encoding。.md 建议 ensureId:true 自动补稳定 frontmatter id；锁文件（package-lock.json 等）不要手改',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '仓库内相对文件路径（父目录须已存在或为已读目录）' },
-        content: { type: 'string', description: '完整文件内容（Markdown）' },
+        path: { type: 'string', description: '仓库内相对文件路径（父目录不存在会自动创建）' },
+        content: { type: 'string', description: '完整文件内容' },
         expectedMtimeMs: { type: 'number', description: '覆写已存在文件时的 mtime 基线（来自 vault.read），省略则不做冲突校验' },
-        ensureId: { type: 'boolean', description: 'true=若为 .md，落盘前自动补 frontmatter id（知识页稳定身份）；教材 / 知识库正文建议 true' },
+        ensureId: { type: 'boolean', description: 'true=若为 .md，落盘前自动补 frontmatter id（知识页稳定身份）' },
+        encoding: { type: 'string', enum: ['utf-8', 'utf-16le', 'utf-16be'], description: '显式编码（默认沿用原文件；非 UTF-8 文件必须传，否则拒写）' },
       },
       required: ['path', 'content'],
     },
@@ -2525,21 +2884,48 @@ export function registerBuiltinTools(): void {
     const content = wantId
       ? ensureKnowledgeDocFrontmatter(baseNameOf(rel).replace(/\.md$/i, ''), str(args.content))
       : str(args.content)
-    if (content.length > 2_000_000) throw new Error('内容过大（>2MB），拒绝写入')
+    if (content.includes('\u0000')) throw new Error('内容含 NUL 字符，拒绝写入')
     assertCanWrite(rel, ctx)
     const root = vaultRootPath()
     const abs = resolveSafe(root, rel)
     if (!abs) throw new Error(`路径非法或越出仓库: ${rel}`)
-    if (content.includes('\u0000')) throw new Error('内容含 NUL 字符，拒绝写入')
-    let existing = false
-    try { existing = statSync(abs).isFile() } catch { /* 新建 */ }
-    assertAiWritable(root, abs, existing ? args.expectedMtimeMs : null)
-    const prev = existing ? readFileSync(abs, 'utf-8') : null
-    return commitOrStage(ctx, () => ({ kind: 'write', relPath: rel, prev, next: content }), () => {
+    const explicit = normalizeEncodingArg(args.encoding)
+    const sizeProbe = Buffer.byteLength(content, 'utf8')
+    assertAiWritable(root, abs, args.expectedMtimeMs, sizeProbe)
+
+    // 读原文件（解码失败 = 非 UTF-8）：此时必须由调用方显式指定 encoding 才能写回，绝不猜
+    let existingBuf: Buffer | null = null
+    let mode: number | null = null
+    try {
+      const st = statSync(abs)
+      if (st.isFile()) { existingBuf = readFileSync(abs); mode = st.mode & 0o777 }
+    } catch { /* 新建 */ }
+    const existing = existingBuf !== null
+    let prev: string | null = null
+    let codec: FileCodecMeta = {
+      encoding: explicit === 'gbk' || explicit === undefined ? 'utf-8' : explicit,
+      bom: false,
+      eol: detectEol(content).eol,
+      mode,
+    }
+    if (existingBuf) {
+      const dec = decodeTextFile(existingBuf, { encoding: explicit })
+      if (!dec.ok) throw new Error(`${dec.error}: ${rel}`)
+      if (dec.encoding === 'gbk') throw new Error(`该文件是 GBK 编码，可读但当前版本不支持写回；请先另存为 UTF-8: ${rel}`)
+      prev = dec.text
+      codec = { encoding: dec.encoding, bom: dec.bom, eol: dec.eol, mode }
+    }
+    return commitOrStage(ctx, () => ({ kind: 'write', relPath: rel, prev, next: content, codec }), () => {
       if (!existing) {
         try { mkdirSync(dirname(abs), { recursive: true }) } catch { /* 目录已存在 */ }
       }
-      writeWorkspaceFile(abs, content)
+      writeWorkspaceFile(abs, content, {
+        encoding: codec.encoding,
+        bom: codec.bom,
+        eol: codec.eol,
+        relPath: rel,
+        mode: codec.mode,
+      })
       if (rel.toLowerCase().endsWith('.md')) {
         invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 与 ws:writeFile 同规则：.md 落盘即失效，知识列表/图谱立即可见
         broadcastDataChanged('knowledge') // v3.1.2 条目9：对齐 knowledge.create-page 口径，带 frontmatter 的页即时进列表
@@ -2562,7 +2948,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.edit',
     title: '编辑文件片段',
-    description: '两种模式：① 替换（默认）在仓库内 .md/.txt 中做一次精确替换（oldText 必须唯一命中；newText 空串即删除片段，可解除 [[双链]]）；② 追加（append=true）把 newText 追加到文件末尾。改动局部内容请用本工具而非 vault.write。需带 vault.read 返回的 expectedMtimeMs 防冲突',
+    description: '两种模式：① 替换（默认）在仓库内文本文件中做一次精确替换（oldText 必须唯一命中；newText 空串即删除片段，可解除 [[双链]]）；② 追加（append=true）把 newText 追加到文件末尾。改动局部内容请用本工具而非 vault.write。需带 vault.read 返回的 expectedMtimeMs 防冲突；非 UTF-8 文件需显式传 encoding',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2571,6 +2957,7 @@ export function registerBuiltinTools(): void {
         newText: { type: 'string', description: '替换后的文本；替换模式下空串即删除片段（如解除 [[双链]] 引用）；append 模式下为要追加的内容', allowEmpty: true },
         append: { type: 'boolean', description: 'true=在文件末尾追加 newText（忽略 oldText；追加前自动去掉文末多余空行）' },
         expectedMtimeMs: { type: 'number', description: 'mtime 基线（来自 vault.read）' },
+        encoding: { type: 'string', enum: ['utf-8', 'utf-16le', 'utf-16be'], description: '显式编码（默认沿用原文件；非 UTF-8 文件必须传）' },
       },
       required: ['path', 'newText'],
     },
@@ -2599,8 +2986,13 @@ export function registerBuiltinTools(): void {
     let st: ReturnType<typeof statSync>
     try { st = statSync(abs) } catch { throw new Error(`文件不存在: ${rel}`) }
     if (!st.isFile()) throw new Error('vault.edit 只接受文件路径')
-    assertAiWritable(root, abs, args.expectedMtimeMs)
-    const text = readFileSync(abs, 'utf-8')
+    const explicit = normalizeEncodingArg(args.encoding)
+    assertAiWritable(root, abs, args.expectedMtimeMs, Buffer.byteLength(newText, 'utf8'))
+    const buf = readFileSync(abs)
+    const dec = decodeTextFile(buf, { encoding: explicit })
+    if (!dec.ok) throw new Error(`${dec.error}: ${rel}`)
+    if (dec.encoding === 'gbk') throw new Error(`该文件是 GBK 编码，可读但当前版本不支持写回；请先另存为 UTF-8: ${rel}`)
+    const text = dec.text
     let next: string
     if (append) {
       // 原 knowledge.append-page 语义：文末多余空行归一后换行追加
@@ -2611,8 +3003,15 @@ export function registerBuiltinTools(): void {
       if (text.indexOf(oldText, first + oldText.length) >= 0) throw new Error('待替换片段在文件中出现多处，请提供更长更精确的 oldText（本工具一次只替换一处）')
       next = text.slice(0, first) + newText + text.slice(first + oldText.length)
     }
-    return commitOrStage(ctx, () => ({ kind: 'edit', relPath: rel, prev: text, next }), () => {
-      writeWorkspaceFile(abs, next)
+    const codec: FileCodecMeta = { encoding: dec.encoding, bom: dec.bom, eol: dec.eol, mode: st.mode & 0o777 }
+    return commitOrStage(ctx, () => ({ kind: 'edit', relPath: rel, prev: text, next, codec }), () => {
+      writeWorkspaceFile(abs, next, {
+        encoding: codec.encoding,
+        bom: codec.bom,
+        eol: codec.eol,
+        relPath: rel,
+        mode: codec.mode,
+      })
       if (rel.toLowerCase().endsWith('.md')) {
         invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 同上：edit 后索引/图谱同步刷新
         broadcastDataChanged('knowledge') // v3.1.2 条目9：知识库列表/图谱同步重读
@@ -2674,16 +3073,16 @@ export function registerBuiltinTools(): void {
 
   // ===== vault.* 高危整理工具（B3/F3）：rename/trash 走回收站语义，全程审计 =====
 
-  // 20. builtin.vault.rename —— 重命名/移动 .md/.txt（跨目录；目标已存在拒绝）
+  // 20. builtin.vault.rename —— 重命名/移动文件或目录（目标已存在文件拒绝）
   registerTool({
     name: 'builtin.vault.rename',
-    title: '重命名/移动仓库文件',
-    description: '重命名或移动仓库内 .md/.txt 文件（同 ws:rename 语义）。若 newPath 是已存在目录则移入该目录；否则按新文件名改名。危险操作：全程审计且不可自动回滚（回收站可恢复需先 trash）',
+    title: '重命名/移动仓库文件或目录',
+    description: '重命名或移动仓库内文件或目录（同 ws:rename 语义）。若 newPath 是已存在目录则移入该目录；否则按新路径改名。目录改名会保住知识库分类类型（space/notebook）。危险操作：全程审计，确认模式可回滚',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '当前仓库内相对文件路径' },
-        newPath: { type: 'string', description: '目标：新相对路径（含新文件名），或已存在目录（表示移入）' },
+        path: { type: 'string', description: '当前仓库内相对路径（文件或目录）' },
+        newPath: { type: 'string', description: '目标：新相对路径（含新名字），或已存在目录（表示移入）' },
       },
       required: ['path', 'newPath'],
     },
@@ -2707,32 +3106,53 @@ export function registerBuiltinTools(): void {
     if (!oldAbs) throw new Error(`源路径非法或越出仓库: ${rel}`)
     const newAbs = resolveSafe(root, newRel)
     if (!newAbs) throw new Error(`目标路径非法或越出仓库: ${newRel}`)
-    // 源必须是普通区 .md/.txt（目录或 .knowbase 内一律不开放 AI rename）
-    if (!isAiWritableFile(root, oldAbs)) throw new Error('仅可重命名/移动仓库内普通 .md/.txt 文件（.knowbase 内部数据禁动）')
-    let targetIsDir = false
-    try { targetIsDir = statSync(newAbs).isDirectory() } catch { /* 目标不存在=改名 */ }
+    const oldKind = statKind(oldAbs)
+    if (oldKind === 'none') throw new Error(`源不存在: ${rel}`)
+    if (oldKind === 'dir') assertAiDirWritable(root, rel)
+    else assertPolicyWritable(root, oldAbs)
+
+    let targetIsDir = statKind(newAbs) === 'dir'
     let finalNewRel = newRel
     if (targetIsDir) {
-      // 移入目录：保持文件名
+      // 移入目录：保持名字
       finalNewRel = join(relative(root, newAbs), baseNameOf(rel)).replace(/\\/g, '/')
       if (!finalNewRel) throw new Error('目标目录与源在同一位置')
-    } else {
-      // 改名/移动到新文件名：目标也须普通区 .md/.txt
-      const probe = newAbs
-      if (!isAiWritableFile(root, probe)) throw new Error('目标须为仓库内普通 .md/.txt 路径')
     }
+    if (finalNewRel === rel) throw new Error('源与目标相同')
+    if (isWelcomeDocRel(rel) || isWelcomeDocRel(finalNewRel)) throw new Error('欢迎页只能原地编辑，不能改名或移动')
+    // 目录不能搬进自己的子树（会成环 / 丢文件）
+    if (oldKind === 'dir' && finalNewRel.startsWith(`${rel}/`)) throw new Error('不能把目录移动到它自己的子目录里')
     const finalAbs = resolveSafe(root, finalNewRel)
     if (!finalAbs) throw new Error('目标路径非法')
+    if (statKind(finalAbs) !== 'none') throw new Error(`目标已存在: ${finalNewRel}`)
     assertCanWrite(finalNewRel, ctx)
+    if (oldKind === 'dir') assertAiDirWritable(root, finalNewRel)
+    else assertPolicyWritable(root, finalAbs)
+
     const rootId = getCurrentVault()?.rootId
     if (!rootId) throw new Error('仓库上下文未就绪')
+
+    // 目录纯改名（同父级）：走分类通道，保住 space / notebook 类型与排序
+    const parentOf = (p: string): string => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i) }
+    const sameParent = parentOf(rel) === parentOf(finalNewRel)
+    const cat = oldKind === 'dir' && sameParent ? findCategoryByPath(rel) : null
+
     return commitOrStage(ctx, () => ({ kind: 'rename', relPath: rel, to: finalNewRel }), () => {
       try { mkdirSync(dirname(finalAbs), { recursive: true }) } catch { /* 目录已存在 */ }
-      renameWorkspacePath(rootId, rel, finalNewRel)
+      if (cat) {
+        try {
+          vaultRenameCategory(cat.id, baseNameOf(finalNewRel))
+        } catch {
+          // 分类通道失败（例如索引未就绪）→ 退回普通重命名，至少文件系统状态正确
+          renameWorkspacePath(rootId, rel, finalNewRel)
+        }
+      } else {
+        renameWorkspacePath(rootId, rel, finalNewRel)
+      }
       // v3.1.2 条目9：rename/trash 此前连 external-change 都不发；这里补树刷新（源 + 目标父目录）
-      if (finalNewRel.toLowerCase().endsWith('.md') || rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+      if (oldKind === 'dir' || finalNewRel.toLowerCase().endsWith('.md') || rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
       notifyVaultTreeChange(finalNewRel, rel)
-      return { ok: true, from: rel, to: finalNewRel }
+      return { ok: true, from: rel, to: finalNewRel, kind: oldKind }
     })
   })
 
@@ -2741,7 +3161,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.move',
     title: '批量移动/重命名仓库文件',
-    description: '一次移动或重命名多个仓库内 .md/.txt 文件（最多 100 条）。先全量校验再暂存为一条变更；目标已存在、路径非法、越界、隐藏目录、AI 教学目录会整批拒绝。',
+    description: '一次移动或重命名多个仓库内文件 / 目录（最多 100 条，受 AI 文件策略限制）。先全量校验再暂存为一条变更；目标已存在、路径非法、越界、隐藏目录、AI 教学目录、目录搬进自身子树会整批拒绝。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2752,8 +3172,8 @@ export function registerBuiltinTools(): void {
           items: {
             type: 'object',
             properties: {
-              from: { type: 'string', description: '源文件相对路径' },
-              to: { type: 'string', description: '目标：已存在目录（移入并保留文件名）或新的 .md/.txt 路径' },
+              from: { type: 'string', description: '源文件 / 目录相对路径' },
+              to: { type: 'string', description: '目标：已存在目录（移入并保留名字）或新的相对路径' },
             },
             required: ['from', 'to'],
           },
@@ -2790,16 +3210,25 @@ export function registerBuiltinTools(): void {
         try { statSync(abs); return true } catch { return false }
       },
     }
-    const pre = preflightMoves((args as Record<string, unknown>).moves, moveProbe, { protectedRoots: [teachRoot] })
+    const pre = preflightMoves((args as Record<string, unknown>).moves, moveProbe, {
+      protectedRoots: [teachRoot],
+      allowDirs: true,
+      // P0-A：从「写死 .md/.txt」改为策略判定；目录只看路径语义
+      allowSource: (rel, kind) => {
+        if (kind === 'dir') return evaluateAiDir(rel, aiPolicy()).allow
+        const abs = absOfRel(rel)
+        return !!abs && evaluateAiFile({ rel, op: 'write', size: undefined }, aiPolicy()).allow
+      },
+      allowTarget: (rel, kind) => kind === 'dir'
+        ? evaluateAiDir(rel, aiPolicy()).allow
+        : evaluateAiFile({ rel, op: 'write', size: undefined }, aiPolicy()).allow,
+    })
     if (!pre.ok) throw new Error(`批量移动未执行：${formatMoveConflicts(pre.conflicts)}`)
-    // 作用域 / 可写性：整批逐条校验，任一越界都整批拒绝（与单文件 rename 同口径）
+    // 作用域：整批逐条校验，任一越界都整批拒绝（与单文件 rename 同口径）
     for (const m of pre.moves) {
       assertCanWrite(m.from, ctx)
       assertCanWrite(m.to, ctx)
-      const fromAbs = absOfRel(m.from)
-      const toAbs = absOfRel(m.to)
-      if (!fromAbs || !isAiWritableFile(root, fromAbs)) throw new Error(`不可移动（源不在普通区）: ${m.from}`)
-      if (!toAbs || !isAiWritableFile(root, toAbs)) throw new Error(`不可写入（目标不在普通区）: ${m.to}`)
+      if (isWelcomeDocRel(m.from) || isWelcomeDocRel(m.to)) throw new Error('欢迎页只能原地编辑，不能改名或移动')
     }
     const moves = pre.moves
     const summary = summarizeMoves(moves)
@@ -2822,11 +3251,12 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.trash',
     title: '移入回收站',
-    description: '把仓库内 .md/.txt 移入系统回收站（可恢复，非永久删除）。危险操作：全程审计；执行前确认用户明确要求删除该文件',
+    description: '把仓库内文件或目录移入系统回收站（可恢复，非永久删除）。目录必须显式 recursive:true，返回删除清单（目录删除不可自动回滚）。拒绝仓库根、AI 教学目录、SOURCES、隐藏目录。执行前确认用户明确要求删除',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '仓库内相对文件路径' },
+        path: { type: 'string', description: '仓库内相对路径（文件或目录）' },
+        recursive: { type: 'boolean', description: '删除目录时必须为 true（防误删整棵树）' },
       },
       required: ['path'],
     },
@@ -2843,20 +3273,49 @@ export function registerBuiltinTools(): void {
     const root = vaultRootPath()
     const abs = resolveSafe(root, rel)
     if (!abs) throw new Error(`路径非法或越出仓库: ${rel}`)
-    if (!isAiWritableFile(root, abs)) throw new Error('仅可移入回收站普通区 .md/.txt 文件（.knowbase 内部数据禁动）')
-    let isFile = false
-    try { isFile = statSync(abs).isFile() } catch { throw new Error(`文件不存在: ${rel}`) }
-    if (!isFile) throw new Error('vault.trash 仅支持文件（目录整理请用编辑器）')
+    const kind = statKind(abs)
+    if (kind === 'none') throw new Error(`路径不存在: ${rel}`)
+    if (isWelcomeDocRel(rel)) throw new Error('欢迎页只能原地编辑，不能删除')
     const rootId = getCurrentVault()?.rootId
     if (!rootId) throw new Error('仓库上下文未就绪')
-    const prev = readFileSync(abs, 'utf-8')
-    return commitOrStage(ctx, () => ({ kind: 'trash', relPath: rel, prev }), async () => {
-      await trashWorkspacePath(rootId, rel)
-      // v3.1.2 条目9：删除后编辑区树与知识库同步（此前无任何广播，文件树上条目还在）
-      if (rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
-      notifyVaultTreeChange(rel)
-      return { ok: true, trashed: rel }
-    })
+
+    // 受保护根：仓库根 / AI 教学根 / 任意位置的 SOURCES 子树
+    const segs = rel.replace(/\\/g, '/').split('/').filter(Boolean)
+    const teachRoot = String(getSettingReader()('aiTeachRootDir') || 'AI教学').trim() || 'AI教学'
+    if (rel === '.' || segs.length === 0) throw new Error('不能删除仓库根目录')
+    if (segs.some((s) => s.toUpperCase() === 'SOURCES')) throw new Error('SOURCES/ 是只读素材目录，禁止删除')
+    if (segs[0] === teachRoot) throw new Error(`AI 教学目录受保护，请用 AI 教学的整理入口: ${rel}`)
+
+    if (kind === 'file') {
+      assertPolicyWritable(root, abs)
+      // 仅在确认模式（需要回滚预览）才解码读全文：直接执行删一个 GBK 文件不该被编码问题挡住
+      let prev = ''
+      if (isPropose(ctx)) {
+        const dec = decodeTextFile(readFileSync(abs))
+        if (!dec.ok) throw new Error(`${dec.error}：无法在确认模式下预览回滚，请用「直接执行」或先转成 UTF-8: ${rel}`)
+        prev = dec.text
+      }
+      return commitOrStage(ctx, () => ({ kind: 'trash', relPath: rel, prev }), async () => {
+        await trashWorkspacePath(rootId, rel)
+        // v3.1.2 条目9：删除后编辑区树与知识库同步（此前无任何广播，文件树上条目还在）
+        if (rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+        notifyVaultTreeChange(rel)
+        return { ok: true, trashed: rel, kind: 'file' }
+      })
+    }
+
+    // 目录：必须显式 recursive，且提前给出清单（用户在确认卡上才知道要删多少）
+    if (args.recursive !== true) throw new Error('删除目录必须显式传 recursive:true（会整棵移入回收站）')
+    assertAiDirWritable(root, rel)
+    const stat = dirTrashManifest(root, rel)
+    if (stat.tooLarge) throw new Error(`目录条目过多（>${DIR_TRASH_MAX_ENTRIES}），请分批整理或在编辑器中操作: ${rel}`)
+    const summary = `删除目录 ${rel}（${stat.files} 个文件 / ${stat.pages} 个知识页，不可自动回滚）`
+    const staged = stageToolOp(ctx, { tool: 'builtin.vault.trash', args, summary })
+    if (staged) return staged
+    await trashWorkspacePath(rootId, rel)
+    broadcastDataChanged('knowledge')
+    notifyVaultTreeChange(rel)
+    return { ok: true, trashed: rel, kind: 'dir', files: stat.files, pages: stat.pages, sample: stat.sample, irreversible: true }
   })
 
   // ===== web.read：通读 https 网页正文（场景 B「吃资料」，跨模块通用，不设 module） =====

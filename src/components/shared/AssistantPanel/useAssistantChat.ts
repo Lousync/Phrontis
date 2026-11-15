@@ -305,7 +305,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   // 统一助手：文件作用域 / 写入策略 / 变更方案 / 会话级模型与思考强度
   const [scope, setScopeState] = useState<string[]>([])
   const [scopeAll, setScopeAllState] = useState(true)
-  const [writeMode, setWriteModeState] = useState<'direct' | 'confirm'>('direct')
+  const [writeMode, setWriteModeState] = useState<'direct' | 'confirm'>('confirm')
   const [plan, setPlan] = useState<AiChangePlan | null>(null)
   const [usage, setUsage] = useState<{ in: number; out: number }>({ in: 0, out: 0 })
   const activeSession = sessions.find(s => s.id === activeId) ?? null
@@ -366,7 +366,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     if (!activeId) {
       setScopeState([])
       setScopeAllState(true)
-      setWriteModeState('direct')
+      // P0-A（v3.31.0）：新会话默认「先预览」—— 可写面扩到全部文本文件后，直接执行的风险收益不成比例
+      setWriteModeState('confirm')
       setPlan(null)
       setUsage({ in: 0, out: 0 })
       return
@@ -651,7 +652,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const hadActive = !!prevSid
     const targetScopeAll = hadActive ? true : scopeAll
     const targetScope = targetScopeAll ? [] : scope
-    const targetWriteMode = hadActive ? 'direct' : writeMode
+    const targetWriteMode = hadActive ? 'confirm' : writeMode
     const targetModelId = hadActive ? '' : modelId
     const targetEffort = hadActive ? undefined : effort
     const sRow = await newAgentSession(title, sessionSource)

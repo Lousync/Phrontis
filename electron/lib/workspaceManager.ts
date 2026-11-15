@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron'
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, openSync, readSync, closeSync } from 'fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, openSync, readSync, closeSync, chmodSync } from 'fs'
 import { basename, join, relative, resolve, sep, extname, dirname, isAbsolute } from 'path'
 import { cp } from 'fs/promises'
 import { randomUUID } from 'crypto'
@@ -17,10 +17,11 @@ import { dedupeVaultRows, upsertVaultRow } from '../../src/lib/vaultRegistryPure
 import { broadcastDataChanged } from '../main/windowBus'
 import { adoptLegacyAgentSessionsToVault } from './agentSessionRepo'
 import { resolveVaultId, migrateVaultIdentity } from 'phrontis-core/kbStore/vaultIdentity'
-import { syncVaultWatcher, markSelfWrite } from './fsWatcher'
+import { syncVaultWatcher, markSelfWrite, markSelfWriteTree } from './fsWatcher'
 import { bookMetaPruneOrphans } from 'phrontis-core/kbStore/vaultBookMetaRepo'
 import { globalReadJson, globalWriteJson } from 'phrontis-core/globalJsonStore'
 import { isAllowedClearRoot, trashVaultFolder } from './vaultDelete'
+import { encodeTextFile } from './textFileCodecPure'
 import { rootDirName } from './aiTeachingFolders'
 import { writeClipboardFilePaths } from './clipboardFiles'
 
@@ -365,7 +366,20 @@ export function detectConflict(absPath: string, expectedMtimeMs: number | null |
 }
 
 /** 原子写：临时文件 + rename 覆盖（对标数据库写盘策略，防半写损坏） */
-export function writeWorkspaceFile(absPath: string, content: string): void {
+export interface WriteWorkspaceFileOptions {
+  /** 文本编码（缺省 utf-8）；UTF-16 由 codec 负责 BOM 与字节序 */
+  encoding?: 'utf-8' | 'utf-16le' | 'utf-16be'
+  /** UTF-8 是否带 BOM（沿用原文件） */
+  bom?: boolean
+  /** 目标换行符（沿用原文件；.bat/.cmd 由 codec 强制 CRLF） */
+  eol?: '\n' | '\r\n'
+  /** 仓库相对路径（判 .bat/.cmd 用；缺省按绝对路径判断） */
+  relPath?: string
+  /** 原子写后恢复的 POSIX 权限位（Windows no-op） */
+  mode?: number | null
+}
+
+export function writeWorkspaceFile(absPath: string, content: string, opts: WriteWorkspaceFileOptions = {}): void {
   // v3.2.0 条目 ④：落盘前登记「这条路径的变更出我自己」——fsWatcher 命中即跳过，
   // 否则应用内保存会被监听器当成外部修改，弹「文件已被外部修改」冲突三选（自打自脸）
   markSelfWrite(absPath)
@@ -376,16 +390,36 @@ export function writeWorkspaceFile(absPath: string, content: string): void {
   if (isMobileNoteAbsPath(absPath)) {
     finalContent = bumpNoteFrontmatterUpdated(content, new Date().toISOString())
   }
-  const real = absPath
-  const tmp = join(real, `..`, `.kb-tmp-${randomUUID()}`)
+  // P0-A §3.2：编码 / 换行 / BOM 保真。编码失败直接抛（不静默写成乱码）
+  const enc = encodeTextFile(finalContent, {
+    encoding: opts.encoding,
+    bom: opts.bom,
+    eol: opts.eol,
+    relPath: opts.relPath ?? absPath,
+  })
+  if (!enc.ok) throw new Error(enc.error)
+  writeWorkspaceFileBuffer(absPath, enc.buffer, opts.mode)
+}
+
+/**
+ * 原子写入原始字节（临时文件 + rename，rename 后恢复 mode）。
+ * AI 写路径在 codec 编码之后走这里；普通文本仍走 `writeWorkspaceFile`。
+ */
+export function writeWorkspaceFileBuffer(absPath: string, data: Uint8Array, mode?: number | null): void {
+  markSelfWrite(absPath)
+  const tmp = join(absPath, `..`, `.kb-tmp-${randomUUID()}`)
   try {
-    writeFileSync(tmp, finalContent, 'utf-8')
+    writeFileSync(tmp, data)
     try {
-      renameSync(tmp, real)
+      renameSync(tmp, absPath)
     } catch {
       // Windows 目标被占用/已存在时：先移除目标再改名
-      if (existsSync(real)) unlinkSync(real)
-      renameSync(tmp, real)
+      if (existsSync(absPath)) unlinkSync(absPath)
+      renameSync(tmp, absPath)
+    }
+    // rename 之后临时文件权限（默认 0666 & umask）会替换原文件权限 → 恢复可执行位等
+    if (mode != null && process.platform !== 'win32') {
+      try { chmodSync(absPath, mode) } catch { /* 权限恢复失败不影响内容 */ }
     }
   } finally {
     try {
@@ -775,6 +809,9 @@ export function renameWorkspacePath(rootId: string, oldRel: string, newRel: stri
   // 正在编辑的文件会误弹三选）；新旧两条路径都登记
   markSelfWrite(from)
   markSelfWrite(to)
+  try {
+    if (statSync(from).isDirectory()) { markSelfWriteTree(from); markSelfWriteTree(to) }
+  } catch { /* 源已不可读时照旧走 rename，由 renameSync 报错 */ }
   renameSync(from, to)
   invalidateIndexIfCurrentVault(rootId)
 }
@@ -786,6 +823,9 @@ export async function trashWorkspacePath(rootId: string, relPath: string): Promi
   // v3.2.0 条目 ④：应用内删除登记自写（正被编辑的文件由编辑器自己关闭标签，
   // 不该再走「文件已在磁盘上被删除」三选——那是给外部删除准备的）
   markSelfWrite(abs)
+  try {
+    if (statSync(abs).isDirectory()) markSelfWriteTree(abs)
+  } catch { /* 已不存在时由 trash 报错 */ }
   const trash = (await import('trash')).default
   await trash([abs])
   invalidateIndexIfCurrentVault(rootId)

@@ -279,6 +279,13 @@ const api = {
   aiToolsInvoke: (name: string, args?: unknown) => ipcRenderer.invoke('aiTools:invoke', name, args),
   aiToolsGetUsage: () => ipcRenderer.invoke('aiTools:getUsage'),
   aiToolsGetRecentAudit: (limit?: number) => ipcRenderer.invoke('aiTools:getRecentAudit', limit),
+  // 工作区信任 + AI 文件策略（P0-A/B）
+  aiTrustGet: () => ipcRenderer.invoke('aiTrust:get'),
+  aiTrustSet: (patch: unknown) => ipcRenderer.invoke('aiTrust:set', patch),
+  aiTrustRevoke: () => ipcRenderer.invoke('aiTrust:revoke'),
+  aiPolicyGet: () => ipcRenderer.invoke('aiPolicy:get'),
+  aiPolicySet: (patch: unknown) => ipcRenderer.invoke('aiPolicy:set', patch),
+  aiPermissionGet: () => ipcRenderer.invoke('aiPermission:get'),
   // MCP servers
   mcpListServers: () => ipcRenderer.invoke('mcp:listServers'),
   mcpAddServer: (draft: unknown) => ipcRenderer.invoke('mcp:addServer', draft),

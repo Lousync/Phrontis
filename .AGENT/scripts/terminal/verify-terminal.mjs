@@ -68,11 +68,15 @@ check('builtinTools: builtin.terminal.exec 注册', tools.includes("name: 'built
 check('builtinTools: ondemand / requires write / module terminal', /builtin\.terminal\.exec[\s\S]{0,900}?tier: 'ondemand'/.test(tools)
   && /builtin\.terminal\.exec[\s\S]{0,900}?requires: 'write'/.test(tools)
   && /builtin\.terminal\.exec[\s\S]{0,900}?module: 'terminal'/.test(tools))
-check('builtinTools: tool.request 清单补 terminal.exec', tools.includes('booksource.draft / terminal.exec'))
+check('builtinTools: 按需工具走 tool.list（清单不再硬编码）',
+  tools.includes("name: 'builtin.tool.list'") && tools.includes('先调 builtin.tool.list'))
 check('builtinTools: handler 侧设置兜底', /builtin\.terminal\.exec[\s\S]{0,1600}?terminal\.aiExec/.test(tools))
 
 const agent = read('electron/lib/agentService.ts')
-check('agentService: terminalAiExec 关 = 不进视野', agent.includes("t.module === 'terminal' && reader('terminal.aiExec') !== true"))
+// v3.31.0（P0-B）：终端可用性 = 工作区信任 allow 或（未表态 且 aiExec 开）；信任只决定「能不能用」，
+// 每条命令仍逐条确认。旧断言只认 aiExec，已随三层权限模型更新。
+check('agentService: 终端工具受工作区信任 + aiExec 双门控',
+  agent.includes("trust.shellExec === 'allow'") && agent.includes("trust.shellExec === null && reader('terminal.aiExec') === true"))
 
 // ===== A4 设置 =====
 const settings = read('src/lib/settings.ts')

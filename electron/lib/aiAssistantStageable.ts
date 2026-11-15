@@ -49,6 +49,9 @@ export function isHandlerStagedTool(name: string): boolean {
 }
 
 export function isStageableWriteTool(name: string): boolean {
+  // P0-D：MCP 工具按 mcp. 前缀纳入通用暂存（kind='tool' 重放）——
+  // 否则外部写工具在「先预览」下直接消失，模型会以为服务器坏了。
+  if (name.startsWith('mcp.')) return true
   return isHandlerStagedTool(name) || STAGEABLE_WRITE_TOOLS.has(name)
 }
 
