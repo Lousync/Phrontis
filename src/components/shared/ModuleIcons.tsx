@@ -1,6 +1,7 @@
 import React from 'react'
 import { useSettings } from '../../lib/SettingsContext'
 import { useSidebarIconNode, type IconModuleId } from '../../lib/sidebarIcons'
+import { DashboardShape, WorkbenchShape } from '../../lib/railIconShapes'
 
 /**
  * 统一风格的手绘模块图标（24px 视口、圆角描边）。
@@ -188,6 +189,27 @@ function AiTeachingIconHandDrawn(props: IconProps) {
   )
 }
 
+/** 看板：首页五控件的缩略图（左列上长下短 + 右列三叠）。
+ *
+ *  几何与取舍写在 `src/lib/railIconShapes.tsx`（手绘包与经典细线包共用同一套形状，
+ *  只差笔宽与圆角；那里也记着「右列画到 33% 宽」「不加外框」两条刻意的失真）。 */
+function DashboardIconHandDrawn(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <DashboardShape />
+    </Svg>
+  )
+}
+
+/** 工作台：三栏外壳的缩略 —— 左侧竖带（书签 / 文件树）+ 正文三行。几何同样在 `railIconShapes.tsx`。 */
+function WorkbenchIconHandDrawn(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <WorkbenchShape />
+    </Svg>
+  )
+}
+
 /** 编辑器：尖括号代码图标（VS Code 风格） */
 function EditorIconHandDrawn(props: IconProps) {
   return (
@@ -275,6 +297,8 @@ const HAND_DRAWN: Record<IconModuleId, (props: IconProps) => React.ReactElement>
   settings: SettingsIconHandDrawn,
   export: ExportIconHandDrawn,
   editor: EditorIconHandDrawn,
+  dashboard: DashboardIconHandDrawn,
+  workbench: WorkbenchIconHandDrawn,
 }
 
 export function BlogIcon(props: IconProps) { return <StyleAware moduleId="blog" Fallback={BlogIconHandDrawn} {...props} /> }
@@ -290,6 +314,9 @@ export function PluginIcon(props: IconProps) { return <StyleAware moduleId="plug
 export function BookMarketIcon(props: IconProps) { return <StyleAware moduleId="bookMarket" Fallback={BookMarketIconHandDrawn} {...props} /> }
 export function UsageIcon(props: IconProps) { return <StyleAware moduleId="usage" Fallback={UsageIconHandDrawn} {...props} /> }
 export function EditorIcon(props: IconProps) { return <StyleAware moduleId="editor" Fallback={EditorIconHandDrawn} {...props} /> }
+/** 看板 / 工作台：图标条顶部固定两枚（2026-11-14 之后按看板本体缩略重画，原型 tmp/rail-board-workbench-icons/board-v3.html） */
+export function DashboardIcon(props: IconProps) { return <StyleAware moduleId="dashboard" Fallback={DashboardIconHandDrawn} {...props} /> }
+export function WorkbenchIcon(props: IconProps) { return <StyleAware moduleId="workbench" Fallback={WorkbenchIconHandDrawn} {...props} /> }
 
 /** 任意包预览:设置→外观 的图标选择器用它渲染每个包的效果 */
 export function IconPreview({ moduleId, packId, size = 24, className }: { moduleId: IconModuleId; packId: string } & IconProps) {

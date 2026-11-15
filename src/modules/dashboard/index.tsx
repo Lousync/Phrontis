@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Pencil, Sparkles } from 'lucide-react'
-import { dashboardGetSnapshot, onAiTeachCourseRefresh, toggleHabitCheck } from '../../lib/ipc'
+import { dashboardGetSnapshot, llmGetQuota, onAiTeachCourseRefresh, toggleHabitCheck } from '../../lib/ipc'
 import { notifyDataChanged, useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
 import { showToast } from '../../lib/toast'
 import { burstConfetti, ensureFeedbackStyles } from '../../lib/confetti'
 import { ThemeFxLayer } from '../../components/shared/ThemeFxLayer'
-import type { DashboardSnapshot, TabName } from '../../types'
+import { VaultSwitcher } from '../../components/shared/VaultSwitcher'
+import type { DashboardSnapshot, ProviderQuotaView, TabName } from '../../types'
 import { MonthCalendar } from './MonthCalendar'
 import { DayTimeline } from './DayTimeline'
+import { HabitChips } from './HabitChips'
 import { UsageHeatmap } from './UsageHeatmap'
-import { AiCourseWindow, ReadingList, WorkbenchWindow } from './ModuleWindow'
+import { AiCourseWindow, AiUsageWindow, WorkbenchWindow } from './ModuleWindow'
 import { dateLine, orderTimeline, verdictParts } from './summary'
 
 /**
@@ -23,10 +25,11 @@ import { dateLine, orderTimeline, verdictParts } from './summary'
  * 版面（原型 `tmp/home-view-proto/index.html#e`）：
  *   一句话结论 + 左侧月历 / 右侧今天的时间线（打卡窄窗在时间轴下、宽窗转右列）
  *   → 近一年使用热力图
- *   → 右列：AI 教学窗口 / 工作台窗口 / 在读
+ *   → 右列：AI 教学窗口 / 工作台窗口 / AI 用量（第三张吃掉余高，右列底边与左列对齐）
  *
  * 数据：主进程一次聚合（`dashboard:getSnapshot`），任一相关域变化就整体重取 ——
  * 快照本身就是一次读，增量刷新没意义（见 database/repositories/dashboardRepo.ts）。
+ * 额度条例外：要联网，走 `llm:quota:get` 在快照之后单独拉，不拖首屏。
  */
 
 /** 一次取全量；任一相关域变化就重取 */
@@ -39,12 +42,10 @@ function useDashboardSnapshot(): DashboardSnapshot | null {
     })
   }, [])
   useEffect(() => { load() }, [load])
-  // 时间线 / 月历 / 打卡 / 热力图 / 在读 —— 任一域变化都要重取
+  // 时间线 / 月历 / 打卡 / 热力图 —— 任一域变化都要重取
   useDataChanged('schedule', load)
   useDataChanged('habit', load)
   useDataChanged('knowledge', load)
-  useDataChanged('pdfReader', load)
-  useDataChanged('readerState', load)
   useDataChanged('pomodoro', load)
   // AI 教学没有 DataChangeScope，走它自己的课程广播（大纲 / 进度变化）
   useEffect(() => onAiTeachCourseRefresh(() => load()), [load])
@@ -74,14 +75,13 @@ function hhmm(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench, onOpenBook, onJumpSchedule, notes, onOpenNotes }: {
+export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench, onJumpSchedule, notes, onOpenNotes }: {
   /** 工作台当前打开的模块标签（右列「工作台窗口」列它们） */
   openTabs: TabName[]
   /** 最近停留过的那个标签（标「上次」） */
   lastTab: TabName | null
   onOpenTab: (tab: TabName) => void
   onOpenWorkbench: () => void
-  onOpenBook?: (relPath: string) => void
   onJumpSchedule?: () => void
   /** 有未读的更新说明时给出当前版本号（渲染层已按「新版本时在看板提醒」开关过滤） */
   notes?: { version: string } | null
@@ -90,6 +90,14 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
   const { s, update } = useSettings()
   const snap = useDashboardSnapshot()
   const compact = useCompactTier()
+  // 账户额度（AI 用量卡下半段）：要联网，和快照分开拉；主进程有 5 分钟缓存，
+  // 刚在用量模块查过的话这里是内存命中，不会二次请求上游。
+  const [quota, setQuota] = useState<ProviderQuotaView[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    void llmGetQuota().then((v) => { if (alive) setQuota(v) }).catch(() => { if (alive) setQuota([]) })
+    return () => { alive = false }
+  }, [])
   // 主题氛围特效画布 + 打卡彩纸的样式（懒注入，挂载即保证）
   useEffect(() => { ensureFeedbackStyles() }, [])
 
@@ -166,7 +174,12 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
               </button>
             )}
             <div className="min-w-0">
-              <span className="block text-[9px] uppercase tracking-[0.14em] text-[var(--text-muted)]">{dateLine(snap.today)}</span>
+              {/* 纸头签（2026-11-15）：仓库切换从工作台左栏搬到这里 —— 看板是「今天这一页」，
+                  仓库名就是这张纸的归属。与日期同一行，零额外占地；窄窗时名字截断、只留图标。 */}
+              <div className="flex min-w-0 items-center gap-2.5">
+                <VaultSwitcher variant="chip" />
+                <span className="truncate text-[9px] uppercase tracking-[0.14em] text-[var(--text-muted)]">{dateLine(snap.today)}</span>
+              </div>
               <h1 className={`mt-[7px] font-bold leading-[1.08] tracking-[-0.035em] text-[var(--text-primary)] ${compact ? 'text-[26px]' : 'text-[clamp(26px,2.1vw,36px)] min-[2000px]:text-[42px]'}`}>
                 {nameEdit ? (
                   <input
@@ -254,27 +267,9 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
 
                         {snap.habit.items.length > 0 && (
                         <div className="flex flex-none flex-wrap items-center gap-1.5 border-t border-[var(--border-color)] px-1 pt-[11px] @min-[660px]:col-start-2 @min-[660px]:row-start-2 @min-[660px]:flex-col @min-[660px]:items-stretch @min-[660px]:gap-[7px] @min-[660px]:border-l @min-[660px]:border-t-0 @min-[660px]:pb-1 @min-[660px]:pl-[18px] @min-[660px]:pt-0.5">
-                          {snap.habit.items.map((h) => (
-                            <button
-                              key={h.id}
-                              type="button"
-                              onClick={(e) => {
-                                if (h.done) { void toggleHabit(h.id); return }
-                                const r = e.currentTarget.getBoundingClientRect()
-                                void toggleHabit(h.id, { x: r.left + 12, y: r.top + r.height / 2 })
-                              }}
-                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9.5px] transition-colors min-[2000px]:px-3 min-[2000px]:py-1.5 min-[2000px]:text-[10.5px] ${
-                                h.done
-                                  ? 'border-[color-mix(in_srgb,var(--accent)_34%,var(--border-color))] bg-[color-mix(in_srgb,var(--accent)_8%,var(--card-bg))] text-[var(--text-primary)]'
-                                  : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[color-mix(in_srgb,var(--text-primary)_18%,transparent)]'
-                              }`}
-                            >
-                              <i aria-hidden className="h-[5px] w-[5px] flex-none rounded-[2px]" style={{ background: h.color }} />
-                              {h.name}
-                            </button>
-                          ))}
+                          <HabitChips items={snap.habit.items} onToggle={toggleHabit} />
                           <span className="ml-auto text-[8.5px] tabular-nums text-[var(--text-muted)] @min-[660px]:ml-0.5 @min-[660px]:mt-2">
-                            {/* 分母用快照里的真实习惯总数，不是被 20 条上限截断的 items.length */}
+                            {/* 分母用快照里的真实习惯总数，不是可滚动 / 折叠的 items.length */}
                             {snap.habit.doneToday}/{snap.habit.habits}
                           </span>
                         </div>
@@ -288,7 +283,7 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
               <UsageHeatmap days={snap.usage.days} today={snap.today} todayMinutes={snap.usage.todayMinutes} compact={compact} />
             </div>
 
-            {/* 右列：两个模块窗口 + 在读 */}
+            {/* 右列：两个模块窗口 + AI 用量（第三张吃掉余高，底边与左列对齐） */}
             <aside className="flex min-h-0 flex-col gap-3">
               <AiCourseWindow course={snap.course} onOpen={() => onOpenTab('aiTeaching')} delay={90} />
               <WorkbenchWindow
@@ -298,10 +293,10 @@ export function DashboardModule({ openTabs, lastTab, onOpenTab, onOpenWorkbench,
                 onOpenWorkbench={onOpenWorkbench}
                 delay={140}
               />
-              <ReadingList
-                reading={snap.reading}
-                onOpenBook={(relPath) => onOpenBook?.(relPath)}
-                onOpenShelf={() => onOpenTab('bookshelf')}
+              <AiUsageWindow
+                aiUsage={snap.aiUsage}
+                quota={quota}
+                onOpenUsage={() => onOpenTab('usage')}
                 delay={190}
               />
             </aside>

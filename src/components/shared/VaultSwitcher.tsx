@@ -10,7 +10,7 @@ import { showToast } from '../../lib/toast'
 import type { WorkspaceRecent } from '../../types'
 
 /**
- * 仓库切换器（P8 / D8 → UI 打磨点1 迁至编辑器侧栏底部）：条形按钮 → 向上弹出面板
+ * 仓库切换器（P8 / D8 → UI 打磨点1 迁至编辑器侧栏底部）：条形按钮 → 弹出面板
  * （最近仓库 / 打开其他 / 文件管理器打开 / 重命名 / 新建）。
  * 形态从简：切换与新建后整窗重载（数据激活重读约定）；重命名只改展示名（不动文件夹）。
  * 弹层走 portal + fixed 定位：侧栏面板根是 overflow-hidden，窄侧栏（minWidth 180 < 菜单 260）
@@ -18,29 +18,48 @@ import type { WorkspaceRecent } from '../../types'
  *
  * 仓库列表管理（2026-10-20）：每行右侧「⋯」→ 从列表移除（保留文件夹）/ 删除仓库文件夹
  * （整仓移入系统回收站）。两步都在菜单内行内确认，不弹中央模态。
+ *
+ * 2026-11-15 入口迁移：看板成为首页后，工作台左栏底部的入口在看板里根本够不到。
+ * 现以 `variant="chip"` 挂在看板 hero 的日期行左边（纸头签），`variant="bar"` 保留给
+ * 其余「侧栏底部条」形态的调用方。两种形态共用同一个面板与同一套数据操作，只差
+ * 触发器外观与弹出方向（纸头签向下、侧栏条向上）。
  */
-export function VaultSwitcher() {
-  const [cur, setCur] = useState<{ rootId: string; name: string; path: string } | null>(null)
+type CurrentVault = { rootId: string; name: string; path: string }
+
+/** 上次取到的当前仓库（模块级）：看板首挂时避免先闪一帧「未打开仓库」 */
+let lastKnownVault: CurrentVault | null = null
+
+export function VaultSwitcher({ variant = 'bar' }: { variant?: 'bar' | 'chip' } = {}) {
+  const [cur, setCur] = useState<CurrentVault | null>(lastKnownVault)
   const [recent, setRecent] = useState<WorkspaceRecent[]>([])
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<'list' | 'create' | 'rename'>('list')
   const [manage, setManage] = useState<{ v: WorkspaceRecent; confirm: 'none' | 'forget' | 'trash' } | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null)
+  const [menuPos, setMenuPos] = useState<{ left: number; top?: number; bottom?: number; maxHeight?: number } | null>(null)
   const ref = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const btnRef = useRef<HTMLButtonElement | null>(null)
 
-  useEffect(() => { void workspaceGetCurrent().then(setCur).catch(() => {}) }, [])
+  useEffect(() => {
+    void workspaceGetCurrent().then((v) => { lastKnownVault = v; setCur(v) }).catch(() => {})
+  }, [])
 
   const toggleMenu = (): void => {
     if (!open) {
       const r = btnRef.current?.getBoundingClientRect()
       if (r) {
-        // 菜单 260 宽 + 8px 屏幕边距，右缘防溢出夹取；bottom 锚定按钮顶缘 → 向上弹出且高度自适应
+        // 菜单 260 宽 + 8px 屏幕边距，右缘防溢出夹取
         const left = Math.max(8, Math.min(r.left, window.innerWidth - 268))
-        setMenuPos({ left, bottom: window.innerHeight - r.top + 6 })
+        if (variant === 'chip') {
+          // 纸头签在看板顶部：向下弹出；下方不足时按可用高度收（面板自身可滚动）
+          const top = r.bottom + 6
+          setMenuPos({ left, top, maxHeight: Math.min(460, Math.max(220, window.innerHeight - top - 10)) })
+        } else {
+          // 侧栏底部：向下弹出会压住内容，维持向上（bottom 锚定 → 高度自适应）
+          setMenuPos({ left, bottom: window.innerHeight - r.top + 6 })
+        }
       }
     }
     setOpen((o) => !o)
@@ -114,7 +133,11 @@ export function VaultSwitcher() {
       } else if (mode === 'rename') {
         const res = await workspaceRenameVault(trimmed)
         if (res && res.ok) {
-          setCur((c) => (c ? { ...c, name: trimmed } : c))
+          setCur((c) => {
+            const next = c ? { ...c, name: trimmed } : c
+            if (next) lastKnownVault = next
+            return next
+          })
           window.dispatchEvent(new Event('vault:changed'))
           setOpen(false)
         } else {
@@ -158,24 +181,52 @@ export function VaultSwitcher() {
     } finally { setBusy(false) }
   }
 
+  const label = cur ? `当前仓库：${cur.name}\n${cur.path}` : '打开仓库'
+
   return (
-    <div className="relative w-full" ref={ref}>
-      <button
-        ref={btnRef}
-        onClick={toggleMenu}
-        data-tip={cur ? `当前仓库：${cur.name}\n${cur.path}` : '打开仓库'} aria-label={cur ? `当前仓库：${cur.name}\n${cur.path}` : '打开仓库'}
-        className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[12px] transition-colors ${open ? 'bg-[var(--bg-hover)]' : 'hover:bg-[var(--bg-hover)]'} text-[var(--text-primary)]`}
-      >
-        <Layers size={13} className="shrink-0 text-[var(--accent)]" />
-        <span className="min-w-0 flex-1 truncate font-medium text-left">{cur ? cur.name : '未打开仓库'}</span>
-        <ChevronDown size={11} className={`shrink-0 opacity-60 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
+    <div className={variant === 'chip' ? 'relative inline-flex min-w-0' : 'relative w-full'} ref={ref}>
+      {variant === 'chip' ? (
+        <button
+          ref={btnRef}
+          onClick={toggleMenu}
+          data-wb="vaultChip"
+          data-tip={label}
+          aria-label={label}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className={`inline-flex max-w-[min(260px,42vw)] items-center gap-1.5 rounded-md border px-[7px] py-[2.5px] text-[10.5px] font-semibold leading-none text-[var(--text-primary)] transition-colors ${
+            open
+              ? 'border-[color-mix(in_srgb,var(--accent)_48%,transparent)] bg-[color-mix(in_srgb,var(--accent)_10%,var(--card-bg))]'
+              : 'border-[color-mix(in_srgb,var(--accent)_22%,transparent)] bg-[color-mix(in_srgb,var(--accent)_6%,var(--card-bg))] hover:border-[color-mix(in_srgb,var(--accent)_48%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_10%,var(--card-bg))]'
+          }`}
+        >
+          <Layers size={12} className="shrink-0 text-[var(--accent)]" />
+          <span className="min-w-0 truncate">{cur ? cur.name : '未打开仓库'}</span>
+          <ChevronDown size={10} className={`kb-chevron shrink-0 opacity-45 ${open ? 'rotate-180' : ''}`} />
+        </button>
+      ) : (
+        <button
+          ref={btnRef}
+          onClick={toggleMenu}
+          data-tip={label}
+          aria-label={label}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[12px] transition-colors ${open ? 'bg-[var(--bg-hover)]' : 'hover:bg-[var(--bg-hover)]'} text-[var(--text-primary)]`}
+        >
+          <Layers size={13} className="shrink-0 text-[var(--accent)]" />
+          <span className="min-w-0 flex-1 truncate font-medium text-left">{cur ? cur.name : '未打开仓库'}</span>
+          <ChevronDown size={11} className={`kb-chevron shrink-0 opacity-60 ${open ? 'rotate-180' : ''}`} />
+        </button>
+      )}
 
       {open && menuPos && createPortal(
         <div
           ref={menuRef}
+          role="dialog"
+          aria-label="仓库切换"
           className="fixed w-[260px] max-h-[min(460px,70vh)] overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-2xl py-1 z-[130] text-[var(--text-primary)]"
-          style={{ left: menuPos.left, bottom: menuPos.bottom }}
+          style={{ left: menuPos.left, top: menuPos.top, bottom: menuPos.bottom, maxHeight: menuPos.maxHeight }}
         >
           {mode === 'list' && manage && (
             <div className="px-3 py-2 kb-item-in">

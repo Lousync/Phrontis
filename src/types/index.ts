@@ -2193,7 +2193,7 @@ export interface DashboardSnapshot {
   /** 本地日 'YYYY-MM-DD'（由主进程给，避免两端算出不同的「今天」） */
   today: string
   todos: {
-    /** 今日任务（含已完成 —— 时间线要画划线态） */
+    /** 今天到期的任务（含已完成 —— 时间线要画划线态；严格 date === today） */
     today: Array<{ id: string; title: string; time: string | null; done: boolean }>
     doneToday: number
     totalToday: number
@@ -2202,7 +2202,7 @@ export interface DashboardSnapshot {
     streak: number
     doneToday: number
     habits: number
-    /** 今日打卡项逐条（反馈 4②：卡列打卡项、可勾选），sort_order 序；color = 习惯色（勾选庆祝用） */
+    /** 今日打卡项逐条（反馈 4②：卡列打卡项、可勾选），sort_order 序（看板渲染时按「未打卡优先」重排）；color = 习惯色（勾选庆祝用） */
     items: Array<{ id: string; name: string; done: boolean; color: string }>
   }
   /**
@@ -2242,7 +2242,18 @@ export interface DashboardSnapshot {
     days: Record<string, number>
   }
   recentNotes: Array<{ id: string; title: string; path: string; updatedAt: string }>
-  reading: Array<{ relPath: string; displayName: string; pct: number }>
+  /**
+   * AI 用量（2026-11-14 看板右列第三卡）：只给「今天」两个数。
+   * 曲线 / 拆分 / 额度都在整窗「用量」模块里，首屏只回答「今天用了多少」。
+   */
+  aiUsage: {
+    /** 今日 token（输入 + 输出，与用量模块同口径） */
+    todayTokens: number
+    /** 今日调用次数 */
+    todayCalls: number
+    /** 近 7 天（含今天，旧 → 新）每日 token；缺失日补 0（卡内迷你柱图） */
+    last7: Array<{ date: string; tokens: number }>
+  }
 }
 
 /* ================= 分享卡片（右栏第三态，2026-09-29） =================

@@ -5,7 +5,6 @@ import {
   LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, ChevronRight,
   CopyPlus, Link2, ArrowUpNarrowWide, ArrowDownNarrowWide,
   Plus, SquareTerminal, Wallet, Radar, Languages,} from 'lucide-react'
-import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
 import { AiAssistantIcon } from '../shared/AiAssistantIcon'
 import { FileIcon } from '../shared/FileIcon'
@@ -37,7 +36,8 @@ import type { TabName } from '../../types'
  * - **overview**：总览态——书签 6 项（内置 + 插件注册）+ 零散文件快速打开。
  *
  * 跟随语义在 App 层（RAIL_FOLLOW_MAP + leftLocked），本组件纯受控展示。
- * 底部仓库切换恒驻（几何约定 vaultBar ⊂ 左栏）。
+ * 2026-11-15：底部仓库切换条已迁至看板纸头（`DashboardModule` 的 `VaultSwitcher variant="chip"`），
+ * 左栏不再承担仓库入口 —— 看板是首页，回工作台只是「干活」，不必在每个左栏底部再放一次。
  */
 
 const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
@@ -564,10 +564,6 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 </div>
               </div>
             )}
-          </div>
-          {/* 仓库切换只在总览态（顶层）显示——2026-09-17 第四轮反馈拍板④；模块态/树模式不混入 */}
-          <div data-wb="vaultBar" className="shrink-0 border-t border-[var(--border-color)] p-1.5">
-            <VaultSwitcher />
           </div>
         </>
       )}

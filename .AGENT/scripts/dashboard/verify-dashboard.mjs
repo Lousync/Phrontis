@@ -21,7 +21,7 @@ import {
   buildHeatmap, levelOf, dayNo, keyOfNo, fmtMinutes, LEVEL_MIN,
 } from '../../../src/modules/dashboard/heatmapModel.ts'
 import {
-  verdictParts, verdictText, orderTimeline, buildMonthGrid, heatRange, dateLine, monthHead, shiftMonth,
+  verdictParts, verdictText, orderTimeline, orderHabits, buildMonthGrid, heatRange, dateLine, monthHead, shiftMonth,
 } from '../../../src/modules/dashboard/summary.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -85,6 +85,20 @@ const T = (id, time, done = false) => ({ id, title: id, time, done })
 {
   const m = orderTimeline([T('a', '12:00')], '12:00')
   eq('C11 时刻正好等于现在 → 不算逾期、插在它之前', [m.rows[0].late, m.nowIndex], [false, 0])
+}
+
+/* ================= C2. 今日打卡排序 ================= */
+
+{
+  const H = (id, done = false) => ({ id, done })
+  eq('C12 未打卡在前、已完成在后',
+    orderHabits([H('a', true), H('b'), H('c', true), H('d')]).map((h) => h.id),
+    ['b', 'd', 'a', 'c'])
+  eq('C13 组内保持原序（不依赖引擎稳定排序）',
+    orderHabits([H('a'), H('b'), H('c')]).map((h) => h.id), ['a', 'b', 'c'])
+  eq('C14 全部已完成时原样保留',
+    orderHabits([H('a', true), H('b', true)]).map((h) => h.id), ['a', 'b'])
+  eq('C15 空列表 → 空数组', orderHabits([]), [])
 }
 
 /* ================= D. 月历 42 格 ================= */
@@ -186,10 +200,15 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
   ok('F5 课程快照取最近工作区（listWorkspaces 的 lastWorkspaceId）', /listWorkspaces\(getSetting\)/.test(repo) && /lastWorkspaceId/.test(repo))
   ok('F6 课程快照复用 getCourseState（不新开存储）', /getCourseState\(/.test(repo))
   ok('F7 课程进度 = 已收尾知识点 / 总数', /done \/ total/.test(repo))
-  ok('F8 今日任务含已完成（时间线要画划线态）', /vaultTodosForDate\(today\)\.filter\(\(t\) => t\.status !== 'canceled'\)/.test(repo))
+  ok('F8 今日任务含已完成（时间线要画划线态）',
+    /vaultTodosForDate\(today\)\.filter\(\(t\) => t\.date === today && t\.status !== 'canceled'\)/.test(repo))
+  ok('F8b 首页严格只留今天的任务（固定日程整周生成物 / 逾期不混进时间线）',
+    /t\.date === today/.test(repo))
   ok('F17 已完成数只数 status=done（已取消既不画也不计入分母）',
     /doneToday:\s*rows\.filter\(\(t\) => t\.status === 'done'\)\.length/.test(repo)
     && /totalToday:\s*rows\.length/.test(repo))
+  ok('F22 打卡项上限随折叠弹层放宽（20 是旧「直接铺开」时代的护栏）',
+    /habitItems:\s*100/.test(repo))
   ok('F9 时间列优先排期时段、其次截止时刻', /scheduled_start/.test(repo) && /T\(\\d\{2\}:\\d\{2\}\)/.test(repo))
   ok('F10 逐块 try 兜底（一块失败不该让看板打不开）',
     (repo.match(/catch\s*\(e\)\s*\{\s*console\.warn\('\[dashboard\]/g) || []).length >= 6)
@@ -207,6 +226,17 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
     && /ipcMain\.handle\('dashboard:getSnapshot'/.test(repo))
   ok('F15 负向：快照不再取错题（拿得少）', !/quizRecordStats/.test(repo))
   ok('F16 负向：跨天逾期不塞进首页时间线（逾期去日程看）', !/vaultOverdueTodos/.test(repo))
+  ok('F18 快照带 AI 用量（今日 token + 调用次数，右列第三卡直吃）',
+    /aiUsage:\s*\{\s*[\s\S]{0,200}todayTokens:\s*number[\s\S]{0,120}todayCalls:\s*number/.test(repo))
+  ok('F19 AI 用量与整窗「用量」模块同一份数据源（agentUsage，今日 = in + out）',
+    /getAiUsageData/.test(repo) && /todayTokens: tokensOf\(today\)/.test(repo)
+    && /d\.in \+ d\.out/.test(repo))
+  ok('F20 负向：快照不再取「在读」（卡已换掉，reading 一并下线）',
+    !/listBooksImpl/.test(repo) && !/reading:\s*Array/.test(repo))
+  ok('F21 近 7 天：固定 7 格、按本地日逐天回退、缺日补 0、今日与 todayTokens 同口径',
+    /length: 7/.test(repo) && /localDayKey\(i - 6\)/.test(repo)
+    && /return d \? d\.in \+ d\.out : 0/.test(repo)
+    && /todayTokens: tokensOf\(today\)/.test(repo))
 }
 
 /* ================= G. 结构接线（顶层视图） ================= */
@@ -243,6 +273,21 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
     && !/回看板/.test(read('src/modules/ai-teaching/index.tsx')))
   ok('G14 railOrder 默认值不含 aiTeaching（它是固定枚）',
     /railOrder:\s*\{\s*default:\s*'\["recycle","plugins","moments","bookMarket","usage"\]'/.test(settings))
+  // 2026-11-14 图标重画：看板 = 首页五控件缩略、工作台 = 左竖带 + 正文线；
+  // 旧的 lucide LayoutGrid / LayoutPanelLeft 两枚都读作「方框 + 分割」，22px 下看混
+  const moduleIcons = stripComments(read('src/components/shared/ModuleIcons.tsx'))
+  const sidebarIcons = stripComments(read('src/lib/sidebarIcons.tsx'))
+  const iconShapes = stripComments(read('src/lib/railIconShapes.tsx'))
+  ok('G15 顶部两枚走自绘图标（DashboardIcon / WorkbenchIcon），不再引 lucide 布局图标',
+    /<DashboardIcon size=\{22\}/.test(bar) && /<WorkbenchIcon size=\{22\}/.test(bar)
+    && !/LayoutGrid|LayoutPanelLeft/.test(bar))
+  ok('G16 两枚图标进手绘包 + 经典细线包（同一套几何，moduleId dashboard / workbench）',
+    /function DashboardIconHandDrawn/.test(moduleIcons) && /function WorkbenchIconHandDrawn/.test(moduleIcons)
+    && /DashboardShape/.test(moduleIcons) && /WorkbenchShape/.test(moduleIcons)
+    && /function DashboardShape/.test(iconShapes) && /function WorkbenchShape/.test(iconShapes)
+    && /DashboardShape classic/.test(sidebarIcons) && /WorkbenchShape classic/.test(sidebarIcons)
+    && /strokeWidth=\{1\.5\}/.test(sidebarIcons) && !/LayoutDashboard|PanelLeft/.test(sidebarIcons)
+    && /\|\s*'dashboard'\s*\|\s*'workbench'/.test(sidebarIcons))
 }
 
 /* ================= H. 版面与动效 ================= */
@@ -251,15 +296,17 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
   const dash = stripComments(read('src/modules/dashboard/index.tsx'))
   const cal = read('src/modules/dashboard/MonthCalendar.tsx')
   const tl = read('src/modules/dashboard/DayTimeline.tsx')
-  const heat = read('src/modules/dashboard/UsageHeatmap.tsx')
+  const heat = stripComments(read('src/modules/dashboard/UsageHeatmap.tsx'))
   const win = read('src/modules/dashboard/ModuleWindow.tsx')
 
   ok('H1 日期文案走快照的 today（两端不会算出不同的今天）', /dateLine\(snap\.today\)/.test(dash))
   ok('H2 一句话结论来自纯函数（不在组件里拼句子）', /verdictParts\(\{ openCount: timeline\.openCount/.test(dash))
   ok('H3 时间线用纯函数模型', /orderTimeline\(/.test(dash))
-  ok('H4 热力图区间 52 列、格子随宽度自适应', /heatRange\(/.test(heat) && /minmax\(9px, 1fr\)/.test(heat))
-  ok('H5 热力图宽度不够时从左边裁（最近的数据贴右边）',
-    /justify-end/.test(heat) && /overflow-hidden/.test(heat) && /minWidth/.test(heat))
+  ok('H4 热力图区间 52 列、格子随宽度自适应（列宽下限 7px）',
+    /heatRange\(/.test(heat) && /minmax\(\$\{MIN_CELL\}px, 1fr\)/.test(heat) && /MIN_CELL = 7/.test(heat))
+  ok('H5 窄卡片按整周收掉最早的周（不裁半列 / 不裁半个字，也不再写死 minWidth）',
+    /ResizeObserver/.test(heat) && /model\.cells\.slice\(dropped \* 7\)/.test(heat)
+    && !/minWidth/.test(heat) && /spanLabel/.test(heat))
   ok('H6 热力图有月份刻度且跳过首个不完整月', /m\.start > 1/.test(heat))
   ok('H7 时间线宽度封顶 760（状态标签不会被推远）', /max-w-\[760px\]/.test(dash))
   ok('H8 宽窗打卡转右列（容器查询，不按视口写死）', /@min-\[660px\]:col-start-2/.test(dash))
@@ -267,7 +314,7 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
   // 整块在列里垂直居中，多出来的高度留白（见 MonthCalendar 头注）。
   ok('H9 月历正方形格子 + 垂直居中（矮窗不再把格子拉长）',
     /aspect-square/.test(cal) && /justify-center/.test(cal) && !/repeat\(6,minmax\(0,1fr\)\)/.test(cal))
-  ok('H10 两个模块窗口共用外壳（标题栏 + 内容 + 底部入口）', /function WindowShell/.test(win) && /打开工作台/.test(win))
+  ok('H10 三个模块窗口共用外壳（标题栏 + 内容 + 底部入口）', /function WindowShell/.test(win) && /打开工作台/.test(win))
   ok('H11 工作台窗口点一行直达对应标签', /onOpenTab\(tab\)/.test(win))
   ok('H12 动效全部复用既有令牌（kb-view-in / kb-item-in / kb-pop）',
     /kb-view-in/.test(dash) && /kb-item-in/.test(win) && /kb-pop/.test(heat))
@@ -280,8 +327,67 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
     /snap\.pomodoro\.days\[snap\.today\]/.test(dash) && /label="分钟专注"/.test(dash))
   ok('H18 打卡分母用快照真实习惯数（不是被 20 条上限截断的 items.length）',
     /snap\.habit\.doneToday}\/\{snap\.habit\.habits/.test(dash))
+  ok('H19 右列第三卡 = AI 用量（今日 token 吃快照，额度条走 llm:quota:get，入口进用量模块）',
+    /<AiUsageWindow/.test(dash) && /aiUsage=\{snap\.aiUsage\}/.test(dash)
+    && /llmGetQuota\(\)/.test(dash) && /onOpenTab\('usage'\)/.test(dash)
+    && /name="AI 用量"/.test(win) && /windowLevel\(/.test(win) && /fmtCountdown\(/.test(win))
+  ok('H20 第三卡吃掉右列余高（grow → flex-1），右列底边与左侧主体对齐',
+    /grow\?: boolean/.test(win) && /\$\{grow \? 'flex-1' : 'flex-none'\}/.test(win)
+    && /^\s*grow$/m.test(win))
+  ok('H21 负向：在读卡已移除（BookOpen / ReadingList / 空态文案都不在）',
+    !/ReadingList/.test(win) && !/BookOpen/.test(win) && !/书架还没有在读的书/.test(win))
+  ok('H22 迷你柱图：7 根柱按峰值归一、今天用强调色、高度按实测像素随卡片余高伸缩，全 0 走空态',
+    /last7\.map/.test(win) && /\(d\.tokens \/ peak\) \* trackH/.test(win)
+    && /isToday/.test(win) && /ResizeObserver/.test(win)
+    && /hasTrend/.test(win) && /近 7 天还没有用量/.test(win))
   ok('H16 负向：旧磁贴引擎 / 插件控件 / 底部入口条已从看板移除',
     !/dashboardTileLayout/.test(dash) && !/CARD_REGISTRY/.test(dash) && !/PluginFrame/.test(dash))
+}
+
+/* ================= K. 仓库入口（2026-11-15 从工作台左栏迁到看板纸头） ================= */
+
+{
+  const dash = stripComments(read('src/modules/dashboard/index.tsx'))
+  const left = stripComments(read('src/components/workbench/WorkbenchLeftPanel.tsx'))
+  const switcher = stripComments(read('src/components/shared/VaultSwitcher.tsx'))
+
+  ok('K1 看板纸头挂纸头签（hero 日期行左边，variant="chip"）',
+    /<VaultSwitcher variant="chip" \/>/.test(dash)
+    && /<VaultSwitcher variant="chip" \/>[\s\S]{0,140}dateLine\(snap\.today\)/.test(dash))
+  ok('K2 负向：工作台左栏不再有仓库切换条（vaultBar 与组件引用都已删）',
+    !/data-wb="vaultBar"/.test(left) && !/VaultSwitcher/.test(left) && !/vaultBar/.test(left))
+  ok('K3 纸头签向下弹出（top 锚定 + 可用高度收），侧栏条仍向上（bottom 锚定）',
+    /variant === 'chip'[\s\S]{0,320}?const top = r\.bottom \+ 6/.test(switcher)
+    && /bottom: window\.innerHeight - r\.top \+ 6/.test(switcher))
+  ok('K4 两种形态共用同一面板（管理 / 新建 / 重命名入口不因迁移丢）',
+    /data-wb="vaultChip"/.test(switcher) && /从列表移除/.test(switcher) && /新建仓库/.test(switcher))
+  ok('K5 纸头签可访问性：aria-haspopup / aria-expanded / 面板 role=dialog / 当前仓库名与路径进 tooltip',
+    /aria-haspopup="dialog"/.test(switcher) && /aria-expanded=\{open\}/.test(switcher)
+    && /role="dialog"/.test(switcher)
+    && /data-tip=\{label\}/.test(switcher) && /当前仓库：\$\{cur\.name\}/.test(switcher))
+}
+
+/* ================= L. 今日打卡折叠（2026-11-15） ================= */
+
+{
+  const chips = stripComments(read('src/modules/dashboard/HabitChips.tsx'))
+  const dash = stripComments(read('src/modules/dashboard/index.tsx'))
+
+  ok('L1 看板打卡区交给 HabitChips（不再就地 map 铺满）',
+    /<HabitChips items=\{snap\.habit\.items\} onToggle=\{toggleHabit\} \/>/.test(dash)
+    && !/snap\.habit\.items\.map/.test(dash))
+  ok('L2 主卡片只铺固定枚数，其余收进「+N」',
+    /VISIBLE_MAX = 6/.test(chips) && /ordered\.slice\(0, VISIBLE_MAX\)/.test(chips)
+    && /\+\{rest\}/.test(chips))
+  ok('L3 「+N」浮层挂 body 且内部可滚动（不被卡片 / 页面滚动容器裁掉）',
+    /<AnchoredLayer/.test(chips) && /anchorRef=\{moreRef\}/.test(chips)
+    && /overflow-y-auto/.test(chips))
+  ok('L4 排序走 orderHabits：勾完后自动后移，未打卡项留在前面',
+    /orderHabits\(items\)/.test(chips))
+  ok('L5 弹层内可继续勾选 / 取消（不关层）',
+    /onClick=\{\(e\) => toggle\(h, e\)\}/.test(chips) && /role="dialog"/.test(chips))
+  ok('L6 长习惯名在主卡片与弹层里都截断，不撑破窄列',
+    /max-w-full/.test(chips) && /truncate/.test(chips))
 }
 
 /* ================= 结果 ================= */

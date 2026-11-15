@@ -6,7 +6,7 @@ import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
 import { dateKeyOf } from 'phrontis-core/appUsage'
 import { getUsageRange, getUsageTodayMinutes } from 'phrontis-core/appUsageStore'
-import { listBooksImpl } from './pdfReaderRepo'
+import { getAiUsageData } from 'phrontis-core/agentUsage'
 import { listWorkspaces } from '../../lib/aiTeachingWorkspaces'
 import { getCourseState } from '../../lib/aiTeachingCourse'
 
@@ -24,22 +24,21 @@ import { getCourseState } from '../../lib/aiTeachingCourse'
  *  - 待办        scheduleVaultRepo
  *  - 打卡        habitVaultRepo + habitStats 的纯判定（连续天数；逐项见 habit.items）
  *  - 最近编辑    knowledgeIndex（**只取索引条目，不读正文** —— 取正文会把全库 markdown 拉进内存）
- *  - 在读书      pdfReaderRepo.listBooksImpl（与书架清单**同一实现**，不另判「什么算在读」）
  *  - 使用时长    appUsageStore（P1 新增的采集器）
+ *  - AI 用量     agentUsage（与整窗「用量」模块同一份 ai-usage.json，只取今天的两个数）
  *
  * 错题卡已随看板方案 §5 反馈 4 移除（2026-09-27）：快照不再取 quizRecordStats（拿得少）。
+ * 「在读」卡 2026-11-14 下线（换成 AI 用量）：不再取 pdfReaderRepo.listBooksImpl。
  */
 
-/** 卡片能画下的量。改这里要同步看板卡片组件，否则「多传了但没人显示」 */
+/** 数据护栏。改这里要同步看板卡片组件（打卡项由折叠弹层承载，不再等于「卡片画得下几条」） */
 export const DASHBOARD_LIMITS = {
   /** 今日时间线最多列几条（含已完成） */
   today: 20,
   /** 最近编辑最多列几条 */
   recentNotes: 5,
-  /** 在读书最多列几本 */
-  reading: 2,
-  /** 今日打卡项最多透出几条（卡内滚动，上限只是字节护栏） */
-  habitItems: 20,
+  /** 今日打卡项最多透出几条（主卡片只铺前 6 枚，其余进「+N」弹层滚动查看；100 只是字节护栏） */
+  habitItems: 100,
   /** 使用热力图跨度（2026-11-14 看板首页重做：半年 → 近一年 52 周） */
   heatmapDays: 364,
 } as const
@@ -57,7 +56,7 @@ export interface DashboardSnapshot {
   /** 本地日 'YYYY-MM-DD'，渲染层据此显示日期、不必自己算（避免两端算出不同的「今天」） */
   today: string
   todos: {
-    /** 今日任务（含已完成）。跨天逾期不放进首页 —— 时间线是「今天」，逾期去日程看 */
+    /** 今天到期的任务（含已完成；严格 date === today，跨天逾期不去首页）。时间线是「今天」，逾期去日程看 */
     today: DashboardTodoDto[]
     doneToday: number
     totalToday: number
@@ -69,8 +68,7 @@ export interface DashboardSnapshot {
     doneToday: number
     /** 未归档习惯总数 */
     habits: number
-    /** 今日打卡项逐条（看板方案 §5 反馈 4②，2026-09-27 拍板：卡列打卡项、可勾选）—— sort_order 序。
-     *  color 随条目透出：勾选庆祝彩纸用习惯色（与打卡列表同款反馈，反馈 7）。 */
+    /** 今日打卡项逐条（反馈 4②：卡列打卡项、可勾选），sort_order 序（看板渲染时按「未打卡优先」重排）；color = 习惯色（勾选庆祝用） */
     items: Array<{ id: string; name: string; done: boolean; color: string }>
   }
   calendar: {
@@ -99,7 +97,14 @@ export interface DashboardSnapshot {
     days: Record<string, number>
   }
   recentNotes: Array<{ id: string; title: string; path: string; updatedAt: string }>
-  reading: Array<{ relPath: string; displayName: string; pct: number }>
+  aiUsage: {
+    /** 今日 token（输入 + 输出，与整窗「用量」模块同口径） */
+    todayTokens: number
+    /** 今日调用次数 */
+    todayCalls: number
+    /** 近 7 天（含今天，旧 → 新）每日 token；缺失日补 0（卡内迷你柱图） */
+    last7: Array<{ date: string; tokens: number }>
+  }
 }
 
 function toTodoDto(t: TodoRow): DashboardTodoDto {
@@ -125,9 +130,13 @@ export function dashboardSnapshot(getSetting: (key: string) => unknown = () => u
   // --- 待办 ---
   let todos: DashboardSnapshot['todos'] = { today: [], doneToday: 0, totalToday: 0 }
   try {
-    // 已取消的既不画也不计数 —— 与列表同一口径（早先 doneToday = 总数 - 未完成，
-    // 会把 canceled 也算成「已完成」，分母也被抬高；2026-11-14 数据核对时修正）
-    const rows = vaultTodosForDate(today).filter((t) => t.status !== 'canceled')
+    // ① 只留 date === today：`vaultTodosForDate` 刻意包含**任何日期**未完成的计划类
+    //    （日视图的「待安排」常驻栏）。固定日程默认 task_type = plan，一次结算会生成
+    //    整周的待办 —— 不按日期收窄的话，今天没别的安排时时间线会被同一条重复任务刷屏。
+    //    首页时间线是「今天」这一页，跨天（含逾期、明天及以后）一律去日程看。
+    // ② 已取消的既不画也不计数 —— 与列表同一口径（早先 doneToday = 总数 - 未完成，
+    //    会把 canceled 也算成「已完成」，分母也被抬高；2026-11-14 数据核对时修正）
+    const rows = vaultTodosForDate(today).filter((t) => t.date === today && t.status !== 'canceled')
     todos = {
       // 时间线要画「已完成」的划线态，所以这里**不再只留未完成**（2026-11-14）
       today: rows.slice(0, DASHBOARD_LIMITS.today).map(toTodoDto),
@@ -195,19 +204,29 @@ export function dashboardSnapshot(getSetting: (key: string) => unknown = () => u
       .map((p) => ({ id: p.id, title: p.title, path: p.path, updatedAt: p.updatedAt }))
   } catch (e) { console.warn('[dashboard] recentNotes failed:', e) }
 
-  // --- 在读的书 ---
-  let reading: DashboardSnapshot['reading'] = []
+  // --- AI 用量（今日 + 近 7 天）：首屏回答「今天用了多少 / 这一周什么走势」，
+  //     趋势细节 / 拆分 / 全部时间窗留在整窗用量模块 ---
+  let aiUsage: DashboardSnapshot['aiUsage'] = { todayTokens: 0, todayCalls: 0, last7: [] }
   try {
-    const r = listBooksImpl()
-    reading = (r.books ?? [])
-      // 「在读」= 有进度且没读完。不另设标记位 —— 与书架清单同一实现，避免两个「在读」口径
-      .filter((b) => b.hasProgress && (b.pct ?? 0) < 100)
-      .sort((a, b) => ((a.updatedAt ?? '') < (b.updatedAt ?? '') ? 1 : -1))
-      .slice(0, DASHBOARD_LIMITS.reading)
-      .map((b) => ({ relPath: b.relPath, displayName: b.displayName, pct: b.pct ?? 0 }))
-  } catch (e) { console.warn('[dashboard] reading failed:', e) }
+    const days = getAiUsageData().days
+    const tokensOf = (key: string): number => {
+      const d = days[key]
+      return d ? d.in + d.out : 0
+    }
+    // 本地日期逐天回退（不能用时间戳硬减：夏令时会偏一天）
+    const last7 = Array.from({ length: 7 }, (_, i) => {
+      const date = localDayKey(i - 6)
+      return { date, tokens: tokensOf(date) }
+    })
+    const todayBucket = days[today]
+    aiUsage = {
+      todayTokens: tokensOf(today),
+      todayCalls: todayBucket?.calls ?? 0,
+      last7,
+    }
+  } catch (e) { console.warn('[dashboard] aiUsage failed:', e) }
 
-  return { today, todos, habit, calendar, course, usage, pomodoro, recentNotes, reading }
+  return { today, todos, habit, calendar, course, usage, pomodoro, recentNotes, aiUsage }
 }
 
 /**

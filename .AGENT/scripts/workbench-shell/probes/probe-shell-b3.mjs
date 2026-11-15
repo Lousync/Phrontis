@@ -66,7 +66,8 @@ const JS_STATE = `(() => {
     // 真树判据（2026-09-29）：VaultTree 条目锚点 + 底部软件文件折叠节
     treeNodes: qa('[data-wb="treeMode"] [data-wb-tree-node]').length,
     treeSoftHead: !!q('[data-wb="treeMode"] [data-wb="treeSoftHead"]'),
-    vaultBar: !!q('[data-wb="vaultBar"]'),
+    // 2026-11-15：仓库切换入口迁到看板纸头，工作台左栏底部不再有 vaultBar
+    vaultBarRetired: !q('[data-wb="vaultBar"]'),
     tabs: qa('[data-wb="tab"]').map((t) => ({ id: t.dataset.wbTab, active: t.dataset.wbActive })),
     lockTitle: q('button[title^="锁定侧边栏"], button[title^="已锁定"]')?.title ?? '',
   }
@@ -118,7 +119,7 @@ async function main() {
   ok(st0.shell, 'S1 三栏外壳渲染')
   ok(st0.tabbar, 'S2 中间页面条渲染（v3.4.0 页面条置顶：原标签条）')
   ok(st0.bookmarks.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog', 'S3 书签 5 项（2026-09-29 对齐真值：editor 模块退役、quiz 进 QUIZ_ENTRY_ENABLED 总闸）', st0.bookmarks.join(','))
-  ok(st0.vaultBar, 'S4 底部仓库切换 vaultBar 渲染')
+  ok(st0.vaultBarRetired, 'S4 左栏底部仓库条已退役（2026-11-15 迁到看板纸头，chip 由看板契约锁）')
   // S5：启动落点可能一个标签都没开（反馈 10 起「回工作台 = 总览态」），故不断言已有标签，
   // 只记录现值；真正验「标签会登记」交给 T3（点知识库书签 → openTabs 含 knowledge）。
   console.log(`  · S5 openTabs 启动现值：${st0.openTabs.join(',') || '(空)'}`)

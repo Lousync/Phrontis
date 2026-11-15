@@ -1,15 +1,15 @@
 # 看板首页（今日纸）实现方案
 
-> 状态：**已实施（2026-11-14，v3.29.0）**
+> 状态：**已实施（2026-11-15，v3.30.0）**
 > 原型：`tmp/home-view-proto/index.html#e`（方案 E · 今日纸）
-> 契约：`.AGENT/scripts/dashboard/verify-dashboard.mjs`（84 项）
+> 契约：`.AGENT/scripts/dashboard/verify-dashboard.mjs`（132 项）
 
 ## 1. 目标（已达成）
 
 把「看板」从**工作台里的一个书签页**提升为**应用首屏与顶层视图**，并重做为「今天这一页」：
 
 1. 看板 = 顶层；工作台 / AI 教学 = 它的两个平级容器。
-2. 首屏 = 一句话结论 + 左月历 / 右今天时间线 + 打卡 + 近一年热力图，右列是两个模块窗口。
+2. 首屏 = 一句话结论 + 左月历 / 右今天时间线 + 打卡 + 近一年热力图，右列是三个窗口（AI 教学 / 工作台 / AI 用量）。
 3. 回看板**没有任何「返回」按钮** —— 只走图标条最上面那枚「看板」。
 
 ### 不做
@@ -55,12 +55,15 @@ course: null | {
   chapterIndex: number; chapterCount: number
 }
 todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // 含已完成
+aiUsage: { todayTokens: number; todayCalls: number; last7: Array<{ date; tokens }> }   // 今日 + 近 7 天（右列第三卡）
 ```
 
 - **calendar**：`vaultMonthTodos(YYYY-MM)` 后按 `date.slice(0,7)` 过滤，只留计数。
 - **course**：`listWorkspaces(getSetting).lastWorkspaceId` → `getCourseState()` → 大纲里第一个未收尾知识点；全收尾则停在最后一个。`registerDashboardHandlers` 因此改为注入 `getSettingValue`。
+- **aiUsage**：`getAiUsageData().days`，今日 token = `in + out`（与整窗「用量」模块同一份 `ai-usage.json`、同一口径）；`last7` 按本地日逐天回退 7 格（缺日补 0，旧 → 新）。额度条**不在快照里**：要联网，渲染层挂载后用 `llm:quota:get` 单独拉（主进程 5 分钟缓存），不拖首屏。
 - **usage**：`DASHBOARD_LIMITS.heatmapDays` 183 → **364**。
 - 跨天逾期不再进首页（`vaultOverdueTodos` 从聚合里移除）—— 时间线是「今天」，逾期去日程看。
+- 「在读」下线（2026-11-14）：`reading` 字段与 `listBooksImpl` 依赖一并删除。
 
 ## 4. 渲染层（已落码）
 
@@ -71,17 +74,18 @@ todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // �
 | `src/modules/dashboard/MonthCalendar.tsx` | 月历：今天填色、有安排打点、点日期进日程 |
 | `src/modules/dashboard/DayTimeline.tsx` | 时间线：按时排、逾期红、完成划线、插「现在」 |
 | `src/modules/dashboard/UsageHeatmap.tsx` | 52 周热力图：月份刻度、格子随宽度、右对齐裁最早周 |
-| `src/modules/dashboard/ModuleWindow.tsx` | AI 教学窗口 / 工作台窗口 / 在读 |
+| `src/modules/dashboard/ModuleWindow.tsx` | AI 教学窗口 / 工作台窗口 / AI 用量（含账户额度条） |
 | `src/modules/dashboard/heatmapModel.ts` | 保留（纯计算层，契约直跑） |
 
 版面细节（都按原型 e 定稿）：
 
 - 内容最大宽 1800（≥2000 视口 2000，字号整体放大一档）。
 - 纸内左月历 200–300，右侧「今天」；时间线行宽上限 760（容器 ≥950 时 820、≥1080 时 900）。
-- 打卡：容器 <620 在时间轴下方一行，≥620 转成右列 176（≥1080 时 210）。
-- 热力图：`minmax(7px, 1fr)`，内层最小宽 `weeks*7 + gap`，右对齐 + `overflow-hidden`。
+- 打卡：容器 <660 在时间轴下方自动换行；≥660 转成右列 176（≥1080 时 210）竖列。两种形态都只铺前 6 枚，其余收进「+N」弹层（层内可滚动、可继续勾选）。排序**未打卡在前、已打卡自动后移**，组内保持习惯模块原序。
+- 热力图：`minmax(7px, 1fr)`；**先量容器宽度再定周数**——放不下 52 周就按整周收掉最早的周（格子不小于 7px，绝不出现半格 / 半个月份字），刻度列号跟着左移，左侧与右侧指标标签改成实际跨度（`近 N 个月`，52 周时仍是「近一年」）。悬停气泡挂在卡片层（不在 `overflow-hidden` 的格子容器里），第一行也切不到。
 - 刻度：只在月份变化列落标签；首列不完整月跳过；最后一个月右对齐（只剩 1 列也不被裁）。
 - 矮窗（视口 <940）收一档：热力图 150、标题 26、行距压缩。
+- 右列三张卡：前两张 `flex-none`（AI 教学 / 工作台），第三张 AI 用量 `grow`（`flex-1`）吃掉余高 —— 右列底边与左侧主体底边对齐，窗口变高时多出来的高度落在用量卡里，而不是留一截空列。用量卡内**近 7 天迷你柱图**（7 根柱按峰值归一、今天用强调色）吃 `flex-1`：柱区随余高伸缩（下限 44px），高窗口下卡里不会只剩一大块空白。
 
 ## 5. 交互
 
@@ -91,8 +95,9 @@ todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // �
 | 「工作台」/「打开工作台」 | 落上次工作台标签（仍在 openTabs 时），否则空态 |
 | 工作台窗口某一行 | 直接激活该模块标签 |
 | 点月历任意日期 / 时间线任意行 / 「打开日程 →」 | 进日程模块 |
-| 打卡胶囊 | 写 `habit:toggleCheck` + 广播 `habit`（勾上时炸彩纸） |
+| 打卡胶囊 | 写 `habit:toggleCheck` + 广播 `habit`（勾上时炸彩纸）；勾完自动排到未打卡项之后，超过 6 枚的从「+N」弹层里继续勾 |
 | AI 教学窗口「继续这一段」 | 进 AI 教学模块 |
+| AI 用量窗口「打开用量」 | 进整窗「用量」模块（额度 / 趋势 / 拆分都在那边） |
 
 ## 6. 三个取舍（已按最保守选项落地）
 
@@ -103,13 +108,13 @@ todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // �
 ## 7. 契约与验收
 
 - `npx tsc --noEmit -p tsconfig.node.json` / `tsconfig.web.json`
-- `.AGENT/scripts/dashboard/verify-dashboard.mjs`（重写，84 项）：
+- `.AGENT/scripts/dashboard/verify-dashboard.mjs`（重写，115 项）：
   - 热力图分档 / 区间 52 列 / 跨年同月份号不合并；
   - 结论句三种文案；时间线排序、逾期、「现在」插入点；
   - 月历 42 格、周一起排、闰年；
-  - 快照字段与主进程聚合（calendar / course / 364 天 / 逐块 try）；
+  - 快照字段与主进程聚合（calendar / course / aiUsage / 364 天 / 逐块 try）；
   - 结构接线（三枚固定 / 启动落看板 / 书签撤出 / 无 onBack）；
-  - 版面与动效（760 上限、容器查询、既有动效令牌）。
+  - 版面与动效（760 上限、容器查询、右列第三卡吃余高、既有动效令牌）。
 - `.AGENT/scripts/workbench-shell/verify-workbench-shell.mjs`：书签 10 项、图标条 5 项 + 顶部三枚。
 - `.AGENT/scripts/startup-tab/verify-startup-tab.mjs`：图标条成员快照同步。
 - 真机：1280×820 / 963、1440×900、1920×1080、2560×1440 无滚动；1000×700（<1080 右列落下方）页面滚动、主列 520 保底。
@@ -125,7 +130,20 @@ todos: { today: Array<{ id; title; time; done }>; doneToday; totalToday }  // �
 - 设置键名沿用 `releaseNotesAutoOpen`（改名会丢用户已存的值），只改文案。
 - 契约：`verify-release-notes.mjs` §6「看板入口接线」10 项。
 
+## 7c. 仓库入口迁到纸头（2026-11-15 追加）
+
+看板成为首页后，仓库切换仍只挂在工作台「总览态」左栏底部 —— 从看板根本够不到。
+现搬到 hero 日期行左边：`▤ 仓库名 ⌄`（`VaultSwitcher variant="chip"`），点开沿用同一个面板。
+
+- **形态取舍**（原型 `tmp/vault-switch-proto/`，四选一）：纸头签 / 右上角胶囊 / 状态栏仓库位 / 图标条底部。
+  选纸头签 —— 零额外占地、语义是「这张纸属于哪个本子」、不抢「今天」的注意力；
+  右上角与「有什么变化」挤一条边带，状态栏与图标条都放不下仓库名。
+- **工作台左栏底部那条删掉**（`data-wb="vaultBar"` 退役）：入口只留一处，回看板即是最上面那枚图标。
+- **弹出方向**：纸头签向下弹出（`top = 按钮底缘 + 6`，下方不足时按可用高度收）；侧栏条形态仍向上（`bottom` 锚定），两者共用一个面板。
+- **不动的东西**：面板内容与全部数据操作（从列表移除 / 删除仓库文件夹 / 重命名 / 新建）、整窗重载语义。
+- 契约：`verify-dashboard.mjs` §K（K1–K5）锁接线、负向与可访问性；两份旧探针的 vaultBar 断言改为「已退役」。
+
 ## 8. 收尾待办
 
 - **AI 手册必须同步**：`resources/help/*.md` 里讲「看板 / 图标条 / 启动落点 / 怎么回看板 / 磁贴编辑」的段落已过时，按 `.AGENT/help-rewrite/README.md` 重编，并跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`。
-- ~~P1：翻月~~ 已做（2026-11-14）。剩余可选：热力图 hover 明细已在（保留 tooltip）、在读书继续阅读、空态文案。
+- ~~P1：翻月~~ 已做（2026-11-14）。剩余可选：热力图 hover 明细已在（保留 tooltip）、空态文案。（「在读书继续阅读」随在读卡下线取消，2026-11-14）

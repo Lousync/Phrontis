@@ -13,11 +13,14 @@ import {
   FileText, Calendar, BookOpen, MessageCircle, Wrench, Package,
   Trash2, LifeBuoy, User, Settings, Upload, FileCode2, GraduationCap, Store, Gauge,
 } from 'lucide-react'
+import { DashboardShape, WorkbenchShape } from './railIconShapes'
 import { pluginGetContribution, pluginListInstalled } from './ipc'
 
 export type IconModuleId =
   | 'blog' | 'schedule' | 'knowledge' | 'moments' | 'aiTeaching' | 'toolbox' | 'plugins'
   | 'recycle' | 'help' | 'user' | 'settings' | 'export' | 'editor' | 'bookMarket' | 'usage'
+  // 2026-11-14 图标条顶部两枚（看板 = 首页缩略 / 工作台 = 左栏 + 正文线）
+  | 'dashboard' | 'workbench'
 
 export const BUILTIN_ICON_PACKS = [
   { id: 'default', label: '手绘(默认)' },
@@ -26,6 +29,19 @@ export const BUILTIN_ICON_PACKS = [
 
 /** classic140:1.4.0 版活动栏的 lucide 细线图标(strokeWidth 1.5) */
 export function renderClassicIcon(moduleId: IconModuleId, size: number, className?: string): React.ReactNode {
+  /* 看板 / 工作台没有 lucide 等价物（lucide 的 LayoutDashboard 是四块、PanelLeft 没有正文线）：
+     这里走同一套几何（`railIconShapes`），只换笔宽 1.5 + 更小的圆角 —— 形状同构、画法有别。 */
+  if (moduleId === 'dashboard' || moduleId === 'workbench') {
+    return (
+      <svg
+        width={size} height={size} viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
+        className={className} aria-hidden="true"
+      >
+        {moduleId === 'dashboard' ? <DashboardShape classic /> : <WorkbenchShape classic />}
+      </svg>
+    )
+  }
   const map = {
     blog: FileText, schedule: Calendar, knowledge: BookOpen, moments: MessageCircle,
     aiTeaching: GraduationCap,

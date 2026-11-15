@@ -99,6 +99,22 @@ export function orderTimeline(todos: TimelineTodo[], nowHHmm: string): TimelineM
   }
 }
 
+/* ==================== 今日打卡 ==================== */
+
+/**
+ * 打卡芯片的展示序：**未打卡在前、已完成在后**。
+ *
+ * 组内保持仓库里的习惯顺序（`sort_order`，由主进程给）—— 用「原下标」做第二排序键，
+ * 不依赖引擎的稳定排序实现。这样勾掉一枚之后它自动移到后面，未打卡项始终留在最前面，
+ * 用户不用在已完成的项里找下一个要打的卡。
+ */
+export function orderHabits<T extends { done: boolean }>(items: readonly T[]): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => Number(a.item.done) - Number(b.item.done) || a.index - b.index)
+    .map(({ item }) => item)
+}
+
 /* ==================== 月历 ==================== */
 
 /**

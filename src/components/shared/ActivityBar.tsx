@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { TabName } from '../../types'
-import { Trash2, FlaskConical, LayoutPanelLeft, LayoutGrid, GraduationCap, Check } from 'lucide-react'
-import { MomentsIcon, SettingsIcon, PluginIcon, BookMarketIcon, UsageIcon } from './ModuleIcons'
+import { Trash2, FlaskConical, GraduationCap, Check } from 'lucide-react'
+import { MomentsIcon, SettingsIcon, PluginIcon, BookMarketIcon, UsageIcon, DashboardIcon, WorkbenchIcon } from './ModuleIcons'
 import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
 import { railHiddenIds, railOrder, railVisibleOrder } from '../../lib/appModules'
 import { useSettings } from '../../lib/SettingsContext'
@@ -22,6 +22,10 @@ import { useDataChanged } from '../../lib/dataChanged'
  *
  * - **顶部看板按钮**：看板态高亮 + 点击无操作（入口幂等）；
  * - **顶部工作台按钮**：工作台态（activeTab 为空或非整窗模块）高亮且点击无操作（入口幂等）；
+ * - **两枚图标是自绘的**（2026-11-14 之后按看板本体缩略重画，`ModuleIcons` 的 DashboardIcon /
+ *   WorkbenchIcon，跟随设置→外观的侧边栏图标包）：看板 = 「左列上长下短 + 右列三叠」的首页缩略，
+ *   工作台 = 「左竖带 + 正文三行」的编辑器窗口。旧的 lucide `LayoutGrid` / `LayoutPanelLeft` 两枚
+ *   都读作「方框 + 内部分割」，22px 下会看混；原型与取舍见 `tmp/rail-board-workbench-icons/board-v3.html`。
  *   整窗模块态点击 = 回工作台（反馈 10，2026-09-27：一律回**总览态** —— 页面条保留各标签，点击即恢复；
  *   旧的「落最后文档标签 ?? knowledge」会落到没开任何页面的知识库模块，左栏被错误拉成笔记区）；
  * - **AI 教学**：整窗独占模块（EXCLUDED 内），激活时中间栏 + 标签条整体让位；
@@ -233,7 +237,7 @@ export function ActivityBar({ active, onChange, onWorkbench, onBoard, flush }: P
         className={railCls(active === 'dashboard')}
       >
         {active === 'dashboard' && railMark}
-        <LayoutGrid size={22} />
+        <DashboardIcon size={22} />
       </button>
 
       {/* 工作台 —— VS Code 惯例：主视图入口紧挨看板。
@@ -245,7 +249,7 @@ export function ActivityBar({ active, onChange, onWorkbench, onBoard, flush }: P
         className={railCls(inWorkbench)}
       >
         {inWorkbench && railMark}
-        <LayoutPanelLeft size={22} />
+        <WorkbenchIcon size={22} />
       </button>
 
       <button

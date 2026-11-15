@@ -134,13 +134,13 @@ async function main() {
   ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule' && st.tabs[0]?.active === '1',
     'D6d 返回工作台 → schedule 标签恢复', JSON.stringify(st.tabs))
 
-  // D7 vaultBar 只在总览态显示（第四轮拍板④）：模块态无、返回总览后有
+  // D7 仓库切换入口已迁到看板（2026-11-15）：左栏模块态 / 总览态都不再有 vaultBar
   const modVb = await evalJs(`!!document.querySelector('[data-wb="vaultBar"]')`)
-  ok(!modVb, 'D7a 模块态下 vaultBar 不显示')
+  ok(!modVb, 'D7a 模块态下左栏没有仓库条（入口已迁到看板纸头）')
   await evalJs(`(() => { document.querySelector('button[title^="返回总览"]')?.click(); return true })()`)
   await sleep(400)
   const ovVb = await evalJs(`!!document.querySelector('[data-wb="vaultBar"]')`)
-  ok(ovVb, 'D7b 总览态下 vaultBar 显示')
+  ok(!ovVb, 'D7b 总览态下左栏也没有仓库条（入口已迁到看板纸头）')
 
   // D8 🔖 书签选显菜单（第四轮拍板⑤）：总览态打开 → 隐藏书架 → 书签区 5 项 → 勾回 6 项
   await evalJs(`(() => { document.querySelector('[data-wb="bookmarkMenuBtn"]')?.click(); return true })()`)

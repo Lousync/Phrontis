@@ -2763,6 +2763,21 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 
 **验收**：双端 tsc 0 错；`npm run build` 通过；`verify-dashboard.mjs` 105 项全绿；真机 1280×820 / 1440×900 / 1000×700：格子实测 42.4×42.4（正方形）、今天圆 35px、卡片高 485/358 时网格 275 高不溢出；翻月 11→10→7 月、回本月、12 月四步都正常，非当月无「今天」高亮。截图 `tmp/dashboard-impl-shots/cal-*.png`。
 
+## 2026-11-14 · 热力图不再被裁：按整周收窄 + 悬停气泡不再被切
+
+**现状 / 用户反馈**：看板「近一年热力图」在窗口收窄时左缘被切——截图里最左边是一列**半个格子**、月份刻度只剩半个「月」字，用户原话「看板的热力图有截断问题」。另外鼠标停第一行时，明细气泡的上半截被切掉。
+
+**根因**：
+- 内层写了死宽度 `minWidth: weeks*7 + gap*51 = 517px`，外层是 `flex-1 min-w-0` + `justify-end` + `overflow-hidden`。卡片可用宽度 < 517 时，画不下的周从左侧溢出并被裁掉 —— 裁切点落在**格子与文字的中途**，所以是「半格 / 半个字」。实测 640 CSS 宽的窗口（卡片 592、可用宽 363）下，左侧 154px 被裁掉，约 15 周的格子与月份字只剩半截。
+- 气泡挂在这个 `overflow-hidden` 容器里，第一行的气泡向上偏移 118% 正好越过容器上缘，被切上半截。
+
+**改动点**（`src/modules/dashboard/UsageHeatmap.tsx`）：
+- **量宽再定周数**：callback ref + `ResizeObserver` 读容器 `clientWidth`，按 `floor((w + gap) / (7 + gap))` 算能放几**整周**，只从最早处整周收，格子恒 ≥ 7px；不再有 `minWidth`，也就没有半列 / 半字。
+- **刻度与文案跟着重算**：月份列号左移后重算，首列若是半个某月则不落标签（与原规则一致）；左侧与右侧第三枚指标的标签改成实际跨度（`近 N 个月`，够 52 周时仍是「近一年」），「有记录 X 天」也按实际画出的范围数。
+- **气泡移到卡片层**：`section` 加 `relative`，气泡作为它的直接子元素定位（不再被格子容器的 `overflow-hidden` 切），左右各留 92px 夹一下，贴边的格子也不会把气泡甩出卡片。
+
+**验收**：web / node tsc 0 错；`verify-dashboard.mjs` 105 项全绿（H4 / H5 改为「列宽下限 7px + 整周收窄 + 无 minWidth」）；真实 Chromium（`tmp/heat-probe/`，`?card=` / `?tip=` 走实际组件）在 640 / 700 / 800 / 900 / 1000 / 1081 / 1120 / 1280 / 1440 / 1920 十个视口实测：`clippedOnLeft` 恒 0、文档无横向溢出、列数 36…52、格宽 7.0–19.1px；640 视口为 4 月–11 月（36 周，标「近 8 个月」），1440 视口仍是 12 月–11 月（52 周，标「近一年」）；第一行悬停气泡完整可见。截图 `tmp/dashboard-impl-shots/heat-narrow-640.png` / `heat-narrow-1081.png`（探针目录 `tmp/heat-probe/` 不进 git）。
+
 ## 2026-11-14 · 工作台右栏删除「最近编辑」卡片
 
 **现状 / 用户反馈**：工作台右侧边栏「小工具」态分上中下三段，中段是一张常驻的「🕘 最近编辑」卡片（近 7 天最多 6 条，窗口最大化时最多 20 条）。用户反馈这张卡已经没什么用，可以直接删除。
@@ -2773,3 +2788,74 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`.AGENT/scripts/workbench-shell/verify-workbench-shell.mjs` 的 E1c / E1d / E6f / E6g 改为「卡片已删除 + 余量归下段」断言；探针 `probes/probe-right-panel-inspect.mjs` 去掉中段取样。顺手修正两条早已与实现脱节的存量断言（E5d 番茄钟环判定、E6 右栏外壳类名）——本轮跑契约前即 FAIL，与本改动无关。
 
 **验收**：双端 `tsc --noEmit` 0 错；`npm run build` 通过；`verify-workbench-shell.mjs` 273 项全绿。真机待验：右栏还原 / 最大化各看一眼（下段吃满、桌宠仍贴底、控件切换与 ⋯ 选显不变）。
+
+## 2026-11-14 · 右栏网址导航搜索框改组合框 + 全仓输入框画法盘点
+
+**现状 / 用户反馈**：工作台右栏「网址导航」简略视图的搜索框是「外层 div 画一道边框 + 内部 `<input>` 仍带全局 1px 边框」，两层细线叠成框中框；占位符用了 `--text-muted`（规范要求 `--text-disabled`），也没有清除钮 / Esc。用户要求按规范优化，并排查其他不符合规范的位置。
+
+**改动点**：
+- `src/components/workbench/widgets/NavWidget.tsx`：外壳改 `.kb-field`（唯一一道框 + `:focus-within` 转 accent），内部改 `.kb-field-control`；`h-28` / 12px，有内容时出 ✕ 清除钮，`Esc` 清空，补 `aria-label`（搜索 / 清除）。
+- 同轮盘点 249 `<input>` / 25 `<textarea>` / 26 `<select>`（按「带边框祖先」筛出 142 处逐条判断），修掉 7 处同类问题：右栏番茄钟主题（补 `focus-within` 焦点描边 + 内部控件走 `.kb-field-control`，弃内联 `style` 归零）、密码本密码显示框（外壳 `.kb-field` + 内部归零）、思维导图节点改名、日程工作流阶段 / 检查点、分享卡片提示词浮层、AI 教学补充回答（均补 `.kb-field-control`）。
+- 其余搜索框（命令面板 / 模型选择 / 关联页 / 书签工具 / 密码本搜索等）本质是 A 形态：input 自画唯一一道框，外层只有分隔线，无框中框，不动。
+- 规范文档 `docs/input-field-pattern.md` §7 盘点表补 8 行 + 本轮结论；契约 `.AGENT/scripts/input-field/verify-input-field.mjs` 迁移清单补 7 项，并锁住网址导航的清除钮 / Esc / aria-label。
+
+**验收**：web tsc 0 错；`npm run build` 通过；`verify-input-field.mjs` PASS（含新增 9 项）。真机待验：右栏网址导航搜索框只剩一道框、焦点描边、✕ 与 Esc 生效；上述 7 处在各自面板里不再出现内层细线。
+
+## 2026-11-14 · 看板右列第三卡换 AI 用量 + 右列底边与左侧对齐
+
+**现状 / 用户反馈**：看板右列三张卡里第三张是「在读 / 书架」。用户书架里没有在读的书时，这张卡只有一行「书架还没有在读的书」，占着右列最后一块位置却没有信息量；同时右列三张卡都是按内容撑高，窗口一高，右列底部就比左侧「今日纸 + 热力图」短一截，两块大卡的下边缘对不齐。
+
+**改动点**：
+- **第三卡换成 AI 用量**（`src/modules/dashboard/ModuleWindow.tsx` 的 `AiUsageWindow`）：上段是今日 token（大字，悬停给精确值）与调用次数；中段是**近 7 天迷你柱图**（7 根柱按峰值归一、缺日留 2px 底座、今天用强调色 + 加粗星期字；全 0 时退化成一句「近 7 天还没有用量」，不画一排看不见的柱），柱区吃 `flex-1`，窗口变高时柱子变高 —— 对齐后多出来的高度不会变成一块空白；柱高按 `ResizeObserver` 实测的柱区像素算（`height: %` 在 flex 分配出来的高度里解析不出来，实测会整排 0 高）；下段是账户额度条（5 小时 / 本周 / 本月，`windowLevel` 分档配色与用量模块同一套，带重置倒计时）；金额类额度（无分母）只写余额一行，不画假进度条；底部整行「打开用量 →」进整窗用量模块。
+- **数据**：`DashboardSnapshot` 加 `aiUsage: { todayTokens, todayCalls, last7 }`（`getAiUsageData().days`，今日 token = `in + out`，与用量模块同源同口径；`last7` 按本地日逐天回退 7 格、缺日补 0）；额度不进快照 —— 要联网，渲染层挂载后单独走 `llm:quota:get`（主进程 5 分钟缓存），不拖首屏。
+- **在读卡下线**：`reading` 字段、`DASHBOARD_LIMITS.reading` 与 `listBooksImpl` 依赖一并删除；`DashboardModule` 不再收 `onOpenBook`。
+- **高度对齐**：右列前两张 `flex-none`，AI 用量卡 `grow`（`flex-1`）吃掉余高；实测 1280×820 下右列 146–793 与左列 146–793 完全一致（第三卡 317px，多出来的高度落在卡内，而不是留一截空列）。
+- 顺手把「底部整行入口」抽成 `WindowFooter`（工作台 / 用量两处共用，不再各抄一遍样式）。
+
+**验收**：双端 `tsc --noEmit` 0 错；`npm run build` 通过；`verify-dashboard.mjs` 115 项全绿（新增 F18–F21 / H19–H22，锁住 aiUsage 口径、近 7 天逐日回退、额度来源、grow 吃余高、迷你柱图归一、在读卡负向）。真实 Chromium（CDP 探针，dev 数据）：1280×820 下右列 `aside` 与左侧主体 top/bottom 均为 146/793（第三卡 317px）；1600×1000 下两者均为 156/973（第三卡 487px，柱图区约 190px，柱子跟着变高、底部不再空一截）；AI 用量卡显示今日 0 tokens / 0 次调用 + 7 根柱 + opencode 三个窗口（0% / 9% / 100% 限速中）。
+
+## 2026-11-15 · 仓库切换入口从工作台左栏迁到看板纸头
+
+**现状 / 用户反馈**：看板升为首页后，仓库切换仍只在工作台「总览态」的左栏底部（`data-wb="vaultBar"`）—— 从看板根本够不到；用户要求把入口搬到看板。
+
+**改动点**：
+- `src/components/shared/VaultSwitcher.tsx` 加 `variant?: 'bar' | 'chip'`：`chip` 是看板纸头用的小胶囊（12px 图标 + 10.5px 名字 + 10px 箭头，宽度上限 `min(260px,42vw)`，名字单行截断），`bar` 保持原侧栏条外观。面板与全部数据操作（最近仓库 / 从列表移除 / 删除仓库文件夹 / 打开其他 / 重命名 / 新建）两种形态共用。
+- **弹出方向**：`chip` 向下（`top = 按钮底缘 + 6px`，下方不足时 `maxHeight` 按可用高度收、面板自身滚动）；`bar` 仍向上（`bottom` 锚定）。夹取宽度沿旧口径 268。
+- `src/modules/dashboard/index.tsx`：hero 的日期行改成 flex，`<VaultSwitcher variant="chip" />` 放在 `dateLine` 左边；日期仍单行截断。
+- `src/components/workbench/WorkbenchLeftPanel.tsx`：删除底部 `vaultBar` 整块与 `VaultSwitcher` 引用（左栏总览态现在以「软件文件」折叠节收尾）。
+- 契约：`verify-dashboard.mjs` 新增 §K（K1 纸头接线 / K2 负向：左栏不再有 vaultBar / K3 两种弹出方向 / K4 共用面板 / K5 aria 与 tooltip），共 120 项；`probe-shell-b3` 与 `probe-tabbar-dyn` 的原「vaultBar 必须渲染」断言改为「已退役」（否则探针成了回退守卫）。
+- AI 手册：`resources/help/常见问题.md`「可以建多个仓库吗？怎么切换？」一句改成新入口（原文还写着「标题栏的仓库名处」，本就已过时）。
+
+**验收**：双端 `tsc --noEmit` 0 错；`verify-dashboard` 120 项、`verify-vault-list` 24 项、`verify-workbench-shell` 273 项全绿；原型 `tmp/vault-switch-proto/index.html`（四形态 + 深色 + 窄窗）。真机待验：看板纸头签在 100% / 150% 下名字截断与面板位置、下方空间不足时面板高度收窄并可滚动、切换后遮罩与整窗重载。
+
+## 2026-11-15 · 图标条「看板 / 工作台」两枚图标重画（按看板本体缩略）
+
+**现状 / 用户反馈**：图标条顶部「看板」是 lucide `LayoutGrid`、「工作台」是 `LayoutPanelLeft` —— 两枚都读作「圆角方框 + 内部分割」，只差一条竖线；22px 下、激活态再染成 accent 色之后几乎同形，用户反馈「两个图标看着相像」。
+
+**改动点**：
+- **看板 = 首页五控件缩略**（`DashboardIconHandDrawn`）：左列「今日纸」（flex-1）长 + 「使用热力图」矮（10 : 4 ≈ 2.5 : 1），右列 AI 课程 / 工作台窗口 / AI 用量三块叠放，块间距 2.0；**不加外框** —— 工作台已经占了「带框的窗口」这一族，看板靠「五个块的比例」被认出来。右列在图标里画到 33% 宽（真实布局约 23%）：照真实比例右列在 22px 下只有 3.5px，三块会细到看不见，这个失真是故意的。
+- **工作台 = 左竖带 + 正文三行**（`WorkbenchIconHandDrawn`，第一轮原型 D 方案定稿）。
+- 形状抽到 **`src/lib/railIconShapes.tsx`**（`DashboardShape` / `WorkbenchShape`）：手绘包（`ModuleIcons.tsx`，1.6 / rx 大一点）与经典细线包（`sidebarIcons.tsx` 的 classic140，1.5 / rx 收到接近 1）**共用同一套几何**，只是笔宽与圆角不同 —— 两处各抄一遍必然漂移；不放在 `ModuleIcons` 里是因为它与 `sidebarIcons` 互相 import 会成环。`ModuleIcons` 导出 `DashboardIcon` / `WorkbenchIcon` 两个 StyleAware，`IconModuleId` 加 `dashboard` / `workbench`；`ActivityBar.tsx` 顶部两枚换用新图标并删掉那两个 lucide import。
+- 契约：`.AGENT/scripts/dashboard/verify-dashboard.mjs` 新增 G15（顶部两枚必须走自绘图标、不得再引 lucide 布局图标）/ G16（两包共用 `railIconShapes` 的同一套几何、经典包 1.5、两个 moduleId 都在 `IconModuleId` 里）。
+- 原型：`tmp/rail-board-workbench-icons/board-v3.html`（含 22px 真实像素放大对照；前两轮 `index.html` / `board-v2.html` 保留作过程记录）。
+
+**验收**：双端 `tsc --noEmit` 0 错；`npm run build` 通过；`verify-dashboard` 新增两项 PASS（该脚本原有的 F19 FAIL 与本轮无关 —— 看板快照改 `tokensOf(today)` 后断言没跟，属存量脱节）；`verify-workbench-shell` 273 项、`verify-startup-tab` 26 项、`verify-recycle-bin` 28 项、`verify-book-market-ui` 全绿。真机待验：100% / 150% 缩放下两枚都能一眼分开，激活态（accent 上色）下右列三条缝仍在。
+
+## 2026-11-15 · 看板打卡折叠 + 今日时间线只收今天
+
+**现状 / 用户反馈**：
+- 设置「每天晚上复盘」这类固定日程后，如果当天没有别的安排，看板时间线会反复出现同一条重复任务（用户原话「他就会一直去显示这个重复任务」）。
+- 打卡项一多，主卡片会把时间线压扁，右侧竖列大约 8–10 枚就顶出卡片；旧实现没有滚动兜底，超过 20 个激活习惯时快照还会直接截断。
+
+**根因**：
+- 今日待办走 `vaultTodosForDate(today)`，它刻意包含**任何日期**未完成的计划类（日程日视图的「待安排」栏需要）；固定日程默认 `task_type = plan`，一次结算生成整周实例，看板没按日期收窄，于是整周同一任务全进了时间线。
+- 打卡区直接 `snap.habit.items.map` 铺满，`habitItems` 20 的上限只是数据护栏，UI 既没有折叠也没有滚动。
+
+**改动点**：
+- `dashboardRepo.ts`：今日待办严格 `date === today`（含已完成、排除已取消）；`habitItems` 20 → 100，弹层负责承载。
+- `summary.ts`：新增 `orderHabits`（未打卡在前、已打卡在后、组内保持原序，纯函数可契约）。
+- `HabitChips.tsx`（新）：主卡片只铺前 6 枚，其余收进「+N」；浮层走 `AnchoredLayer` 挂 body，内部可滚动、可继续勾选；长名字截断。
+- `docs/dashboard-home-plan.md` 同步版面与交互口径。
+- 契约：`verify-dashboard.mjs` 新增 C12–C15 排序用例与 §L 折叠弹层接线，共 132 项。
+
+**验收**：双端 `tsc --noEmit` 0 错；`verify-dashboard` 132 项、`verify-release-notes`、`verify-workbench-shell` 273 项、`verify-startup-tab` 26 项、`verify-input-field`、`verify-vault-list` 24 项全绿；8 个习惯的 SSR 自检输出「6 枚 + `+2`」，顺序为未打卡在前。

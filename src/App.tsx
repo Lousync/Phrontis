@@ -1809,19 +1809,13 @@ export default function App() {
       // 看板（2026-09-27；2026-11-14 重做为「今日纸」首页）：**应用顶层视图**，
       // 图标条最上面那枚进入，左右栏与页面条退场（WORKBENCH_TABBAR_EXCLUDED）。
       // 回看板只走图标条；看板自己不再有返回箭头，工作台 / AI 教学里也没有「↑ 看板」按钮。
-      // 右列两个模块窗口：工作台窗口列 openTabs（点一条直达），AI 教学窗口吃快照里的 course。
-      // onOpenBook（反馈 5②）：在读的书点条目 → 直接进书架阅读态（与摘录「回到原文」同链；
-      // kind 磁盘推导；单向跳转 —— 拍板不做「返回看板」）。
+      // 右列三个模块窗口：工作台窗口列 openTabs（点一条直达）、AI 教学窗口吃快照里的 course、
+      // AI 用量窗口吃快照里的 aiUsage（额度条自己拉 llm:quota:get）。
       case 'dashboard': return <DashboardModule
         openTabs={openTabs.filter((t): t is TabName => isTabName(t))}
         lastTab={lastWorkbenchTab}
         onOpenTab={handleTabChange}
         onOpenWorkbench={goWorkbench}
-        onOpenBook={(relPath) => {
-          const kind = bookKindOf(relPath) ?? 'pdf'
-          setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind })
-          handleTabChange('bookshelf')
-        }}
         onJumpSchedule={() => handleTabChange('schedule')}
         // 更新说明入口（2026-11-14）：只在「有未读 + 「新版本时在看板提醒」开着」时出。
         // 开关关掉 = 连这枚入口都不出现（用户要的是彻底静默）。
