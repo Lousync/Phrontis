@@ -2,7 +2,7 @@
 
 > 状态：**已实施（2026-11-15，v3.30.0）**
 > 原型：`tmp/home-view-proto/index.html#e`（方案 E · 今日纸）
-> 契约：`.AGENT/scripts/dashboard/verify-dashboard.mjs`（132 项）
+> 契约：`.AGENT/scripts/dashboard/verify-dashboard.mjs`（133 项）
 
 ## 1. 目标（已达成）
 

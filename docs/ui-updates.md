@@ -2859,3 +2859,13 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`verify-dashboard.mjs` 新增 C12–C15 排序用例与 §L 折叠弹层接线，共 132 项。
 
 **验收**：双端 `tsc --noEmit` 0 错；`verify-dashboard` 132 项、`verify-release-notes`、`verify-workbench-shell` 273 项、`verify-startup-tab` 26 项、`verify-input-field`、`verify-vault-list` 24 项全绿；8 个习惯的 SSR 自检输出「6 枚 + `+2`」，顺序为未打卡在前。
+
+## 2026-11-15 · 看板热力图格子按列铺（每列一周）
+
+**现状 / 用户反馈**：看板「近一年热力图」有内容的颜色全挤在最下面一两行，横向连成几条带，和月份刻度对不上（用户截图：「有内容的排列有问题」）。
+
+**根因**：格子容器是 `grid-template-columns: repeat(52, …)` + `grid-template-rows: repeat(7, 12px)`，但 `cells` 是按「每 7 天 = 一列」排列的时间序列。CSS Grid 默认 `grid-auto-flow: row`，会先把第 1 行 52 个格子铺满、再铺第 2 行 —— 于是整年的日期被横着切成 7 条时间带，最近几个月自然落在最下面一两行。旧的打卡轨迹（`.desk-act`）一直带 `grid-auto-flow: column`，这次新看板重写时漏了。
+
+**改动点**：`UsageHeatmap.tsx` 的格子容器补 `gridAutoFlow: 'column'`；契约新增 H4b 锁住它（`verify-dashboard` 133 项）。
+
+**验收**：真实 Chromium 最小复现：带 `column` 时前 7 个格子同 x、y 递增，第 8 个换列；不带时前 7 个同 y、x 递增（复现现象）。双端 tsc 0 错；`verify-dashboard` 133 项全绿。

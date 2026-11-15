@@ -4,11 +4,45 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：79
+ * 版本数：80
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.30.1",
+    "date": "2026-11-15",
+    "summary": "本版一句话：修看板热力图的排列 —— 每列是一周，日期颜色不再横着挤成几条。",
+    "groups": [
+      {
+        "title": "看板 · 使用热力图",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "按列铺格子",
+            "rest": "时间序列按「每 7 天 = 一列」排列，每列从上到下是周一到周日。此前漏了 `gridAutoFlow: column`，浏览器默认按行横铺，表现为最近几个月的颜色全挤在最下面一两行、和月份刻度对不上。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "本周使用天数 / 有记录天数 / 今日分钟数口径不变，仍与画出来的格子同一份数据。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "契约 `verify-dashboard.mjs` 新增 H4b，锁住热力图格子的 `gridAutoFlow: 'column'`（133 项）。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.30.0",
     "date": "2026-11-15",
