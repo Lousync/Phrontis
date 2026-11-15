@@ -304,6 +304,8 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
   ok('H3 时间线用纯函数模型', /orderTimeline\(/.test(dash))
   ok('H4 热力图区间 52 列、格子随宽度自适应（列宽下限 7px）',
     /heatRange\(/.test(heat) && /minmax\(\$\{MIN_CELL\}px, 1fr\)/.test(heat) && /MIN_CELL = 7/.test(heat))
+  ok('H4b 格子按列铺（每列一周）；默认按行横铺会把最近几个月的颜色挤到最下面',
+    /gridAutoFlow:\s*'column'/.test(heat))
   ok('H5 窄卡片按整周收掉最早的周（不裁半列 / 不裁半个字，也不再写死 minWidth）',
     /ResizeObserver/.test(heat) && /model\.cells\.slice\(dropped \* 7\)/.test(heat)
     && !/minWidth/.test(heat) && /spanLabel/.test(heat))

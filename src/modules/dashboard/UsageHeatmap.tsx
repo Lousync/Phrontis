@@ -130,7 +130,10 @@ export function UsageHeatmap({ days, today, todayMinutes, compact }: Props) {
             ))}
           </div>
 
-          <div className="grid" style={{ gridTemplateColumns: cols, gridTemplateRows: 'repeat(7, 12px)', gap: GAP }}>
+          {/* ★ gridAutoFlow 必须是 column：cells 是按**周**排列的时间序列（每 7 天 = 一列），
+              默认的 row 会把它横着铺成 7 条「时间带」—— 表象是最近几个月的颜色全挤在最下面
+              一两行、月份刻度和格子对不上（2026-11-15 实机反馈）。 */}
+          <div className="grid" style={{ gridTemplateColumns: cols, gridTemplateRows: 'repeat(7, 12px)', gridAutoFlow: 'column', gap: GAP }}>
             {cells.map((c, i) => c === null ? (
               <i key={`pad-${i}`} className="invisible" />
             ) : (
