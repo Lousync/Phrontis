@@ -2918,3 +2918,17 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`verify-workbench-shell.mjs` D2b / D2b2 / D2b3 改为「ToolHost 有 pomodoro 分支 + App 无覆盖层挂载 + 入口统一事件」。
 
 **验收**：双端 `tsc --noEmit` 0 错；`verify-workbench-shell` 275 项全绿；`verify-release-notes` 通过。
+
+## 2026-11-16 · 昼夜主题下笔记左栏分组条去底色
+
+**现状 / 用户反馈**：笔记区左栏「今天 / 本周」分组条在昼夜主题下像一条突兀的实心奶油横条，和侧栏半透明玻璃的透明边框对不上（截图对比 15:00）。
+
+**根因**：分组头铺的是 `--bg-secondary` 95% 实心底 + 药丸计数 + 横线，而面板是「`--wb-glass-bg` = 44% + 0.8 × 晨昏增益」的玻璃。天空从面板透上来偏青灰的时段，实心奶油条与面板的色差被放大；药丸和横线又加重了「独立表面」的读感。分组头本质是标题，不是可读面。
+
+**改动点**：
+- `src/modules/knowledge/components/NoteFeed.tsx`：分组按钮 / 计数 / 横线挂语义类 `kb-feed-group` / `kb-feed-group-count` / `kb-feed-group-rule`。
+- `src/styles/index.css`（daycycle 块）：`html.theme-daycycle .kb-feed-group` 改为 `position: static` + 透明底 + 去掉 `backdrop-filter`，上下留白改 16px / 4px；计数去药丸底、横线隐藏。其它主题保持原样（实心底与页面同色，本来就看不出来）。
+- 刻意不做透明吸顶：滚动内容会从文字下穿过；补一层底（哪怕只靠 blur）会在已带 `backdrop-filter` 的面板上再留一块更亮的补丁（Chromium 实测），与「和侧栏同透明」冲突。
+- 契约 `verify-daycycle.mjs` 增 C9l（语义类接线 + daycycle 去底色 / 去吸顶）。
+
+**验收**：`tsc --noEmit -p tsconfig.web.json` 0 错；`verify-daycycle.mjs` 全绿。

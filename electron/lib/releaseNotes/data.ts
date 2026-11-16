@@ -4,11 +4,39 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：91
+ * 版本数：92
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.42.1",
+    "date": "2026-11-16",
+    "summary": "本版一句话：昼夜主题下，笔记左栏的「今天 / 本周」不再是一条突兀的奶油色横条。",
+    "groups": [
+      {
+        "title": "笔记区 · 左栏分组条",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "贴合侧栏透明",
+            "rest": "分组标题去掉 95% 实心底、计数药丸和横线，改成随列表滚动的纯标题，和半透明侧栏同一层。",
+            "sub": []
+          },
+          {
+            "lead": "不再吸顶",
+            "rest": "为保证视觉上和侧栏完全同透明，分组标题随列表滚走（吸顶会需要再盖一层底色）。",
+            "sub": []
+          },
+          {
+            "lead": "改动范围",
+            "rest": "只影响昼夜动态主题；其它主题保持原样。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.42.0",
     "date": "2026-11-16",

@@ -118,12 +118,15 @@ export function NoteFeed({ pages, activePageId, sort, onOpen, onContextMenu }: N
                 else next.add(g.key)
                 return next
               })}
-              className="sticky top-0 z-[1] flex w-full items-center gap-2 bg-[var(--bg-secondary)]/95 px-2 pb-1.5 pt-2.5 text-left text-[11px] font-semibold tracking-wide text-[var(--text-muted)] backdrop-blur-sm hover:text-[var(--text-secondary)]"
+              /* 分组头是「标题」不是「表面」：昼夜主题下面板是半透明玻璃，铺 95% 实心底
+                 会变成一条突兀的奶油横条（2026-11-16 用户反馈）。daycycle 覆盖见 index.css
+                 `.kb-feed-group`：去掉底色 / 吸顶 / 药丸 / 横线，结构交给留白。 */
+              className="kb-feed-group sticky top-0 z-[1] flex w-full items-center gap-2 bg-[var(--bg-secondary)]/95 px-2 pb-1.5 pt-2.5 text-left text-[11px] font-semibold tracking-wide text-[var(--text-muted)] backdrop-blur-sm hover:text-[var(--text-secondary)]"
             >
               <ChevronDown size={12} className={`shrink-0 text-[var(--text-disabled)] kb-chevron ${closed ? '-rotate-90' : ''}`} />
               <span>{g.key}</span>
-              <span className="rounded-full bg-[var(--bg-tertiary)] px-1.5 text-[9.5px] font-normal leading-[15px] tabular-nums text-[var(--text-disabled)]">{g.pages.length}</span>
-              <span className="ml-0.5 h-px flex-1 bg-[var(--border-color)] opacity-55" />
+              <span className="kb-feed-group-count rounded-full bg-[var(--bg-tertiary)] px-1.5 text-[9.5px] font-normal leading-[15px] tabular-nums text-[var(--text-disabled)]">{g.pages.length}</span>
+              <span className="kb-feed-group-rule ml-0.5 h-px flex-1 bg-[var(--border-color)] opacity-55" />
             </button>
             {!closed && g.pages.map((p) => (
               <div key={p.id} className={cvClass}>

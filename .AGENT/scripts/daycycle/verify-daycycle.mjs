@@ -258,6 +258,13 @@ function mixRgb(c1, c2, t) {
   ]) {
     assert(read(file).includes('kb-glass-chrome'), `C9k ${hint} 挂 kb-glass-chrome`)
   }
+  // 笔记左栏分组条（2026-11-16）：分组头是标题不是表面 —— 昼夜主题下不许铺 95% 实心底、
+  // 不许吸顶（透明吸顶要么露字、要么嵌套 backdrop-filter 在面板上留补丁）。
+  const noteFeed = read('src/modules/knowledge/components/NoteFeed.tsx')
+  assert(noteFeed.includes('kb-feed-group') && noteFeed.includes('kb-feed-group-count') && noteFeed.includes('kb-feed-group-rule'),
+    'C9l 笔记分组条挂语义类（底色 / 计数 / 横线可被昼夜主题单独接管）')
+  assert(/html\.theme-daycycle \.kb-feed-group\s*\{[^}]*position:\s*static[^}]*background-color:\s*transparent/.test(css),
+    'C9l 昼夜主题分组条去底色 / 去吸顶（不再是一条实心奶油横条）')
 
   const app = read('src/App.tsx')
   assert(app.includes('startDaycycleEngine()') && app.includes('stopDaycycleEngine()'),

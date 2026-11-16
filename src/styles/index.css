@@ -3155,6 +3155,30 @@ html.theme-daycycle .kb-activitybar {
 html.theme-daycycle .kb-statusbar {
   background-color: color-mix(in srgb, var(--bg-tertiary) calc(52% + var(--dc-glass-boost, 0%) * .5), transparent);
 }
+/* 笔记左栏「今天 / 本周」分组条（2026-11-16 用户反馈：「和侧栏的透明边框不太搭配」）。
+   分组头是**标题**不是表面：原来铺 95% 的 --bg-secondary，在面板偏青灰的时段就是一条
+   实心奶油横条，压在半透明玻璃上格外突兀。这里改成「随列表滚动的纯标题」——
+   去底色 / 去吸顶 / 去药丸 / 去横线，结构交给留白（铁律 26）。
+   ★ 连吸顶一起放弃是刻意的：透明元素吸顶时，滚上来的内容会从字下面穿过；要挡住就得
+     再盖一层底（哪怕只靠 backdrop-filter）。而面板自身已带 backdrop-filter，嵌套一层
+     会在面板上额外留下一块更亮的补丁（Chromium 实测「今天」区域比周围亮一截）——
+     与「和侧栏同透明度」直接冲突，二者只能取一个。 */
+html.theme-daycycle .kb-feed-group {
+  position: static;
+  background-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding-top: 16px;
+  padding-bottom: 4px;
+}
+html.theme-daycycle .kb-feed-group-count {
+  background-color: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+html.theme-daycycle .kb-feed-group-rule {
+  display: none;
+}
 /* Edge 式页签的激活条目：底色必须跟内容面同一配方。
    `--wb-glass-bg` 压在外壳卡上 = 「卡 + 填充」两层，比正文面深一档 —— 正好读出「当前页」的隆起；
    两侧 8px 内凹弧也必须同配方，否则那两枚角会变成两块**不透明**奶油色贴在半透明卡上（原本是 var(--bg-primary) 实色）。 */
