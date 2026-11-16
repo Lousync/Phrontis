@@ -6,6 +6,7 @@ import { copyText } from '../../../lib/ipc'
 import { StreamBubble } from './StreamBubble'
 import { ProcessSummary, type TraceRowView } from './ProcessSummary'
 import { ImageCard, imageGroupsOf } from './ImageCard'
+import { PlanTodoCard, latestTodoOf } from './PlanTodoCard'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import type { AgentTraceStep, ResumeInfo } from '../../../types'
 import { toolActionLabel } from '../../../lib/toolLabels'
@@ -294,6 +295,9 @@ export function MessageList({
     return { pendingArgs, groups, errors }
   }, [liveSteps])
 
+  /** P1-4：生成态的任务清单（agent:step 实时推送，运行结束后由落库 trace 接手） */
+  const liveTodo = useMemo(() => latestTodoOf(liveSteps), [liveSteps])
+
   const list = (
     <div
       ref={scrollRef}
@@ -311,6 +315,8 @@ export function MessageList({
             <>
               {/* 过程收起来（默认收起）：思考时长 + 工具清单折成一行，点开是事件流 */}
               <ProcessSummary rows={traceRows(m.trace)} />
+              {/* P1-4：任务清单（数据源 = trace 里最后一条 todo 快照 ⇒ 刷新后还在） */}
+              <PlanTodoCard items={latestTodoOf(m.trace)} />
               {/* 去气泡（docs/code-block-card-plan.md §2.2 末段 / §7-3 改后 B）：助手侧与 AI 教学一样
                  平铺 markdown 原生排版 —— 否则代码卡片自带 bg + 边框，在这一面变成「框中框」。
                  ★ 下面这几样**一个都不能顺手删**：select-text（body 全局 user-select:none，删了
@@ -429,6 +435,9 @@ export function MessageList({
           </span>
         </div>
       ))}
+
+      {/* P1-4：生成态任务清单（工具调用后实时出现；结束时 trace 版本接上，不重复） */}
+      {pending && <PlanTodoCard items={liveTodo} />}
 
       {/* 生图（生成态）：占位框在**状态行下方**单独一档 —— 它是"图位"，不是过程文本的一部分。
           停止钮在图上常显（C3），与输入区那颗停止键并存（那颗停的是整轮）。 */}

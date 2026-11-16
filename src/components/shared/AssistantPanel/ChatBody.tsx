@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
-  RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2,
+  RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2, ListChecks,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
@@ -705,15 +705,20 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   <button
                     onClick={() => setPop(p => (p === 'writeMode' ? null : 'writeMode'))}
                     disabled={pending}
-                    data-tip={writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'} aria-label={writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'}
+                    data-tip={writeMode === 'plan'
+                      ? '只读规划：写工具与命令全部隐藏，先调查再给计划'
+                      : writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'}
+                    aria-label={writeMode === 'plan'
+                      ? '只读规划：写工具与命令全部隐藏，先调查再给计划'
+                      : writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'}
                     className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${
-                      writeMode === 'confirm'
+                      writeMode !== 'direct'
                         ? 'text-[var(--accent)]'
                         : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
                     }`}
                   >
-                    <Zap size={12} />
-                    {!isNarrow && <span className="leading-none">{writeMode === 'confirm' ? '先预览' : '直接执行'}</span>}
+                    {writeMode === 'plan' ? <ListChecks size={12} /> : <Zap size={12} />}
+                    {!isNarrow && <span className="leading-none">{writeMode === 'plan' ? '只读规划' : writeMode === 'confirm' ? '先预览' : '直接执行'}</span>}
                   </button>
                   </>)}
                   {!scheduleMode && (<>
@@ -814,6 +819,17 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       <span className="min-w-0">
                         <span className="block text-[12px] text-[var(--text-primary)]">先预览</span>
                         <span className="block text-[10.5px] text-[var(--text-muted)]">任务结束后统一确认；不可预览工具会从工具面移除</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setWriteMode('plan'); setPop(null) }}
+                      className="flex w-full items-start gap-2 px-2.5 py-2 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      <Check size={12} className={`mt-0.5 shrink-0 ${writeMode === 'plan' ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] text-[var(--text-primary)]">只读规划</span>
+                        <span className="block text-[10.5px] text-[var(--text-muted)]">不写任何文件 / 不跑命令；先调查，再给计划与任务清单</span>
                       </span>
                     </button>
                     <div className="border-t border-[var(--border-color)] px-2.5 py-1.5 text-[10px] text-[var(--text-muted)]">

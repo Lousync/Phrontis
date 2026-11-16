@@ -730,21 +730,26 @@ export function AiAssistantModule({
               <>
                 <button
                   type="button"
-                  onClick={() => api.setWriteMode(api.writeMode === 'confirm' ? 'direct' : 'confirm')}
+                  onClick={() => api.setWriteMode(api.writeMode === 'direct' ? 'confirm' : api.writeMode === 'confirm' ? 'plan' : 'direct')}
                   disabled={api.pending}
                   className={`flex h-7 items-center gap-1 rounded-md px-2 text-[11px] transition-colors disabled:opacity-40 ${
-                    api.writeMode === 'confirm'
+                    api.writeMode !== 'direct'
                       ? 'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   }`}
-                  data-tip={api.writeMode === 'confirm'
-                    ? '先预览：写操作等确认后应用（点击切直接执行）'
-                    : '直接执行：写操作立即落盘（点击切先预览）'} aria-label={api.writeMode === 'confirm'
-                    ? '先预览：写操作等确认后应用（点击切直接执行）'
-                    : '直接执行：写操作立即落盘（点击切先预览）'}
+                  data-tip={api.writeMode === 'plan'
+                    ? '只读规划：写工具与命令隐藏（点击切直接执行）'
+                    : api.writeMode === 'confirm'
+                      ? '先预览：写操作等确认后应用（点击切只读规划）'
+                      : '直接执行：写操作立即落盘（点击切先预览）'}
+                  aria-label={api.writeMode === 'plan'
+                    ? '只读规划：写工具与命令隐藏（点击切直接执行）'
+                    : api.writeMode === 'confirm'
+                      ? '先预览：写操作等确认后应用（点击切只读规划）'
+                      : '直接执行：写操作立即落盘（点击切先预览）'}
                 >
                   <Zap size={11} />
-                  {api.writeMode === 'confirm' ? '先预览' : '直接执行'}
+                  {api.writeMode === 'plan' ? '只读规划' : api.writeMode === 'confirm' ? '先预览' : '直接执行'}
                 </button>
                 <button
                   ref={modelTriggerRef}

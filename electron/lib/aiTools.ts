@@ -87,7 +87,7 @@ export interface ToolInvokeCtx {
   /** 是否整个仓库（与 scope 配合，区分「整仓」和「明确不选文件」） */
   scopeAll?: boolean
   /** 统一助手的写入策略；confirm 下所有可暂存写工具只记入变更方案 */
-  writeMode?: 'direct' | 'confirm'
+  writeMode?: 'direct' | 'confirm' | 'plan'
   /**
    * 暂存（propose）模式：统一助手 confirm 模式下由 AgentRunner 注入。
    * true 时写工具不直接落盘，改由 aiAssistantCommit / 通用暂存层记入变更方案。
@@ -357,6 +357,16 @@ async function invokeTool(
   }
 
   // 统一 AI 助手 confirm 模式：非 handler 自暂存的写工具在这里统一暂存。
+  // P1-4：只读规划模式硬拦截 —— 工具面已经把写工具滤掉，这里兜住模型幻觉调用。
+  if (ctx?.writeMode === 'plan' && tool.requires === 'write') {
+    appendAudit(callerPluginId, auditActionFor(name) + '.denied', { tool: name, reason: 'plan-mode' })
+    return {
+      ok: false,
+      code: 'EXEC_ERROR',
+      message: '当前是只读规划模式：写操作与命令一律不执行。请先输出计划，用户确认后切到「直接执行」或「先预览」',
+    }
+  }
+
   // handler 自暂存的 vault 文件工具（commitOrStage）不受影响，避免双重记录。
   if (ctx?.propose === true && ctx.apply !== true && ctx.sessionId && tool.requires === 'write' && !isHandlerStagedTool(name)) {
     if (!isStageableWriteTool(name)) {

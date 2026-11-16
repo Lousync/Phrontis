@@ -7,7 +7,7 @@
 
 // 'intel'（📡 情报助手，v3.12.0）同为专属助手来源，与 aiTeaching / schedule 同样「不动」
 export type NormalizableSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant' | 'intel'
-export type NormalizableWriteMode = 'direct' | 'confirm'
+export type NormalizableWriteMode = 'direct' | 'confirm' | 'plan'
 
 export interface NormalizableSessionFields {
   source?: NormalizableSessionSource

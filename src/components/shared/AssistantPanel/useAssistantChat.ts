@@ -111,8 +111,8 @@ export interface AssistantChatController {
   setScope: (next: string[]) => void
   setScopeAll: (all: boolean) => void
   /** 写入策略 */
-  writeMode: 'direct' | 'confirm'
-  setWriteMode: (mode: 'direct' | 'confirm') => void
+  writeMode: 'direct' | 'confirm' | 'plan'
+  setWriteMode: (mode: 'direct' | 'confirm' | 'plan') => void
   /** 变更方案（confirm 模式） */
   plan: AiChangePlan | null
   pendingCount: number
@@ -311,7 +311,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   // 统一助手：文件作用域 / 写入策略 / 变更方案 / 会话级模型与思考强度
   const [scope, setScopeState] = useState<string[]>([])
   const [scopeAll, setScopeAllState] = useState(true)
-  const [writeMode, setWriteModeState] = useState<'direct' | 'confirm'>('confirm')
+  const [writeMode, setWriteModeState] = useState<'direct' | 'confirm' | 'plan'>('confirm')
   const [plan, setPlan] = useState<AiChangePlan | null>(null)
   const [usage, setUsage] = useState<{ in: number; out: number }>({ in: 0, out: 0 })
   const activeSession = sessions.find(s => s.id === activeId) ?? null
@@ -383,7 +383,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const scopePending = scopeTimerRef.current !== null && scopePendingRef.current?.id === activeId
     if (!scopePending) setScopeState(Array.isArray(row?.scope) ? row.scope.slice() : [])
     setScopeAllState(scopePending ? false : row?.scopeAll !== false)
-    setWriteModeState(row?.writeMode === 'confirm' ? 'confirm' : 'direct')
+    setWriteModeState(row?.writeMode === 'confirm' ? 'confirm' : row?.writeMode === 'plan' ? 'plan' : 'direct')
   }, [unified, activeId, sessions])
 
   // ===== N-3 多对话并行：运行态/流式草稿来自共享 store（三宿主单例） =====
@@ -525,10 +525,10 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     // 首次发送前（尚无会话）也要把「缩窄」写进草稿：否则新会话仍按整仓 + 直接执行创建
     setScopeState(clean)
     setScopeAllState(false)
-    if (wasAll) setWriteModeState('confirm')
+    if (wasAll && writeMode === 'direct') setWriteModeState('confirm')
     if (!id) return
-    // 从「整个仓库」主动缩窄 → 自动切先预览；扩回整仓不会自动切回
-    if (wasAll) {
+    // 从「整个仓库」主动缩窄 → 自动切先预览（规划模式不动）；扩回整仓不会自动切回
+    if (wasAll && writeMode === 'direct') {
       setSessions(prev => prev.map(s => s.id === id ? { ...s, scope: clean, scopeAll: false, writeMode: 'confirm' } : s))
       void agentSetSessionPrefs(id, { writeMode: 'confirm' }).catch(() => { /* 落库失败下一轮对齐 */ })
     } else {
@@ -542,7 +542,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       scopePendingRef.current = null
       if (pending) void agentSetSessionScope(pending.id, pending.scope, pending.scopeAll).catch(() => { /* 下次勾选会再写 */ })
     }, 400)
-  }, [unified, scopeAll, plan])
+  }, [unified, scopeAll, plan, writeMode])
 
   const setScopeAll = useCallback((all: boolean) => {
     if (!unified) return
@@ -555,7 +555,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setScopeAllState(all)
     if (all) setScopeState([])
     if (!id) {
-      if (!all && wasAll) setWriteModeState('confirm')
+      if (!all && wasAll && writeMode === 'direct') setWriteModeState('confirm')
       return
     }
     if (isSessionRunning(id)) return
@@ -574,9 +574,9 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       scopePendingRef.current = null
       if (pending) void agentSetSessionScope(pending.id, pending.scope, pending.scopeAll).catch(() => { /* 下次勾选会再写 */ })
     }, 400)
-  }, [unified, scope, scopeAll, plan])
+  }, [unified, scope, scopeAll, plan, writeMode])
 
-  const setWriteMode = useCallback((mode: 'direct' | 'confirm') => {
+  const setWriteMode = useCallback((mode: 'direct' | 'confirm' | 'plan') => {
     if (!unified) return
     if (plan?.ops.some(o => o.status === 'pending')) {
       showToast({ type: 'info', message: '有未处理的变更方案', detail: '先应用或丢弃，再改写入方式' })
@@ -668,7 +668,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     if (!sRow) return null
     if (unified) {
       await agentSetSessionScope(sRow.id, targetScope, targetScopeAll).catch(() => null)
-      if (targetWriteMode === 'confirm') await agentSetSessionPrefs(sRow.id, { writeMode: 'confirm' }).catch(() => null)
+      if (targetWriteMode !== 'direct') await agentSetSessionPrefs(sRow.id, { writeMode: targetWriteMode }).catch(() => null)
       if (targetModelId) await agentSetSessionPrefs(sRow.id, { modelId: targetModelId }).catch(() => null)
       if (targetEffort) await agentSetSessionPrefs(sRow.id, { effort: targetEffort }).catch(() => null)
       setSessions(prev => [{

@@ -47,8 +47,8 @@ export interface AiAssistantApi {
   scopeAll: boolean
   setScope: (next: string[]) => void
   setScopeAll: (all: boolean) => void
-  writeMode: 'direct' | 'confirm'
-  setWriteMode: (mode: 'direct' | 'confirm') => void
+  writeMode: 'direct' | 'confirm' | 'plan'
+  setWriteMode: (mode: 'direct' | 'confirm' | 'plan') => void
   setActiveId: (id: string | null) => void
   /** 渲染窗口起点：长会话只挂最近 10 轮，数据仍是全量 */
   windowStart: number

@@ -18,6 +18,7 @@ export const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.terminal.inspect': '只读查看',
   'builtin.terminal.exec': '执行命令',
   'builtin.terminal.output': '读取终端输出',
+  'builtin.plan.todo': '更新任务清单',
   'builtin.knowledge.search': '检索知识库',
   'builtin.knowledge.create-page': '新建知识页',
   'builtin.knowledge.topics': '查笔记主题',

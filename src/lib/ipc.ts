@@ -741,7 +741,7 @@ export const aiAssistantTasks = (): Promise<AiTaskSummary[]> => a().aiAssistantT
 export const aiAssistantScopeSuggest = (query: string, limit?: number): Promise<AiScopeSuggestion[]> => a().aiAssistantScopeSuggest(query, limit)
 export const agentRenameSession = (id: string, title: string): Promise<boolean> => a().agentRenameSession(id, title)
 export const agentSetSessionScope = (id: string, scope: string[], scopeAll?: boolean): Promise<{ ok: boolean; error?: string }> => a().agentSetSessionScope(id, scope, scopeAll)
-export const agentSetSessionPrefs = (id: string, patch: { writeMode?: 'direct' | 'confirm'; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }): Promise<{ ok: boolean; error?: string }> => a().agentSetSessionPrefs(id, patch)
+export const agentSetSessionPrefs = (id: string, patch: { writeMode?: 'direct' | 'confirm' | 'plan'; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }): Promise<{ ok: boolean; error?: string }> => a().agentSetSessionPrefs(id, patch)
 export const agentDeleteSession = (id: string): Promise<boolean> => a().agentDeleteSession(id)
 export const agentSetSessionPinned = (id: string, pinned: boolean): Promise<boolean> => a().agentSetSessionPinned(id, pinned)
 // ===== v3.1.2 条目11：支线旁问（sidetrack）=====

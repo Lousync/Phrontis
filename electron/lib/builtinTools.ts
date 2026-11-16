@@ -30,6 +30,7 @@ import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
 import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
 import { aiExec, aiReadOutput } from './terminalService'
 import { aiInspect } from './terminalInspect'
+import { normalizeAgentTodos } from './agentTodoPure'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
 import { getKnowledgeIndex, getKnowledgeTextIndex } from 'phrontis-core/kbStore/knowledgeIndex'
@@ -2348,6 +2349,11 @@ export function registerBuiltinTools(): void {
         denied.push({ name: n, module: t.module ?? '', reason: '先预览模式不支持该工具，请切直接执行' })
         continue
       }
+      // P1-4：只读规划模式不允许申请写工具（申请成功下一轮也不会出现）
+      if (ctx?.writeMode === 'plan' && t.requires === 'write') {
+        denied.push({ name: n, module: t.module ?? '', reason: '只读规划模式不能启用写工具，请先输出计划' })
+        continue
+      }
       // 权限不足的工具不能"申请成功"（2026-09-10 修）：
       // 否则模型会误以为已启用，进而向用户宣称操作完成 —— 而下一轮它依然不在工具列表里，
       // 结果是"AI 说创建成功、实际上什么都没发生"。
@@ -4425,4 +4431,38 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
     vaultFile: 'read',
   }, async (args, ctx) => aiInspect(args, ctx))
+
+  // 24c. builtin.plan.todo —— 通用任务清单（P1-4）：模型提交完整清单，对话框渲染成可读的待办
+  registerTool({
+    name: 'builtin.plan.todo',
+    title: '更新任务清单',
+    description: '把本次任务的待办清单同步到对话框（每次提交**完整最新清单**，不是增量）。多步骤任务先列清单再执行，完成一步就更新状态；传空数组清空。最多 20 项，最多一个 doing。只影响界面清单，不写任何文件/模块数据',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          maxItems: 20,
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: '步骤描述（不超过 200 字）' },
+              status: { type: 'string', enum: ['todo', 'doing', 'done'], description: '缺省 todo；最多一项 doing' },
+            },
+            required: ['text'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'read',
+    tier: 'ondemand',
+  }, async args => {
+    const r = normalizeAgentTodos(args.items)
+    if (!r.ok) throw new Error(r.error)
+    return { items: r.items, updatedAt: new Date().toISOString() }
+  })
 }

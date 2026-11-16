@@ -1,7 +1,7 @@
 # AI 助手 Harness 对齐实现方案
 
-> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 第 1 项「AI 操作 journal + 撤销本次运行」已落码（v3.32.0）；第 2 项「终端只读通道 `terminal.inspect`」已落码（v3.33.0）；第 3 项「终端 `exec` 增强（tailLines / filter / 续读 / 后台任务）」已落码（v3.34.0），其余待排期。
-> **目标版本**：`v3.31.0`（P0，新功能）；P1 逐项随 `v3.32.0` / `v3.33.0` / `v3.34.0`（均为新功能）。
+> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 第 1 项「AI 操作 journal + 撤销本次运行」（v3.32.0）、第 2 项「终端只读通道 `terminal.inspect`」（v3.33.0）、第 3 项「终端 `exec` 增强」（v3.34.0）、第 4 项「只读规划模式 + 通用任务清单」已落码（v3.35.0），其余待排期。
+> **目标版本**：`v3.31.0`（P0，新功能）；P1 逐项随 `v3.32.0` / `v3.33.0` / `v3.34.0` / `v3.35.0`（均为新功能）。
 > **范围**：P0 四批 —— A 文件策略与通用文件原语 / B 工作区信任 / C 索引与默认忽略 / D MCP、Skill 与工具发现；P1 只给提纲。
 > **关联**：`AGENTS.md` 铁律 1 / 2 / 16 / 17 / 18 / 25；`docs/ui-animation-plan.md`；`docs/pending-fixes.md`。
 
@@ -313,7 +313,7 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 | 1 ✅ | AI 操作 journal + 撤销本次运行 | 每次运行记 write / edit / rename / move / trash；删除先快照到 `.knowbase/agent/undo/<runId>/`；面板加「撤销本次运行」；容量与保留期上限。落码见 §15 |
 | 2 ✅ | 终端只读通道 `terminal.inspect` | 白名单命令（git status/diff/log/show、ls、cat、head/tail、wc、rg、find、file、which）；`spawn` 直呼 argv、不走 shell；规划模式可用。落码见 §16 |
 | 3 ✅ | 终端 `exec` 增强 | `tailLines` / `filter` / 输出续读；后台任务 + 事后读取。落码见 §17 |
-| 4 | 只读规划模式 + 通用 todo | `writeMode` 增加 `plan`；todo 工具落到对话框清单 |
+| 4 ✅ | 只读规划模式 + 通用 todo | `writeMode` 增加 `plan`；todo 工具落到对话框清单。落码见 §18 |
 | 5 | 长任务档 | `long/deep` 循环档（60 轮 / 150 写 / 64k 历史）；触顶后支持「继续」 |
 | 6 | 规则文件 | 自动注入仓库根 `AGENTS.md` / `CLAUDE.md`（+ 目录级），带长度上限、可关 |
 | 7 | `vault.write-batch` | 多文件原子写 + 逆序回滚，暂存为一条 op |
@@ -443,3 +443,21 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 - 输出句柄不是审计日志：只保留最近 40 条 / 4M 字符，超出即不可续读（如实报错）。
 
 **契约**：`.AGENT/scripts/ai-harness/verify-terminal-exec.mjs`（30 项断言：整形、过滤、续读边界、接线）。
+
+---
+
+## 18. P1-4 落码结果（2026-11-16，v3.35.0）
+
+| 落点 | 内容 |
+|---|---|
+| `writeMode` | 会话写入策略扩为 `direct / confirm / plan`；会话行、规范化迁移、preload / IPC / 渲染层类型全链路同步 |
+| 工具面 | `buildToolsPayload` 新增 `planMode`：所有 `requires=write` 工具（含 MCP / 模块写）一律不进视野；`builtin.plan.todo` 在规划模式自动放行（on-demand 不额外申请一轮） |
+| 硬拦截 | `aiTools.invokeTool` 对 `writeMode=plan + requires=write` 直接拒绝（模型幻觉调用也执行不了）；`builtin.tool.request` 在规划模式不允许申请写工具 |
+| 提示词 | 规划模式注入专用纪律：先调查、输出可执行计划、用任务清单展示步骤、不得声称已修改；确认后再切直接执行 / 先预览 |
+| `builtin.plan.todo`（新，ondemand） | 模型提交**完整最新清单**（最多 20 项 / 200 字 / 最多一个 doing）；`AgentTraceStep.todo` 随消息 trace 落库 |
+| 渲染层 | 输入区运行方式菜单三档；`PlanTodoCard` 在生成态（liveSteps）与完成态（消息 trace）都渲染清单，取最后一条快照 |
+| 行为 | 从整仓缩窄作用域只在「直接执行」时自动切先预览，规划模式不受影响 |
+
+**取舍**：清单工具保持 `ondemand`（不占每轮 core schema），规划模式通过 `extraTools` 自动放行；其它模式要模型主动申请。清单只影响界面，不写文件/模块数据；`readOnly:false` 让它串行执行，避免并发更新快照。
+
+**契约**：`.AGENT/scripts/ai-harness/verify-plan-mode.mjs`（32 项断言：清单归一、工具面/硬拦截、会话偏好、UI 接线）。

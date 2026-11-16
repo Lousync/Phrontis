@@ -1200,6 +1200,12 @@ export interface CcSwitchImportResult {
   errors: string[]
 }
 
+/** 通用任务清单项（P1-4；`builtin.plan.todo` 提交，对话框渲染） */
+export interface AgentTodoItem {
+  text: string
+  status: 'todo' | 'doing' | 'done'
+}
+
 export interface AgentTraceStep {
   kind: 'llm' | 'tool'
   name?: string
@@ -1241,6 +1247,8 @@ export interface AgentTraceStep {
   processText?: string
   /** 思考耗时 ms（落库；reasoning 全文不落库） */
   thinkingMs?: number
+  /** P1-4：`builtin.plan.todo` 的完整清单快照（同一运行多次调用时取最后一条） */
+  todo?: AgentTodoItem[]
 }
 
 /**
@@ -1346,7 +1354,7 @@ export interface AgentSessionInfo {
   /** true=整个仓库；false=严格按 scope（空数组 = 不读取仓库文件） */
   scopeAll?: boolean
   /** 写入策略：direct=立即执行；confirm=先进入变更方案 */
-  writeMode?: 'direct' | 'confirm'
+  writeMode?: 'direct' | 'confirm' | 'plan'
   /** 会话级模型（空 = 跟随全局设置） */
   modelId?: string
   /** 会话级思考强度（空 = 跟随全局设置） */
@@ -3086,7 +3094,7 @@ export interface ElectronAPI {
   aiAssistantScopeSuggest: (query: string, limit?: number) => Promise<AiScopeSuggestion[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>
   agentSetSessionScope: (id: string, scope: string[], scopeAll?: boolean) => Promise<{ ok: boolean; error?: string }>
-  agentSetSessionPrefs: (id: string, patch: { writeMode?: 'direct' | 'confirm'; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<{ ok: boolean; error?: string }>
+  agentSetSessionPrefs: (id: string, patch: { writeMode?: 'direct' | 'confirm' | 'plan'; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<{ ok: boolean; error?: string }>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
   agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>

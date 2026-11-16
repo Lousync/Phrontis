@@ -69,11 +69,12 @@ function requireAgentDir(): string {
 export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant' | 'intel'
 
 /**
- * 写入策略（统一 AI 助手，v3.11.0）：
+ * 写入策略（统一 AI 助手，v3.11.0；P1-4 加 `plan`）：
  * - `direct`：写工具立即执行；
- * - `confirm`：所有可暂存写工具先进入 ChangePlan，用户确认后应用。
+ * - `confirm`：所有可暂存写工具先进入 ChangePlan，用户确认后应用；
+ * - `plan`：只读规划 —— 写工具/命令全部隐藏，先调查再输出计划与任务清单。
  */
-export type SessionWriteMode = 'direct' | 'confirm'
+export type SessionWriteMode = 'direct' | 'confirm' | 'plan'
 
 /** 思考强度档位（与 AI 教学 / agentService 同口径） */
 export type SessionEffort = 'off' | 'low' | 'medium' | 'high'
@@ -498,7 +499,7 @@ export function updateAgentSessionPreferences(id: string, patch: {
   const sessions = readSessions()
   const row = sessions.find((s) => s.id === id)
   if (!row) return
-  if (patch.writeMode === 'direct' || patch.writeMode === 'confirm') row.writeMode = patch.writeMode
+  if (patch.writeMode === 'direct' || patch.writeMode === 'confirm' || patch.writeMode === 'plan') row.writeMode = patch.writeMode
   if (patch.modelId !== undefined) {
     const modelId = String(patch.modelId ?? '').trim()
     if (modelId) row.modelId = modelId

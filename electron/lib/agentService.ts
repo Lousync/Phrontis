@@ -67,6 +67,7 @@ import { MAX_BATCH_MOVE_ITEMS_PER_MESSAGE } from './vaultMovePure'
 import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { suggestScope } from './aiAssistantScopeSuggestPure'
 import { toolActionLabel } from '../../src/lib/toolLabels'
+import type { AgentTodoItem } from './agentTodoPure'
 
 /**
  * 单轮估算费用（USD）：把 provider 的 prompt/completion/cached 拆成 `modelPricing` 的四桶
@@ -357,6 +358,8 @@ export interface AgentTraceStep {
   processText?: string
   /** 思考耗时（ms）。reasoning 全文**不落库**——会话文件全量读写，思考链长度常是正文数倍 */
   thinkingMs?: number
+  /** P1-4：`builtin.plan.todo` 的完整清单快照（落库；渲染层取最后一条画任务清单） */
+  todo?: AgentTodoItem[]
 }
 
 /**
@@ -580,6 +583,8 @@ const enabledOnDemand = new Map<string, Set<string>>()
 function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
   /** 统一助手 confirm 模式：只保留可安全暂存的写工具 */
   confirmMode?: boolean
+  /** 统一助手只读规划模式：所有 requires=write 的工具一律不进视野 */
+  planMode?: boolean
   /** 统一助手只读日程：隐藏所有日程写工具 */
   scheduleReadOnly?: boolean
   /** 统一助手只读情报池：隐藏 intel 写工具（筛选/推荐请用情报助手的 📡 面板，D8） */
@@ -604,8 +609,10 @@ function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
   // v3.1.2 条目11：本会话是否为支线旁问——决定写类工具是否进入模型视野
   const laneSession = sessionId ? getAgentSession(sessionId) : undefined
   const isSideLaneSession = !!(laneSession?.parentSessionId && laneSession.lane === 'side')
-  // 本会话已启用的 ondemand 工具（tool.request 申请，会话内持久）
-  const extraTools = sessionId ? enabledOnDemand.get(sessionId) : undefined
+  // 本会话已启用的 ondemand 工具（tool.request 申请，会话内持久）。
+  // P1-4：规划模式自动放行任务清单工具——它是清单的唯一入口，不该再要求模型先申请一轮。
+  const extraTools = new Set<string>(sessionId ? (enabledOnDemand.get(sessionId) ?? []) : [])
+  if (modeOpts?.planMode) extraTools.add('builtin.plan.todo')
   // 按模块权限预过滤：AI 无权使用的操作不进入其视野（invoke 处另有硬校验兜底）
   const all = listTools().filter(t => t.enabled)
   const onlySet = only ? new Set(only) : null
@@ -622,6 +629,7 @@ function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
     // 统一助手：日程只读（写工具交给日程助手），情报池只读（筛选/推荐交给情报助手 📡），确认模式隐藏不可安全预览的写工具
     if (modeOpts?.scheduleReadOnly && t.module === 'schedule' && t.requires === 'write') return false
     if (modeOpts?.intelReadOnly && t.module === 'intel' && t.requires === 'write') return false
+    if (modeOpts?.planMode && t.requires === 'write') return false
     if (modeOpts?.confirmMode && isConfirmModeHiddenTool(t.name, t.requires)) return false
     const denied = checkModulePermission(t, reader)
     if (denied && t.module) deniedModules.add(t.module)
@@ -1184,16 +1192,17 @@ async function runAgentLoopInner(
         ? ctxData.scopeAll
         : runModeRow?.scopeAll !== false)
     : true
-  const writeMode: 'direct' | 'confirm' = unifiedAssistant
-    ? (ctxData.writeMode === 'confirm' || ctxData.writeMode === 'direct'
+  const writeMode: 'direct' | 'confirm' | 'plan' = unifiedAssistant
+    ? (ctxData.writeMode === 'confirm' || ctxData.writeMode === 'direct' || ctxData.writeMode === 'plan'
         ? ctxData.writeMode
-        : (runModeRow?.writeMode === 'confirm' ? 'confirm' : 'direct'))
+        : (runModeRow?.writeMode === 'confirm' || runModeRow?.writeMode === 'plan' ? runModeRow.writeMode : 'direct'))
     : 'direct'
   const rawScope = Array.isArray(ctxData.scope)
     ? ctxData.scope.filter((x): x is string => typeof x === 'string')
     : (runModeRow?.scope ?? [])
   const aiScope = unifiedAssistant && !scopeAll ? normalizeSessionScope(rawScope) : undefined
   const aiPropose = unifiedAssistant && writeMode === 'confirm'
+  const planMode = unifiedAssistant && writeMode === 'plan'
   // 会话级模型 / 思考强度：请求没显式带时回落到会话行（regenerate / edit 等路径不传 modelId）
   if (llmOpts) {
     llmOpts = {
@@ -1206,7 +1215,7 @@ async function runAgentLoopInner(
   let toolsState = buildToolsPayload(
     sessionId,
     manual ? [MANUAL_CHANNEL_TOOL] : source === 'schedule' ? SCHEDULE_TOOL_NAMES : source === 'intel' ? INTEL_TOOL_NAMES : undefined,
-    { confirmMode: aiPropose, scheduleReadOnly: unifiedAssistant, intelReadOnly: unifiedAssistant },
+    { confirmMode: aiPropose, planMode, scheduleReadOnly: unifiedAssistant, intelReadOnly: unifiedAssistant },
   )
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
@@ -1475,9 +1484,11 @@ async function runAgentLoopInner(
         : '\n\n【统一助手·作用域】本次没有选择任何仓库文件：不要读取/写入仓库文件（vault.* 调用会被拒绝）；仍可按用户请求使用受权限允许的模块工具。'
   const writeModeHint = !unifiedAssistant
     ? ''
-    : writeMode === 'confirm'
-      ? '\n【统一助手·暂存纪律】你的所有可暂存写操作会被**暂存**、不会立即落盘，等用户逐条确认后才应用。工具返回的 "staged" 表示已记入方案（不是已写入）。**不要**声称"已完成/已修改"——只有用户确认应用之后才算改动。不可安全预览的写工具已从工具面移除；需要时请让用户切换到「直接执行」。'
-      : '\n【统一助手·直接执行】用户选择了「直接执行」：写工具会立即落盘。只有真正调用工具并拿到成功结果后，才能告诉用户已完成。'
+    : writeMode === 'plan'
+      ? '\n【统一助手·只读规划】本次是**只读规划模式**：写工具、终端命令、模块写入全部不在工具面，任何写入调用都会被拒绝。先充分调查（vault.* / terminal.inspect / 知识检索等只读工具），再输出可执行计划（步骤、涉及文件、取舍与风险）。需要展示待办时调用 builtin.plan.todo，提交**完整最新清单**（status: todo / doing / done，最多一个 doing）。不要声称已修改任何文件；结尾请让用户确认后再切到「直接执行」或「先预览」。'
+      : writeMode === 'confirm'
+        ? '\n【统一助手·暂存纪律】你的所有可暂存写操作会被**暂存**、不会立即落盘，等用户逐条确认后才应用。工具返回的 "staged" 表示已记入方案（不是已写入）。**不要**声称"已完成/已修改"——只有用户确认应用之后才算改动。不可安全预览的写工具已从工具面移除；需要时请让用户切换到「直接执行」。'
+        : '\n【统一助手·直接执行】用户选择了「直接执行」：写工具会立即落盘。只有真正调用工具并拿到成功结果后，才能告诉用户已完成。'
   const scheduleReadOnlyHint = unifiedAssistant
     ? '\n【统一助手·日程只读】日程数据只读；不要创建/修改/删除日程。日程写入请让用户使用日程助手。'
     : ''
@@ -1757,7 +1768,7 @@ async function runAgentLoopInner(
           for (const n of enabled) cur.add(n)
           enabledOnDemand.set(sessionId, cur)
           if (cur.size !== before) {
-            toolsState = buildToolsPayload(sessionId, undefined, { confirmMode: aiPropose, scheduleReadOnly: unifiedAssistant })
+            toolsState = buildToolsPayload(sessionId, undefined, { confirmMode: aiPropose, planMode, scheduleReadOnly: unifiedAssistant })
             toolPayload = toolsState.payload
           }
         }
@@ -1809,6 +1820,11 @@ async function runAgentLoopInner(
           ref: String(args?.ref ?? '').trim(),
           slug: String(args?.slug ?? ''),
         }
+      }
+      // P1-4：任务清单快照随工具步骤落库（渲染层取最后一条画对话框清单）
+      if (realName === 'builtin.plan.todo' && exec.ok && exec.data && typeof exec.data === 'object') {
+        const items = (exec.data as Record<string, unknown>).items
+        if (Array.isArray(items)) toolStep.todo = items as AgentTraceStep['todo']
       }
       trace.push(toolStep)
       stepEmitters.get(signal)?.(toolStep) // 实时过程：渲染层活动气泡
@@ -2357,7 +2373,7 @@ export function registerAgentHandlers(): void {
   })
   // 统一 AI 助手：会话级写入策略 / 模型 / 思考强度
   ipcMain.handle('agent:setSessionPrefs', (_e, id: string, patch: {
-    writeMode?: 'direct' | 'confirm'
+    writeMode?: 'direct' | 'confirm' | 'plan'
     modelId?: string
     effort?: 'off' | 'low' | 'medium' | 'high'
   }) => {
