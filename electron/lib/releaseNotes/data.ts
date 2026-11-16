@@ -4,11 +4,75 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：87
+ * 版本数：88
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.38.0",
+    "date": "2026-11-16",
+    "summary": "本版一句话：跨多篇批量改动更稳了 —— 新增 `vault.write-batch`，一次最多 20 个文件，整批原子写入，失败自动逆序回滚。",
+    "groups": [
+      {
+        "title": "AI 助手 · 批量写入",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "一条工具调用改多个文件",
+            "rest": "AI 可一次提交 1–20 个文件的完整内容（例如跨多篇重构、批量生成笔记），每个文件仍走与单文件写入相同的文件策略、编码保真、大小与 mtime 冲突校验。",
+            "sub": []
+          },
+          {
+            "lead": "整批原子",
+            "rest": "任一条校验不通过整批不落盘；写入中途失败会把已写文件逆序恢复原内容（新建的移入回收站），不会留下改到一半的状态；回滚不干净时会如实列出仍在新状态的路径。",
+            "sub": []
+          },
+          {
+            "lead": "先预览仍是一条方案卡",
+            "rest": "批量写入在「先预览」下作为一条变更暂存，方案卡上方可切换文件、下方看单文件 diff，可整批应用 / 丢弃；「回滚整任务」按逆序写回每个文件。",
+            "sub": []
+          },
+          {
+            "lead": "直接执行可撤销",
+            "rest": "本次运行记入操作 journal，逐文件校验内容指纹；运行后又被你手动改过的文件会整批跳过，不覆盖新内容。",
+            "sub": []
+          },
+          {
+            "lead": "本次改动清单",
+            "rest": "批量写入的每个文件都会单独列出，可点击直达编辑器。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "`PlanOpKind` 增加 `write-batch`，`PlanOp.writes` 携带每个文件的 `prev/next/codec`；应用正向写 next、回滚逆序写 prev。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "`applyWriteBatch()`（`electron/lib/aiAssistantPlan.ts`）顺序写入 + 失败逆序回滚；`runAction` / `applyPlan` / `rollbackTask` / 运行 journal 全链路支持。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增 `builtin.vault.write-batch`（ondemand，schema 573 字符）并登记进确认模式白名单；`ReviewPane` 新增批量写入预览视图。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本 `.AGENT/scripts/ai-harness/verify-write-batch.mjs`（46 项断言）；方案与取舍见 `docs/agent-harness-alignment-plan.md` §21。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.37.0",
     "date": "2026-11-16",

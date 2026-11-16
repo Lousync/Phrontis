@@ -13,7 +13,15 @@ import type { FileCodecMeta } from './aiAssistantPlanPure'
 import type { MovePair } from './vaultMovePure'
 
 /** journal 记录的文件操作种类（与 vault 写工具一一对应；mkdir 不参与撤销，不记） */
-export type JournalOpKind = 'write' | 'edit' | 'rename' | 'move-batch' | 'trash'
+export type JournalOpKind = 'write' | 'edit' | 'rename' | 'move-batch' | 'trash' | 'write-batch'
+
+/** write-batch 的单文件记录（只留撤销所需：写前内容 + 落盘后指纹） */
+export interface JournalWriteEntry {
+  relPath: string
+  prev: string | null
+  nextHash?: string
+  codec?: FileCodecMeta
+}
 
 export interface JournalOp {
   /** 运行内序号（从 1 递增；快照文件名也用它） */
@@ -31,6 +39,8 @@ export interface JournalOp {
   codec?: FileCodecMeta
   /** move-batch：整批移动条目（正向顺序） */
   moves?: MovePair[]
+  /** write-batch：整批写入条目（正向顺序；prev=null = 原本不存在） */
+  writes?: JournalWriteEntry[]
   /** trash：原文件原始字节快照文件名（相对 `undo/<runId>/`） */
   snapshot?: string
   /** trash：原文件权限位（POSIX；Windows 忽略） */
@@ -85,27 +95,40 @@ function moveBlocker(moves: MovePair[], probe: UndoProbe): string | null {
  *
  * 冲突口径（用户拍板）：运行后文件又被改过就**跳过**，绝不覆盖用户后续修改。
  */
+function writeBlocker(rel: string, prev: string | null | undefined, nextHash: string | undefined, probe: UndoProbe): string | null {
+  if (!rel) return '记录缺少文件路径'
+  const exists = probe.exists(rel)
+  // 运行前不存在（新建）：撤销 = 移除当前文件，必须确认它仍是本次运行写下的内容
+  if (prev === null) {
+    if (!exists) return '文件已不在原位置'
+    if (!nextHash) return '缺少运行后的内容指纹'
+    const h = probe.hash(rel)
+    if (!h) return '无法读取当前内容'
+    return h === nextHash ? null : '运行后文件已被修改'
+  }
+  // 运行前已存在：文件若在运行后又被改过 / 删掉 → 跳过（删掉也是用户后续修改，不擅自复活）
+  if (!exists) return '文件已被删除'
+  if (!nextHash) return '缺少运行后的内容指纹'
+  const h = probe.hash(rel)
+  if (!h) return '无法读取当前内容'
+  return h === nextHash ? null : '运行后文件已被修改'
+}
+
 export function undoBlockReason(op: JournalOp, probe: UndoProbe): string | null {
   const rel = op.relPath ?? ''
   switch (op.kind) {
     case 'write':
-    case 'edit': {
-      if (!rel) return '记录缺少文件路径'
-      const exists = probe.exists(rel)
-      // 运行前不存在（新建）：撤销 = 移除当前文件，必须确认它仍是本次运行写下的内容
-      if (op.prev === null) {
-        if (!exists) return '文件已不在原位置'
-        if (!op.nextHash) return '缺少运行后的内容指纹'
-        const h = probe.hash(rel)
-        if (!h) return '无法读取当前内容'
-        return h === op.nextHash ? null : '运行后文件已被修改'
+    case 'edit':
+      return writeBlocker(rel, op.prev, op.nextHash, probe)
+    case 'write-batch': {
+      const writes = op.writes ?? []
+      if (writes.length === 0) return '记录缺少文件清单'
+      // 整批同进同退：任一条被改过就整批跳过，避免只回滚一半
+      for (const w of writes) {
+        const blocker = writeBlocker(w.relPath, w.prev, w.nextHash, probe)
+        if (blocker) return `「${w.relPath}」${blocker}`
       }
-      // 运行前已存在：文件若在运行后又被改过 / 删掉 → 跳过（删掉也是用户后续修改，不擅自复活）
-      if (!exists) return '文件已被删除'
-      if (!op.nextHash) return '缺少运行后的内容指纹'
-      const h = probe.hash(rel)
-      if (!h) return '无法读取当前内容'
-      return h === op.nextHash ? null : '运行后文件已被修改'
+      return null
     }
     case 'rename':
       if (!op.to) return '记录缺少目标路径'
@@ -131,6 +154,7 @@ export function journalOpLabel(op: JournalOp): string {
     case 'edit': return `编辑「${rel}」`
     case 'rename': return `移动「${rel}」→「${op.to ?? ''}」`
     case 'move-batch': return `批量移动 ${op.moves?.length ?? 0} 项`
+    case 'write-batch': return `批量写入 ${op.writes?.length ?? 0} 个文件`
     case 'trash': return `删除「${rel}」`
     default: return rel || '文件操作'
   }
@@ -190,5 +214,5 @@ export function snapshotFileName(seq: number, relPath: string): string {
 
 /** 是否为可撤销的文件操作（mkdir 不记；未知不记） */
 export function isJournalableKind(kind: string): kind is JournalOpKind {
-  return kind === 'write' || kind === 'edit' || kind === 'rename' || kind === 'move-batch' || kind === 'trash'
+  return kind === 'write' || kind === 'edit' || kind === 'rename' || kind === 'move-batch' || kind === 'trash' || kind === 'write-batch'
 }

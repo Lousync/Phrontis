@@ -1,5 +1,5 @@
 源文件: /home/lousync/Projects/Phrontis/electron/lib/builtinTools.ts
-工具总数: 77
+工具总数: 78
 
 【core —— 每轮常驻注入】18 个
   builtin.vault.read                  7431 字符  ~2147 tok  schema  719  [read/-]
@@ -22,7 +22,8 @@
   builtin.schedule.list-recurring      570 字符  ~ 167 tok  schema   34  [read/schedule]
   小计: 42552 字符  ~12967 tok
 
-【ondemand —— 默认折叠，tool.request 后才注入】59 个
+【ondemand —— 默认折叠，tool.request 后才注入】60 个
+  builtin.vault.write-batch           5140 字符  ~1488 tok  schema  573  [write/-]
   builtin.quiz.gen-paper              4961 字符  ~1631 tok  schema  713  [write/quiz]
   image                               4422 字符  ~1632 tok  schema  362  [write/-]
   builtin.knowledge.graph-topology    4346 字符  ~1345 tok  schema  264  [read/knowledge]
@@ -82,9 +83,9 @@
   course.outline.remove-unit           619 字符  ~ 211 tok  schema  106  [write/-]
   builtin.schedule.delete-workflow     601 字符  ~ 174 tok  schema   96  [write/schedule]
   builtin.schedule.get-workflow        594 字符  ~ 173 tok  schema   96  [read/schedule]
-  小计: 108842 字符  ~35096 tok
+  小计: 113982 字符  ~36584 tok
 
-合计若全部装载: ~48063 tok
+合计若全部装载: ~49551 tok
 实际常驻(默认权限 read 态): ~12967 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】

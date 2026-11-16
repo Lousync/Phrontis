@@ -8,7 +8,7 @@
 
 import type { MovePair } from './vaultMovePure'
 
-export type PlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool' | 'move-batch'
+export type PlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool' | 'move-batch' | 'write-batch'
 
 /**
  * 文件编码元信息（P0-A §3.2）：暂存 / 回滚都要按**原文件的编码与换行**写回，
@@ -20,6 +20,19 @@ export interface FileCodecMeta {
   eol?: '\n' | '\r\n'
   /** POSIX 权限位（回滚恢复可执行位） */
   mode?: number | null
+}
+
+/**
+ * 批量写入的单文件记录（P1-7）：一份 op 里带多个文件的 before/after，
+ * 应用正向写 `next`、回滚反向写 `prev`（prev=null = 该文件原本不存在，回滚要移除）。
+ */
+export interface PlanWriteEntry {
+  relPath: string
+  prev: string | null
+  next: string
+  codec?: FileCodecMeta
+  /** 运行 journal 用：落盘后内容指纹（仅 journal 填） */
+  nextHash?: string
 }
 
 /** 回滚方向：逆序 + 反向（与 vaultMovePure.reverseMoves 同口径；此处内联避免纯模块运行时互引） */
@@ -52,6 +65,8 @@ export interface PlanOp {
   tempId?: string
   /** kind='move-batch'：整批移动条目（已解析成 from/to 文件路径） */
   moves?: MovePair[]
+  /** kind='write-batch'：整批写入条目（应用正向写 next，回滚反向写 prev） */
+  writes?: PlanWriteEntry[]
   /** 应用后工具返回的原始结果（用于临时 id 映射与回滚提示） */
   result?: unknown
   /** 应用失败原因（status='failed'；失败项不再作为 pending 重放） */
@@ -107,8 +122,17 @@ export function summarizeToolOp(name: string, args: Record<string, unknown>): st
 }
 
 /** 一个 op 正/反向对应的原子文件动作（真正执行交给 aiAssistantPlan 的 fs 层） */
+export interface WriteBatchActionEntry {
+  relPath: string
+  /** 本方向要写入的内容；null = 该方向应移除这个文件 */
+  content: string | null
+  /** 本条失败时回到执行前的内容；null = 移除 */
+  inverse: string | null
+  codec?: FileCodecMeta
+}
+
 export interface FsAction {
-  action: 'write' | 'rename' | 'trash' | 'mkdir' | 'move-batch'
+  action: 'write' | 'rename' | 'trash' | 'mkdir' | 'move-batch' | 'write-batch'
   relPath: string
   /** write 专用：写入内容 */
   content?: string
@@ -118,6 +142,8 @@ export interface FsAction {
   to?: string
   /** move-batch 专用：整批条目（回滚方向已逆序反向） */
   moves?: MovePair[]
+  /** write-batch 专用：整批写入条目（回滚方向已逆序，content=prev） */
+  writes?: WriteBatchActionEntry[]
 }
 
 /**
@@ -163,6 +189,21 @@ export function actionForOp(op: PlanOp, mode: 'apply' | 'rollback'): FsAction | 
         relPath: moves[0]?.from ?? rel,
         moves: mode === 'apply' ? moves : reversePairs(moves),
       }
+    }
+    case 'write-batch': {
+      const writes = op.writes ?? []
+      // 回滚方向：逆序 + 反向（prev=null = 原本不存在，回滚时移除）
+      return mode === 'apply'
+        ? {
+            action: 'write-batch',
+            relPath: writes[0]?.relPath ?? rel,
+            writes: writes.map((w) => ({ relPath: w.relPath, content: w.next, inverse: w.prev, codec: w.codec })),
+          }
+        : {
+            action: 'write-batch',
+            relPath: writes[writes.length - 1]?.relPath ?? rel,
+            writes: writes.slice().reverse().map((w) => ({ relPath: w.relPath, content: w.prev, inverse: w.next, codec: w.codec })),
+          }
     }
     case 'tag':
       return null

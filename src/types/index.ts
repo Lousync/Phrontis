@@ -1655,7 +1655,7 @@ export interface AgentChange {
 
 // ---- AI助手变更方案（v3.9.0）：先预览、后确认、可整任务回滚 ----
 
-export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool' | 'move-batch'
+export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool' | 'move-batch' | 'write-batch'
 
 export interface AiPlanOp {
   id: string
@@ -1678,6 +1678,8 @@ export interface AiPlanOp {
   summary?: string
   /** kind='move-batch'：整批移动条目（已解析成 from/to 文件路径） */
   moves?: Array<{ from: string; to: string }>
+  /** kind='write-batch'：整批写入条目（prev=null = 原本不存在） */
+  writes?: Array<{ relPath: string; prev: string | null; next: string }>
   /** kind='tool'：应用后工具返回结果 */
   result?: unknown
   /** 应用失败原因（status='failed'） */

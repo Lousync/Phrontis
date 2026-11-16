@@ -11,6 +11,7 @@ export const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.vault.search': '搜索内容',
   'builtin.vault.resolve-ref': '解析引用',
   'builtin.vault.write': '写入文件',
+  'builtin.vault.write-batch': '批量写入',
   'builtin.vault.edit': '修改文件',
   'builtin.vault.rename': '重命名',
   'builtin.vault.move': '批量移动',

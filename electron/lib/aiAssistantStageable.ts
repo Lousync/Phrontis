@@ -11,6 +11,7 @@
 /** 由各工具 handler 内部调用 commitOrStage / stageToolOp 暂存的工具（通用层必须跳过，避免双重暂存） */
 export const HANDLER_STAGED_TOOLS = new Set([
   'builtin.vault.write',
+  'builtin.vault.write-batch',
   'builtin.vault.edit',
   'builtin.vault.rename',
   'builtin.vault.trash',

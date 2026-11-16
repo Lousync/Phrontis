@@ -196,6 +196,9 @@ export function beginRunOp(runId: string, sessionId: string, input: PlanOpInput)
     prev: input.kind === 'write' || input.kind === 'edit' ? input.prev ?? null : undefined,
     codec: input.codec as FileCodecMeta | undefined,
     moves: (input.moves as MovePair[] | undefined)?.map((m) => ({ from: m.from, to: m.to })),
+    writes: input.kind === 'write-batch'
+      ? (input.writes ?? []).map((w) => ({ relPath: w.relPath, prev: w.prev, codec: w.codec }))
+      : undefined,
   }
   const pending: PendingRunOp = { runId: assertRunId(runId), op }
   if (op.kind !== 'trash') return pending
@@ -237,6 +240,16 @@ export function commitRunOp(pending: PendingRunOp | null): void {
     const abs = cur?.rootPath && rel ? resolveSafe(cur.rootPath, rel) : null
     if (!abs || !existsSync(abs)) return
     try { op.nextHash = sha256Of(readFileSync(abs)) } catch { return }
+  }
+  if (op.kind === 'write-batch') {
+    // 指纹必须在落盘后从磁盘读（覆盖 writeWorkspaceFile 的额外处理）。
+    // 任一条读不到就整条 op 不记账：无法验证的记录不能向用户承诺可撤销。
+    const cur = getCurrentVault()
+    for (const w of op.writes ?? []) {
+      const abs = cur?.rootPath && w.relPath ? resolveSafe(cur.rootPath, w.relPath) : null
+      if (!abs || !existsSync(abs)) return
+      try { w.nextHash = sha256Of(readFileSync(abs)) } catch { return }
+    }
   }
   entry.ops.push(op)
   entry.journal.finishedAt = new Date().toISOString()
@@ -360,6 +373,25 @@ export async function undoRun(runId: string): Promise<RunUndoResult> {
           })
         }
         touched.push(rel)
+      } else if (op.kind === 'write-batch') {
+        // 逆序还原每个文件：原本不存在的移除，原本存在的写回旧内容
+        for (const w of [...(op.writes ?? [])].reverse()) {
+          const wAbs = resolveSafe(rootPath, w.relPath)
+          if (!wAbs) throw new Error(`路径非法: ${w.relPath}`)
+          if (w.prev === null) {
+            await trashWorkspacePath(rootId, w.relPath)
+          } else {
+            mkdirSync(dirname(wAbs), { recursive: true })
+            writeWorkspaceFile(wAbs, w.prev, {
+              encoding: w.codec?.encoding,
+              bom: w.codec?.bom,
+              eol: w.codec?.eol,
+              relPath: w.relPath,
+              mode: w.codec?.mode ?? undefined,
+            })
+          }
+          touched.push(w.relPath)
+        }
       } else if (op.kind === 'rename') {
         if (!op.to) throw new Error('记录缺少目标路径')
         // 目录纯改名当时走的是分类通道（保住 space / notebook 与排序），撤销也要走回去，

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { Check, X, Undo2, FileText, FilePlus2, MoveRight, Trash2, ArrowLeft } from 'lucide-react'
+import { Check, X, Undo2, FileText, FilePlus2, Files, MoveRight, Trash2, ArrowLeft } from 'lucide-react'
 import type { AiChangePlan, AiPlanOp } from '../../types'
 import { bindEditorTheme } from '../../lib/editorTheme'
 // Monaco 运行时装配与共享宿主同源（worker 注册 + loader 本地化），monaco 仍单独分包
@@ -43,16 +43,35 @@ function isDiffable(op: AiPlanOp): boolean {
 
 function labelOf(op: AiPlanOp): string {
   if (op.kind === 'move-batch') return op.summary || `批量移动 ${op.moves?.length ?? 0} 个文件`
+  if (op.kind === 'write-batch') return op.summary || `批量写入 ${op.writes?.length ?? 0} 个文件`
   return op.relPath ?? op.to ?? op.tool ?? '(未知)'
 }
 
 function KindIcon({ kind }: { kind: AiPlanOp['kind'] }) {
   const p = { size: 13, className: 'shrink-0 text-[var(--text-muted)]' }
   if (kind === 'write') return <FilePlus2 {...p} />
+  if (kind === 'write-batch') return <Files {...p} />
   if (kind === 'edit') return <FileText {...p} />
   if (kind === 'rename' || kind === 'move-batch') return <MoveRight {...p} />
   if (kind === 'trash') return <Trash2 {...p} />
   return <FileText {...p} />
+}
+
+/** 只读 diff 的共用配置（单文件与批量写入都走这一份，避免两套参数漂移） */
+function diffOptions(compact: boolean) {
+  return {
+    readOnly: true,
+    originalEditable: false,
+    minimap: { enabled: false },
+    fontSize: compact ? 11 : 13,
+    wordWrap: 'on' as const,
+    scrollBeyondLastLine: false,
+    // 窄面板必须单栏：并排 diff 在 200px 宽里会把右侧压成纯黑条
+    renderSideBySide: !compact,
+    lineNumbers: (compact ? 'off' : 'on') as 'off' | 'on',
+    renderOverviewRuler: !compact,
+    automaticLayout: true,
+  }
 }
 
 /** 批量移动的方案卡：按目标目录分组，不把 100 条路径平铺成一面墙 */
@@ -96,6 +115,68 @@ function MoveBatchView({ op, compact }: { op: AiPlanOp; compact: boolean }) {
         </div>
       ))}
       {moves.length === 0 && <p className="text-[12px] text-[var(--text-muted)]">没有可移动的条目</p>}
+    </div>
+  )
+}
+
+/** 批量写入的方案卡：上方文件切换条（新建 / 覆写），下方单文件 diff；整批同进同退 */
+function WriteBatchView({ op, compact }: { op: AiPlanOp; compact: boolean }) {
+  const writes = op.writes ?? []
+  const [sel, setSel] = useState(0)
+  useEffect(() => {
+    setSel((v) => (v < writes.length ? v : 0))
+  }, [writes.length])
+  const cur = writes[sel]
+  const created = writes.filter((w) => w.prev === null).length
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className={`shrink-0 ${compact ? 'px-3 py-2' : 'px-5 py-3'}`}>
+        <div className="mb-1 flex items-center gap-2 text-[13px] font-medium text-[var(--text-primary)]">
+          <Files size={14} className="shrink-0 text-[var(--accent)]" />
+          <span className="min-w-0 truncate" data-tip={op.summary} aria-label={op.summary}>{op.summary || `批量写入 ${writes.length} 个文件`}</span>
+        </div>
+        <p className="text-[11.5px] text-[var(--text-muted)]">
+          整批应用 · 逐条写入，任一条失败会逆序恢复已写文件{created > 0 ? ` · 其中 ${created} 个为新建` : ''}。选一个文件查看差异。
+        </p>
+        {op.status === 'failed' && op.error && (
+          <p className="mt-1 max-w-full break-words text-[12px] text-[var(--danger)]" data-tip={op.error} aria-label={op.error}>失败：{op.error}</p>
+        )}
+      </div>
+      <div className={`shrink-0 overflow-x-auto border-y border-[var(--border-color)] bg-[var(--bg-secondary)] ${compact ? 'px-2 py-1' : 'px-3 py-1.5'}`}>
+        <div className="flex w-max items-center gap-1">
+          {writes.map((w, i) => (
+            <button
+              key={w.relPath}
+              type="button"
+              onClick={() => setSel(i)}
+              className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition-colors ${
+                i === sel ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+              data-tip={w.relPath} aria-label={w.relPath}
+            >
+              <span className="max-w-[220px] truncate">{w.relPath}</span>
+              {w.prev === null && <span className="shrink-0 text-[9.5px] text-emerald-500">新建</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="min-h-0 flex-1">
+        {cur ? (
+          <MonacoErrorBoundary>
+            <DiffEditor
+              height="100%"
+              theme="knowbase-auto"
+              beforeMount={bindEditorTheme}
+              original={cur.prev ?? ''}
+              modified={cur.next}
+              language={langOf(cur.relPath)}
+              options={diffOptions(compact)}
+            />
+          </MonacoErrorBoundary>
+        ) : (
+          <div className="flex h-full items-center justify-center text-[13px] text-[var(--text-muted)]">没有可预览的文件</div>
+        )}
+      </div>
     </div>
   )
 }
@@ -236,23 +317,13 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
                 original={selected.prev ?? ''}
                 modified={selected.next ?? ''}
                 language={langOf(selected.relPath)}
-                options={{
-                  readOnly: true,
-                  originalEditable: false,
-                  minimap: { enabled: false },
-                  fontSize: compact ? 11 : 13,
-                  wordWrap: 'on',
-                  scrollBeyondLastLine: false,
-                  // 窄面板必须单栏：并排 diff 在 200px 宽里会把右侧压成纯黑条
-                  renderSideBySide: !compact,
-                  lineNumbers: compact ? 'off' : 'on',
-                  renderOverviewRuler: !compact,
-                  automaticLayout: true,
-                }}
+                options={diffOptions(compact)}
               />
             </MonacoErrorBoundary>
           ) : selected.kind === 'move-batch' ? (
             <MoveBatchView op={selected} compact={compact} />
+          ) : selected.kind === 'write-batch' ? (
+            <WriteBatchView op={selected} compact={compact} />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-[13px] text-[var(--text-secondary)]">
               <KindIcon kind={selected.kind} />

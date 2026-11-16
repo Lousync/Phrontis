@@ -21,8 +21,8 @@ import type { ToolInvokeCtx } from './aiTools'
 import { assertCanRead, assertCanWrite, readPredicate } from './aiAssistantScope'
 import { commitOrStage, isPropose, stageToolOp } from './aiAssistantCommit'
 import { resolveKnowledgeTargetPure, type KnowledgeTarget } from './knowledgeTargetPure'
-import { summarizeToolOp, type FileCodecMeta } from './aiAssistantPlanPure'
-import { applyMoveBatch } from './aiAssistantPlan'
+import { summarizeToolOp, type FileCodecMeta, type PlanWriteEntry } from './aiAssistantPlanPure'
+import { applyMoveBatch, applyWriteBatch } from './aiAssistantPlan'
 import { preflightMoves, formatMoveConflicts, summarizeMoves, MAX_BATCH_MOVES, type MoveProbe } from './vaultMovePure'
 import { isConfirmModeHiddenTool } from './aiAssistantStageable'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
@@ -2954,7 +2954,133 @@ export function registerBuiltinTools(): void {
     })
   })
 
-  // 18. builtin.vault.edit —— 精确替换（oldText→newText）+ 末尾追加（P2 收编原 knowledge.append-page）
+  // 18. builtin.vault.write-batch —— 多文件原子写（P1-7）：一条 op / 逆序回滚
+  registerTool({
+    name: 'builtin.vault.write-batch',
+    title: '批量写入文件',
+    description: '一次原子写入多个文本文件：逐条走与 vault.write 相同的策略 / 编码 / 冲突校验，任一条不通过则整批不落盘；写入中途失败会逆序恢复已写文件。覆写已存在文件需带各自的 expectedMtimeMs。适合跨多篇重构 / 批量生成；单个文件仍用 vault.write',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        files: {
+          type: 'array',
+          maxItems: 20,
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: '仓库内相对文件路径' },
+              content: { type: 'string', description: '完整文件内容' },
+              expectedMtimeMs: { type: 'number', description: '覆写该文件时的 mtime 基线（来自 vault.read）' },
+            },
+            required: ['path', 'content'],
+          },
+          description: '文件清单（1-20 条，同一路径不能重复）',
+        },
+        ensureId: { type: 'boolean', description: 'true=对 .md 自动补 frontmatter id' },
+        encoding: { type: 'string', enum: ['utf-8', 'utf-16le', 'utf-16be'], description: '显式编码（默认沿用各文件；非 UTF-8 未指定则拒写）' },
+      },
+      required: ['files'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    vaultFile: 'write',
+  }, async (args, ctx) => {
+    const rawFiles = Array.isArray(args.files) ? args.files : []
+    if (rawFiles.length === 0) throw new Error('缺少必填参数: files')
+    if (rawFiles.length > 20) throw new Error('一次最多批量写入 20 个文件')
+    const explicit = normalizeEncodingArg(args.encoding)
+    const root = vaultRootPath()
+    const rootId = getCurrentVault()?.rootId ?? ''
+    const seen = new Set<string>()
+    const writes: PlanWriteEntry[] = []
+    for (let i = 0; i < rawFiles.length; i++) {
+      const item = rawFiles[i] as Record<string, unknown>
+      const rawPath = str(item?.path).trim()
+      if (!rawPath) throw new Error(`第 ${i + 1} 条缺少 path`)
+      if (ctx?.source === 'aiTeaching') {
+        const boundary = aiTeachingWriteBoundaryError(rawPath, 'vault.write')
+        if (boundary) throw new Error(`第 ${i + 1} 条：${boundary}`)
+      }
+      const rel = normalizeAiTeachingWritePath(rawPath, ctx)
+      if (!rel) throw new Error(`第 ${i + 1} 条路径非法`)
+      if (seen.has(rel)) throw new Error(`重复路径：${rel}`)
+      seen.add(rel)
+      const content = args.ensureId === true && rel.toLowerCase().endsWith('.md')
+        ? ensureKnowledgeDocFrontmatter(baseNameOf(rel).replace(/\.md$/i, ''), str(item?.content))
+        : str(item?.content)
+      if (content.includes('\u0000')) throw new Error(`第 ${i + 1} 条内容含 NUL 字符，拒绝写入：${rel}`)
+      assertCanWrite(rel, ctx)
+      const abs = resolveSafe(root, rel)
+      if (!abs) throw new Error(`路径非法或越出仓库: ${rel}`)
+      assertAiWritable(root, abs, item?.expectedMtimeMs as number | undefined, Buffer.byteLength(content, 'utf8'))
+      let existingBuf: Buffer | null = null
+      let mode: number | null = null
+      try {
+        const st = statSync(abs)
+        if (st.isDirectory()) throw new Error(`目标是目录，不能批量写入: ${rel}`)
+        if (st.isFile()) { existingBuf = readFileSync(abs); mode = st.mode & 0o777 }
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith('目标是目录')) throw e
+        /* 新建 */
+      }
+      let prev: string | null = null
+      let codec: FileCodecMeta = {
+        encoding: explicit === 'gbk' || explicit === undefined ? 'utf-8' : explicit,
+        bom: false,
+        eol: detectEol(content).eol,
+        mode,
+      }
+      if (existingBuf) {
+        const dec = decodeTextFile(existingBuf, { encoding: explicit })
+        if (!dec.ok) throw new Error(`第 ${i + 1} 条：${dec.error}: ${rel}`)
+        if (dec.encoding === 'gbk') throw new Error(`第 ${i + 1} 条是 GBK 编码，可读但当前版本不支持写回；请先另存为 UTF-8: ${rel}`)
+        prev = dec.text
+        codec = { encoding: dec.encoding, bom: dec.bom, eol: dec.eol, mode }
+      }
+      writes.push({ relPath: rel, prev, next: content, codec })
+    }
+    const preview = writes.slice(0, 3).map((w) => w.relPath).join('、')
+    const summary = `批量写入 ${writes.length} 个文件：${preview}${writes.length > 3 ? '…' : ''}`
+    return commitOrStage(ctx, () => ({ kind: 'write-batch', relPath: writes[0].relPath, writes, summary }), async () => {
+      const refreshWritten = (): void => {
+        let touchedMd = false
+        for (const w of writes) {
+          const abs = resolveSafe(root, w.relPath)
+          if (!abs) continue
+          try {
+            const st = statSync(abs)
+            broadcastExternalWrite(w.relPath, st.mtimeMs)
+          } catch { /* 回滚后可能已不存在；树刷新仍要发 */ }
+          notifyVaultTreeChange(w.relPath)
+          if (w.relPath.toLowerCase().endsWith('.md')) touchedMd = true
+        }
+        if (touchedMd) {
+          invalidateIndexIfCurrentVault(rootId)
+          broadcastDataChanged('knowledge')
+        }
+      }
+      let result: Awaited<ReturnType<typeof applyWriteBatch>>
+      try {
+        result = await applyWriteBatch(root, rootId, writes.map((w) => ({
+          relPath: w.relPath, content: w.next, inverse: w.prev, codec: w.codec,
+        })))
+      } catch (err) {
+        refreshWritten() // 中途失败已逆序回滚：界面也要回到实际状态
+        throw err
+      }
+      refreshWritten()
+      return {
+        ok: true,
+        count: result.count,
+        files: writes.map((w) => ({ path: w.relPath, created: w.prev === null, size: Buffer.byteLength(w.next, 'utf8') })),
+      }
+    })
+  })
+
+  // 19. builtin.vault.edit —— 精确替换（oldText→newText）+ 末尾追加（P2 收编原 knowledge.append-page）
   registerTool({
     name: 'builtin.vault.edit',
     title: '编辑文件片段',

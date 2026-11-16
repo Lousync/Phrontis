@@ -19,7 +19,7 @@ import {
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { broadcastTreeRefresh } from './aiTeachingFolders'
 import { appendAgentMessage, sessionExists } from './agentSessionRepo'
-import { selectOps, actionForOp, type ChangePlan, type PlanOp, type PlanOpInput, type FsAction } from './aiAssistantPlanPure'
+import { selectOps, actionForOp, type ChangePlan, type PlanOp, type PlanOpInput, type FsAction, type WriteBatchActionEntry } from './aiAssistantPlanPure'
 import {
   preflightMoves, formatMoveConflicts, type MovePair, type MoveProbe,
 } from './vaultMovePure'
@@ -162,6 +162,76 @@ export function applyMoveBatch(rootPath: string, rootId: string, moves: MovePair
   return { ok: true, moved: done.length, count: done.length, items }
 }
 
+export interface WriteBatchResult {
+  ok: true
+  count: number
+  files: string[]
+}
+
+/**
+ * 整批写入（P1-7）：顺序写入，**任一条失败就回滚本次已写的条目**，整批不视为成功。
+ *
+ * 与「批量移动」同口径，不做「部分成功也算成功」的静默处理：回滚不干净时把仍留在
+ * 新状态的路径一并报出来（用户能手动收拾），错误信息带失败条目与回滚结果。
+ *
+ * 条目 `content === null` 表示该方向要移除文件（回滚「原本不存在」的新文件时用）。
+ */
+export async function applyWriteBatch(
+  rootPath: string,
+  rootId: string,
+  writes: WriteBatchActionEntry[],
+): Promise<WriteBatchResult> {
+  const done: WriteBatchActionEntry[] = []
+  for (const w of writes) {
+    try {
+      const abs = absOf(rootPath, w.relPath)
+      if (w.content === null) {
+        if (existsSync(abs)) await trashWorkspacePath(rootId, w.relPath)
+      } else {
+        mkdirSync(dirname(abs), { recursive: true })
+        writeWorkspaceFile(abs, w.content, {
+          encoding: w.codec?.encoding,
+          bom: w.codec?.bom,
+          eol: w.codec?.eol,
+          relPath: w.relPath,
+          mode: w.codec?.mode ?? undefined,
+        })
+      }
+      done.push(w)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const residual: string[] = []
+      for (const back of [...done].reverse()) {
+        try {
+          const backAbs = absOf(rootPath, back.relPath)
+          if (back.inverse === null) {
+            if (existsSync(backAbs)) await trashWorkspacePath(rootId, back.relPath)
+          } else {
+            mkdirSync(dirname(backAbs), { recursive: true })
+            writeWorkspaceFile(backAbs, back.inverse, {
+              encoding: back.codec?.encoding,
+              bom: back.codec?.bom,
+              eol: back.codec?.eol,
+              relPath: back.relPath,
+              mode: back.codec?.mode ?? undefined,
+            })
+          }
+        } catch {
+          residual.push(back.relPath)
+        }
+      }
+      const head = `批量写入失败（${w.relPath}）：${msg}`
+      const tail = done.length === 0
+        ? '；本批未产生任何写入'
+        : residual.length === 0
+          ? `；已写入的 ${done.length} 个文件已回滚，整批未应用`
+          : `；已写入的 ${done.length} 个文件中，${residual.length} 个回滚失败：${residual.join('、')}`
+      throw new Error(head + tail)
+    }
+  }
+  return { ok: true, count: done.length, files: done.map((w) => w.relPath) }
+}
+
 function refresh(rels: string[]): void {
   try {
     for (const rel of rels) {
@@ -204,6 +274,9 @@ async function runAction(a: FsAction, rootPath: string, rootId: string): Promise
       return
     case 'move-batch':
       applyMoveBatch(rootPath, rootId, a.moves ?? [])
+      return
+    case 'write-batch':
+      await applyWriteBatch(rootPath, rootId, a.writes ?? [])
       return
   }
 }
@@ -293,9 +366,11 @@ export async function applyPlan(
         } else {
           const action = actionForOp(op, 'apply')
           if (action) await runAction(action, rootPath, rootId)
-          // move-batch 要刷新**所有** from / to 的父目录，不能只取第一条
+          // move-batch / write-batch 要刷新**所有**条目的父目录，不能只取第一条
           if (action?.action === 'move-batch') {
             for (const m of action.moves ?? []) rels.push(m.from, m.to)
+          } else if (action?.action === 'write-batch') {
+            for (const w of action.writes ?? []) rels.push(w.relPath)
           } else {
             rels.push(op.relPath ?? op.to ?? '')
           }
@@ -310,6 +385,7 @@ export async function applyPlan(
         failures.push({ id: op.id, tool: op.tool, summary: op.summary, error: msg })
         // 失败也可能有残留（批量移动回滚不干净）：把相关路径纳入刷新，别让树上停在旧位置
         if (op.kind === 'move-batch') for (const m of op.moves ?? []) rels.push(m.from, m.to)
+        else if (op.kind === 'write-batch') for (const w of op.writes ?? []) rels.push(w.relPath)
         else rels.push(op.relPath ?? op.to ?? '')
         // 后续 op 可能依赖本条的前提（临时 id / 目标目录），停在第一条失败，其余留给用户重试
         break
@@ -368,6 +444,8 @@ export async function rollbackTask(
       op.status = 'rejected'
       if (action?.action === 'move-batch') {
         for (const m of action.moves ?? []) rels.push(m.from, m.to)
+      } else if (action?.action === 'write-batch') {
+        for (const w of action.writes ?? []) rels.push(w.relPath)
       } else {
         rels.push(op.relPath ?? op.to ?? '')
       }
@@ -379,6 +457,7 @@ export async function rollbackTask(
       errors.push(`${op.summary || op.kind}：${op.error}`)
       // 回滚失败可能留下部分移动：相关路径同样要刷新
       if (op.kind === 'move-batch') for (const m of op.moves ?? []) rels.push(m.from, m.to)
+      else if (op.kind === 'write-batch') for (const w of op.writes ?? []) rels.push(w.relPath)
       else rels.push(op.relPath ?? op.to ?? '')
     }
   }

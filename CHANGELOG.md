@@ -2,6 +2,25 @@
 
 # 更新日志
 
+## v3.38.0（2026-11-16）
+
+> **本版一句话**：跨多篇批量改动更稳了 —— 新增 `vault.write-batch`，一次最多 20 个文件，整批原子写入，失败自动逆序回滚。
+
+### AI 助手 · 批量写入
+
+- **一条工具调用改多个文件**：AI 可一次提交 1–20 个文件的完整内容（例如跨多篇重构、批量生成笔记），每个文件仍走与单文件写入相同的文件策略、编码保真、大小与 mtime 冲突校验。
+- **整批原子**：任一条校验不通过整批不落盘；写入中途失败会把已写文件逆序恢复原内容（新建的移入回收站），不会留下改到一半的状态；回滚不干净时会如实列出仍在新状态的路径。
+- **先预览仍是一条方案卡**：批量写入在「先预览」下作为一条变更暂存，方案卡上方可切换文件、下方看单文件 diff，可整批应用 / 丢弃；「回滚整任务」按逆序写回每个文件。
+- **直接执行可撤销**：本次运行记入操作 journal，逐文件校验内容指纹；运行后又被你手动改过的文件会整批跳过，不覆盖新内容。
+- **本次改动清单**：批量写入的每个文件都会单独列出，可点击直达编辑器。
+
+### 内部
+
+- `PlanOpKind` 增加 `write-batch`，`PlanOp.writes` 携带每个文件的 `prev/next/codec`；应用正向写 next、回滚逆序写 prev。
+- `applyWriteBatch()`（`electron/lib/aiAssistantPlan.ts`）顺序写入 + 失败逆序回滚；`runAction` / `applyPlan` / `rollbackTask` / 运行 journal 全链路支持。
+- 新增 `builtin.vault.write-batch`（ondemand，schema 573 字符）并登记进确认模式白名单；`ReviewPane` 新增批量写入预览视图。
+- 新增契约脚本 `.AGENT/scripts/ai-harness/verify-write-batch.mjs`（46 项断言）；方案与取舍见 `docs/agent-harness-alignment-plan.md` §21。
+
 ## v3.37.0（2026-11-16）
 
 > **本版一句话**：AI 现在会读仓库里的 `AGENTS.md` / `CLAUDE.md` —— 你在别的 AI 工具里写的项目约定，Phrontis 助手也照着做。

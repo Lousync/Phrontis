@@ -558,6 +558,7 @@ function carryArgsOf(args: Record<string, unknown>): string {
 /** 写改动识别：工具 → 人类动作标签（成功执行后收集 target=path/title/date/name） */
 const CHANGE_LABELS: Record<string, string> = {
   'builtin.vault.write': '写入文件',
+  'builtin.vault.write-batch': '批量写入文件',
   'builtin.vault.edit': '修改文件',
   'builtin.vault.rename': '重命名文件',
   'builtin.vault.move': '批量移动文件',
@@ -1876,28 +1877,39 @@ async function runAgentLoopInner(
           const data = (typeof exec.data === 'object' && exec.data !== null)
             ? exec.data as Record<string, unknown>
             : {}
-          // vault 文件写类工具：目标=真实落盘路径（rename 取目标路径 to）；trash 后文件已移走不可跳转
-          // visual.html：relPath 一并作 file（右栏「本次改动」条目可点击回工件栏渲染）
-          // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
-          const vaultPath = realName === 'builtin.vault.move'
-            ? String(((data?.items as Array<{ to?: string }> | undefined)?.[0]?.to) ?? '').trim()
-            : realName.startsWith('builtin.vault.')
-              ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
-            : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image') ? String(data?.relPath ?? '').trim()
-              : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
-                // 主题整理：结果是主题名（不是文件），「本次改动」清单显示「整理笔记主题 · 面试高频」
-                : realName === 'builtin.knowledge.topic.assign' ? String(data?.name ?? '').trim()
-                : ''
-          const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
-          // 参数里取不到可读目标时，回落到工具结果自带的标题（如 schedule.delete-todo
-          // 只收 id，摘要里的 title 是唯一人能看懂的目标）—— 否则删除不会出现在「本次改动」清单里
-          const target = vaultPath || String(args?.title ?? args?.date ?? args?.name ?? data?.title ?? '').trim().slice(0, 120)
-          if (target) {
-            const change = { tool: realName, action: label, target, ...(file ? { file } : {}) }
-            changes.push(change)
-            // 会话文件改动审计（批次5，方案 §3.8）：仅 vault 内文件写（file 非空可直达编辑器），
-            // 内存按会话分桶，右栏 token 面板「改动文件」控件拉取
-            if (file) recordSessionFileChange(sessionId, change, getAgentSession(sessionId)?.title ?? '')
+          if (realName === 'builtin.vault.write-batch' && Array.isArray(data.files)) {
+            // 批量写入一条工具调用 = 多个文件改动，逐条进「本次改动」清单（都可点击直达编辑器）
+            for (const f of data.files as Array<{ path?: string }>) {
+              const p = String(f?.path ?? '').trim()
+              if (!p) continue
+              const change = { tool: realName, action: label, target: p, file: p }
+              changes.push(change)
+              recordSessionFileChange(sessionId, change, getAgentSession(sessionId)?.title ?? '')
+            }
+          } else {
+            // vault 文件写类工具：目标=真实落盘路径（rename 取目标路径 to）；trash 后文件已移走不可跳转
+            // visual.html：relPath 一并作 file（右栏「本次改动」条目可点击回工件栏渲染）
+            // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
+            const vaultPath = realName === 'builtin.vault.move'
+              ? String(((data?.items as Array<{ to?: string }> | undefined)?.[0]?.to) ?? '').trim()
+              : realName.startsWith('builtin.vault.')
+                ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
+                : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image') ? String(data?.relPath ?? '').trim()
+                  : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
+                    // 主题整理：结果是主题名（不是文件），「本次改动」清单显示「整理笔记主题 · 面试高频」
+                    : realName === 'builtin.knowledge.topic.assign' ? String(data?.name ?? '').trim()
+                      : ''
+            const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
+            // 参数里取不到可读目标时，回落到工具结果自带的标题（如 schedule.delete-todo
+            // 只收 id，摘要里的 title 是唯一人能看懂的目标）—— 否则删除不会出现在「本次改动」清单里
+            const target = vaultPath || String(args?.title ?? args?.date ?? args?.name ?? data?.title ?? '').trim().slice(0, 120)
+            if (target) {
+              const change = { tool: realName, action: label, target, ...(file ? { file } : {}) }
+              changes.push(change)
+              // 会话文件改动审计（批次5，方案 §3.8）：仅 vault 内文件写（file 非空可直达编辑器），
+              // 内存按会话分桶，右栏 token 面板「改动文件」控件拉取
+              if (file) recordSessionFileChange(sessionId, change, getAgentSession(sessionId)?.title ?? '')
+            }
           }
         }
       }
