@@ -21,6 +21,9 @@ import * as nodePty from '@lydell/node-pty'
 import * as iconv from 'iconv-lite'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
+import {
+  AI_OUTPUT_RAW_CAP, clampTailLines, shapeAiOutput, sliceAiOutput,
+} from './terminalOutputPure'
 
 // ===== shell 解析（三平台） =====
 
@@ -278,8 +281,6 @@ export interface TerminalAiRecord {
 const aiRecords: TerminalAiRecord[] = []
 const AI_RECORDS_MAX = 50
 const AI_CONFIRM_TIMEOUT_MS = 90_000
-/** 给模型的自截上限（框架 MAX_TOOL_RESULT_CHARS=24000 之前先自守，铁律 17「拿得少」） */
-const AI_OUTPUT_CAP = 8_000
 /** UI 记录里留存的输出预览上限 */
 const AI_PREVIEW_CAP = 2_000
 
@@ -316,7 +317,21 @@ function upsertRecord(rec: TerminalAiRecord): void {
   broadcast(BROADCAST_CHANNEL.termAiRecord, { record: { ...rec } })
 }
 
-export interface AiExecInput { command: string; timeoutMs?: number; shellPref?: string }
+export interface AiExecInput {
+  command: string
+  timeoutMs?: number
+  shellPref?: string
+  /** 只看输出末尾 N 行（整形后再截 8000 字符给模型） */
+  tailLines?: number
+  /** 按关键词过滤（不区分大小写，空格分隔 = AND） */
+  filter?: string
+  /** true = 后台执行，立即返回 outputId/status，之后用 aiReadOutput 轮询 */
+  background?: boolean
+}
+
+/** 输出条目的生命周期状态（与 TerminalAiStatus 分开：killed 只属于后台任务） */
+export type AiOutputStatus = 'running' | 'ok' | 'error' | 'timeout' | 'killed'
+
 export interface AiExecOutput {
   approved: boolean
   exitCode: number | null
@@ -326,7 +341,56 @@ export interface AiExecOutput {
   shell: string
   cwd: string
   message?: string
+  /** 输出句柄：前台/后台都有；配合 builtin.terminal.output 续读 */
+  outputId?: string
+  totalChars?: number
+  hasMore?: boolean
+  nextOffset?: number
+  background?: boolean
+  status?: AiOutputStatus
 }
+
+export interface AiOutputInput {
+  outputId: string
+  offset?: number
+  tailLines?: number
+  filter?: string
+  kill?: boolean
+}
+
+export interface AiOutputView {
+  ok: true
+  outputId: string
+  status: AiOutputStatus
+  output: string
+  truncated: boolean
+  hasMore: boolean
+  nextOffset: number
+  totalChars: number
+  exitCode: number | null
+  durationMs: number | null
+  note?: string
+}
+
+interface AiOutputEntry {
+  id: string
+  /** 进程仍在跑时的原始块；结束后清空并只留 text */
+  chunks: Buffer[]
+  text: string
+  status: AiOutputStatus
+  startedAt: number
+  durationMs: number | null
+  exitCode: number | null
+  child?: ChildProcess
+  timer?: ReturnType<typeof setTimeout>
+  /** 超过原始输出上限被杀 */
+  overCap?: boolean
+}
+
+/** 保留最近 40 条输出 / 总量 4M 字符（给模型续读用；不是审计日志） */
+const aiOutputs = new Map<string, AiOutputEntry>()
+const AI_OUTPUT_KEEP = 40
+const AI_OUTPUT_TOTAL_CHARS = 4_000_000
 
 function totalLen(chunks: Buffer[]): number {
   let n = 0
@@ -354,15 +418,93 @@ function decodeOutput(chunks: Buffer[]): string {
   return text
 }
 
+/** 取当前可见文本：只要还有原始块（运行中 / 刚被 kill 尚未 close）就先解码；结束后用已解码的 text */
+function outputTextOf(entry: AiOutputEntry): string {
+  if (entry.chunks.length > 0) return decodeOutput(entry.chunks)
+  return entry.text
+}
+
+function pruneAiOutputs(): void {
+  const entries = [...aiOutputs.values()].sort((a, b) => a.startedAt - b.startedAt)
+  let total = entries.reduce((n, e) => n + outputTextOf(e).length, 0)
+  for (const e of entries) {
+    if (aiOutputs.size <= AI_OUTPUT_KEEP && total <= AI_OUTPUT_TOTAL_CHARS) break
+    if (e.status === 'running') continue // 运行中的不淘汰
+    aiOutputs.delete(e.id)
+    total -= outputTextOf(e).length
+  }
+}
+
+function updateAiRecord(reqId: string, patch: Partial<TerminalAiRecord>): void {
+  const rec = aiRecords.find((r) => r.reqId === reqId)
+  if (!rec) return
+  Object.assign(rec, patch)
+  broadcast(BROADCAST_CHANNEL.termAiRecord, { record: { ...rec } })
+}
+
 /**
- * AI 一次性执行：广播确认请求 → 等行内确认（90s 超时 = 拒绝）→ 非 TTY 落执行 → 输出自截返回。
- * 抛错只用于「根本没到确认那一步」（参数非法/开关未开）；确认后被拒/超时返回 approved:false。
+ * 用 builtin.terminal.output 读取一条输出的后续内容 / 查看或终止后台任务。
+ * 不存在 = 已超出保留窗口（最近 40 条 / 4M 字符），如实报错而不是返回空。
+ */
+export function aiReadOutput(input: AiOutputInput): AiOutputView {
+  const id = String(input?.outputId ?? '').trim()
+  if (!id) throw new Error('缺少必填参数: outputId')
+  const entry = aiOutputs.get(id)
+  if (!entry) throw new Error('输出已过期或不存在（只保留最近 40 条 / 4M 字符）。请重新执行命令')
+  if (input.kill === true && entry.status === 'running') {
+    entry.status = 'killed'
+    if (entry.timer) clearTimeout(entry.timer)
+    entry.timer = undefined
+    if (entry.child) killChild(entry.child)
+    updateAiRecord(id, { status: 'error', outputPreview: '（已终止）' })
+  }
+  const text = outputTextOf(entry)
+  const shaped = shapeAiOutput(text, { tailLines: clampTailLines(input.tailLines), filter: input.filter })
+  const sliced = sliceAiOutput(shaped, input.offset)
+  const status = entry.status
+  return {
+    ok: true,
+    outputId: id,
+    status,
+    output: sliced.output,
+    truncated: sliced.truncated,
+    hasMore: sliced.hasMore,
+    nextOffset: sliced.nextOffset,
+    totalChars: sliced.totalChars,
+    exitCode: entry.exitCode,
+    durationMs: entry.durationMs,
+    ...(status === 'running'
+      ? { note: '进程仍在运行；读到的是当前累计输出。稍后再读，或 kill=true 终止' }
+      : {}),
+  }
+}
+
+/** 应用退出时终止所有后台 AI 任务（否则 Windows 上子进程会活过主进程） */
+export function killAllAiJobs(): void {
+  for (const entry of aiOutputs.values()) {
+    if (entry.status !== 'running') continue
+    entry.status = 'killed'
+    if (entry.timer) clearTimeout(entry.timer)
+    entry.timer = undefined
+    if (entry.child) killChild(entry.child)
+    updateAiRecord(entry.id, { status: 'error', outputPreview: '（应用退出，已终止）' })
+  }
+}
+
+/**
+ * AI 一次性执行：广播确认请求 → 等行内确认（90s 超时 = 拒绝）→ 非 TTY 落执行 → 输出整形/续读。
+ *
+ * background=true 时确认后立即返回 outputId/status，后续用 `aiReadOutput` 轮询；
+ * 前台输出保留最近 40 条，`outputId` + `offset` 可继续读被 8000 字符截断的部分。
  */
 export async function aiExec(input: AiExecInput): Promise<AiExecOutput> {
   const cmd = input.command.trim()
   if (!cmd) throw new Error('命令为空')
   if (cmd.length > 4000) throw new Error('命令过长（>4000 字符），拒绝执行')
-  const timeoutMs = clampInt(input.timeoutMs, 30_000, 1_000, 300_000)
+  const background = input.background === true
+  const timeoutMs = background
+    ? clampInt(input.timeoutMs, 600_000, 1_000, 1_800_000)
+    : clampInt(input.timeoutMs, 30_000, 1_000, 300_000)
   const cwd = vaultCwd()
   const reqId = randomUUID()
   const rec: TerminalAiRecord = {
@@ -371,20 +513,20 @@ export async function aiExec(input: AiExecInput): Promise<AiExecOutput> {
   }
   upsertRecord(rec)
 
-  let timedOut = false
+  let confirmTimedOut = false
   const approved = await new Promise<boolean>(resolve => {
     pendingConfirms.set(reqId, resolve)
     setTimeout(() => {
-      if (pendingConfirms.delete(reqId)) { timedOut = true; resolve(false) }
+      if (pendingConfirms.delete(reqId)) { confirmTimedOut = true; resolve(false) }
     }, AI_CONFIRM_TIMEOUT_MS)
   })
   if (!approved) {
-    rec.status = timedOut ? 'timeout' : 'denied'
-    rec.outputPreview = timedOut ? '（确认超时，未执行）' : '（用户拒绝，未执行）'
+    rec.status = confirmTimedOut ? 'timeout' : 'denied'
+    rec.outputPreview = confirmTimedOut ? '（确认超时，未执行）' : '（用户拒绝，未执行）'
     upsertRecord(rec)
     return {
       approved: false, exitCode: null, durationMs: null, output: '', truncated: false, shell: '', cwd,
-      message: timedOut ? '用户在 90 秒内未确认，命令未执行' : '用户拒绝执行该命令。请如实告知未执行，不要声称已完成',
+      message: confirmTimedOut ? '用户在 90 秒内未确认，命令未执行' : '用户拒绝执行该命令。请如实告知未执行，不要声称已完成',
     }
   }
   rec.status = 'running'
@@ -392,46 +534,99 @@ export async function aiExec(input: AiExecInput): Promise<AiExecOutput> {
 
   const shell = resolveShell(input.shellPref, true)
   const started = Date.now()
-  const result = await new Promise<{ code: number | null; text: string }>(resolve => {
-    let child: ChildProcess
-    try {
-      child = cpSpawn(shell.file, [...shell.args, cmd], { cwd, windowsHide: true, env: childEnv() })
-    } catch (e) {
-      resolve({ code: null, text: `进程启动失败：${(e as Error).message}` })
-      return
+  const entry: AiOutputEntry = {
+    id: reqId, chunks: [], text: '', status: 'running', startedAt: started,
+    durationMs: null, exitCode: null,
+  }
+  aiOutputs.set(reqId, entry)
+
+  const chunks = entry.chunks
+  let timedOut = false
+  let settled = false
+  let doneResolve: ((v: { code: number | null }) => void) | null = null
+  const done = new Promise<{ code: number | null }>(resolve => { doneResolve = resolve })
+
+  const finalize = (code: number | null, opts?: { spawnError?: string }): void => {
+    if (settled) return
+    settled = true
+    if (entry.timer) clearTimeout(entry.timer)
+    entry.timer = undefined
+    entry.child = undefined
+    entry.text = opts?.spawnError ? opts.spawnError : decodeOutput(chunks)
+    entry.chunks.length = 0
+    entry.exitCode = code
+    entry.durationMs = Date.now() - started
+    if (entry.status === 'running') {
+      entry.status = opts?.spawnError || entry.overCap ? 'error' : timedOut ? 'timeout' : 'ok'
     }
-    const chunks: Buffer[] = []
-    const collect = (d: Buffer | string) => {
-      chunks.push(typeof d === 'string' ? Buffer.from(d, 'utf8') : d)
-      if (totalLen(chunks) > 400_000) killChild(child) // 输出失控保险丝
+    rec.exitCode = code
+    rec.durationMs = entry.durationMs
+    rec.status = entry.status === 'timeout' ? 'timeout' : entry.status === 'ok' ? 'ok' : 'error'
+    rec.outputPreview = (entry.text || '（无输出）').slice(0, AI_PREVIEW_CAP)
+    upsertRecord(rec)
+    pruneAiOutputs()
+    doneResolve?.({ code })
+  }
+
+  let child: ChildProcess
+  try {
+    child = cpSpawn(shell.file, [...shell.args, cmd], {
+      cwd, windowsHide: true, env: childEnv(),
+      // 后台任务没有调用方等待，必须自己收流；stdin 保持关闭（不能交互）
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (e) {
+    finalize(null, { spawnError: `进程启动失败：${(e as Error).message}` })
+    if (background) {
+      return {
+        approved: true, exitCode: null, durationMs: entry.durationMs, output: entry.text, truncated: false,
+        shell: shell.label, cwd, outputId: reqId, totalChars: entry.text.length, hasMore: false, nextOffset: entry.text.length,
+        background: true, status: entry.status,
+      }
     }
-    child.stdout?.on('data', collect)
-    child.stderr?.on('data', collect)
-    let done = false
-    const timer = setTimeout(() => { killChild(child) }, timeoutMs)
-    const finish = (code: number | null) => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      resolve({ code, text: decodeOutput(chunks) })
+    return {
+      approved: true, exitCode: null, durationMs: entry.durationMs, output: entry.text, truncated: false,
+      shell: shell.label, cwd, outputId: reqId, totalChars: entry.text.length, hasMore: false, nextOffset: entry.text.length,
+      status: entry.status,
     }
-    child.on('close', code => finish(code))
-    child.on('error', () => finish(-1))
-  })
-  const durationMs = Date.now() - started
-  rec.status = 'ok'
-  rec.exitCode = result.code
-  rec.durationMs = durationMs
-  rec.outputPreview = result.text.slice(0, AI_PREVIEW_CAP)
-  upsertRecord(rec)
+  }
+  entry.child = child
+  const collect = (d: Buffer | string): void => {
+    const buf = typeof d === 'string' ? Buffer.from(d, 'utf8') : d
+    chunks.push(buf)
+    if (totalLen(chunks) > AI_OUTPUT_RAW_CAP) { entry.overCap = true; killChild(child) } // 输出失控保险丝
+  }
+  child.stdout?.on('data', collect)
+  child.stderr?.on('data', collect)
+  entry.timer = setTimeout(() => { timedOut = true; killChild(child) }, timeoutMs)
+  child.on('close', (code) => finalize(code))
+  child.on('error', () => finalize(-1))
+
+  if (background) {
+    return {
+      approved: true, exitCode: null, durationMs: null, output: '', truncated: false,
+      shell: shell.label, cwd, outputId: reqId, totalChars: 0, hasMore: true, nextOffset: 0,
+      background: true, status: 'running',
+      message: `已在后台启动。用 builtin.terminal.output 传 outputId="${reqId}" 读取输出/状态，kill=true 可终止`,
+    }
+  }
+
+  await done
+  const shaped = shapeAiOutput(entry.text, { tailLines: clampTailLines(input.tailLines), filter: input.filter })
+  const sliced = sliceAiOutput(shaped, 0)
   return {
     approved: true,
-    exitCode: result.code,
-    durationMs,
-    output: result.text.slice(0, AI_OUTPUT_CAP),
-    truncated: result.text.length > AI_OUTPUT_CAP,
+    exitCode: entry.exitCode,
+    durationMs: entry.durationMs,
+    output: sliced.output,
+    truncated: sliced.truncated,
     shell: shell.label,
     cwd,
+    outputId: reqId,
+    totalChars: sliced.totalChars,
+    hasMore: sliced.hasMore,
+    nextOffset: sliced.nextOffset,
+    status: entry.status,
   }
 }
 

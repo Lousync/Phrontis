@@ -4,11 +4,70 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：83
+ * 版本数：84
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.34.0",
+    "date": "2026-11-16",
+    "summary": "本版一句话：AI 跑命令不再只看第一屏 —— 长输出可按关键词/末尾几行整形、可续读，跑得久的还能转后台。",
+    "groups": [
+      {
+        "title": "AI 助手 · 终端执行增强",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "长输出整形",
+            "rest": "`terminal.exec` 新增 `tailLines`（只看末尾 N 行）与 `filter`（关键词过滤，不区分大小写，空格分隔多个词要求全部命中）。先过滤、再取末尾，最后按 8000 字符截断。",
+            "sub": []
+          },
+          {
+            "lead": "输出续读",
+            "rest": "结果返回 `outputId` / `totalChars` / `hasMore` / `nextOffset`；截断后用新增的 `builtin.terminal.output` 传 `offset=nextOffset` 继续读，不必重跑命令。",
+            "sub": []
+          },
+          {
+            "lead": "后台任务",
+            "rest": "`background:true` 确认后立即返回 `outputId` 与 `status=running`，命令继续执行（默认 10 分钟上限、最多 30 分钟）；之后用 `builtin.terminal.output` 轮询当前累计输出，`kill:true` 终止。应用退出时自动终止所有后台任务。",
+            "sub": []
+          },
+          {
+            "lead": "保留窗口",
+            "rest": "输出句柄只保留最近 40 条 / 4M 字符（不是审计日志），超出后如实报「输出已过期」。",
+            "sub": []
+          },
+          {
+            "lead": "内存与失控保护",
+            "rest": "单条命令原始输出超过 400k 字符仍会触发保险丝终止；后台任务同样受约束。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "新增 `electron/lib/terminalOutputPure.ts`（整形/续读纯逻辑）与 `builtin.terminal.output` 工具；`terminalService` 增加输出句柄表、后台任务生命周期与退出清理。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本 `.AGENT/scripts/ai-harness/verify-terminal-exec.mjs`（30 项断言）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "方案与取舍：`docs/agent-harness-alignment-plan.md` §17。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.33.0",
     "date": "2026-11-16",

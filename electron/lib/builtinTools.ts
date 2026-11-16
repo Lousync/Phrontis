@@ -28,7 +28,7 @@ import { isConfirmModeHiddenTool } from './aiAssistantStageable'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
 import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
 import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
-import { aiExec } from './terminalService'
+import { aiExec, aiReadOutput } from './terminalService'
 import { aiInspect } from './terminalInspect'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
@@ -4339,12 +4339,15 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.terminal.exec',
     title: '执行终端命令',
-    description: '在当前仓库根目录执行一条 shell 命令并返回其输出。每条命令都需用户在终端模块确认后才真正运行，被拒或确认超时则不执行。适合 git / npm 等命令行操作；不能替代业务模块工具',
+    description: '在当前仓库根目录执行一条 shell 命令并返回其输出。每条命令都需用户在终端模块确认后才真正运行，被拒或确认超时则不执行。适合 git / npm 等命令行操作；不能替代业务模块工具。长输出可用 tailLines / filter 整形；被 8000 字符截断时用返回的 outputId + nextOffset 配合 builtin.terminal.output 续读；background=true 立即返回 outputId，后台继续跑',
     inputSchema: {
       type: 'object',
       properties: {
         command: { type: 'string', description: '要执行的单条命令（系统 shell：Windows pwsh/PowerShell，macOS/Linux 取 $SHELL）' },
-        timeoutMs: { type: 'number', description: '超时毫秒（默认 30000，上限 300000），超时终止进程' },
+        timeoutMs: { type: 'number', description: '超时毫秒（前台默认 30000 上限 300000；后台默认 600000 上限 1800000），超时终止进程' },
+        tailLines: { type: 'number', description: '只看输出末尾 N 行（整形后再按 8000 字符截断）' },
+        filter: { type: 'string', description: '按关键词过滤（不区分大小写；空格分隔的多个词要求全部命中）' },
+        background: { type: 'boolean', description: 'true=后台执行，立即返回 outputId/status；之后用 builtin.terminal.output 读取或终止' },
       },
       required: ['command'],
     },
@@ -4360,8 +4363,45 @@ export function registerBuiltinTools(): void {
     const cmd = str(args.command).trim()
     if (!cmd) throw new Error('缺少必填参数: command')
     const pref = reader('terminal.shell')
-    return aiExec({ command: cmd, timeoutMs: num(args.timeoutMs, 30000), shellPref: typeof pref === 'string' ? pref : undefined })
+    return aiExec({
+      command: cmd,
+      timeoutMs: num(args.timeoutMs, args.background === true ? 600000 : 30000),
+      shellPref: typeof pref === 'string' ? pref : undefined,
+      tailLines: args.tailLines === undefined ? undefined : num(args.tailLines, 0),
+      filter: args.filter === undefined ? undefined : str(args.filter),
+      background: args.background === true,
+    })
   })
+
+  // 24c. builtin.terminal.output —— 读取终端输出 / 后台任务状态与终止（P1-3）
+  registerTool({
+    name: 'builtin.terminal.output',
+    title: '读取终端输出',
+    description: '读取 builtin.terminal.exec 返回的 outputId 对应的输出并分页续读，或查看后台任务状态。可传 tailLines / filter 整形后再读；offset 从上次的 nextOffset 继续。后台任务 status=running 时读到当前累计输出，kill=true 终止进程。输出只保留最近 40 条 / 4M 字符',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        outputId: { type: 'string', description: 'builtin.terminal.exec 返回的 outputId' },
+        offset: { type: 'number', description: '续读起点（字符；用上次返回的 nextOffset）' },
+        tailLines: { type: 'number', description: '只看整形后视图的末尾 N 行' },
+        filter: { type: 'string', description: '按关键词过滤（不区分大小写；空格分隔 = 全部命中）' },
+        kill: { type: 'boolean', description: 'true=终止仍在运行的后台任务' },
+      },
+      required: ['outputId'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    module: 'terminal',
+    requires: 'read',
+    tier: 'ondemand',
+  }, async args => aiReadOutput({
+    outputId: str(args.outputId),
+    offset: args.offset === undefined ? undefined : num(args.offset, 0),
+    tailLines: args.tailLines === undefined ? undefined : num(args.tailLines, 0),
+    filter: args.filter === undefined ? undefined : str(args.filter),
+    kill: args.kill === true,
+  }))
 
   // 24b. builtin.terminal.inspect —— 终端只读通道（P1-2）：白名单命令、argv 直呼、不走 shell、不逐条确认
   registerTool({

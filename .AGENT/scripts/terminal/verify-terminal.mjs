@@ -65,9 +65,9 @@ check('windowBus: term 通道真相源', bus.includes("termData: 'term:data'")
 // ===== A3 AI 工具门控链 =====
 const tools = read('electron/lib/builtinTools.ts')
 check('builtinTools: builtin.terminal.exec 注册', tools.includes("name: 'builtin.terminal.exec'"))
-check('builtinTools: ondemand / requires write / module terminal', /builtin\.terminal\.exec[\s\S]{0,900}?tier: 'ondemand'/.test(tools)
-  && /builtin\.terminal\.exec[\s\S]{0,900}?requires: 'write'/.test(tools)
-  && /builtin\.terminal\.exec[\s\S]{0,900}?module: 'terminal'/.test(tools))
+check('builtinTools: ondemand / requires write / module terminal', /builtin\.terminal\.exec[\s\S]{0,2000}?tier: 'ondemand'/.test(tools)
+  && /builtin\.terminal\.exec[\s\S]{0,2000}?requires: 'write'/.test(tools)
+  && /builtin\.terminal\.exec[\s\S]{0,2000}?module: 'terminal'/.test(tools))
 check('builtinTools: 按需工具走 tool.list（清单不再硬编码）',
   tools.includes("name: 'builtin.tool.list'") && tools.includes('先调 builtin.tool.list'))
 check('builtinTools: handler 侧设置兜底', /builtin\.terminal\.exec[\s\S]{0,1600}?terminal\.aiExec/.test(tools))

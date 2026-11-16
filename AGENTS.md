@@ -22,7 +22,7 @@
 - **背单词功能的软件适配与优化**（延后中，目标版本待定——原计划 v3.18.0 已过期未开放）：v3.17.0 已合入代码 / IPC / AI 工具 / 静态资源，但用户入口由 `src/lib/featureFlags.ts` 的 `VOCAB_ENTRY_ENABLED = false` 关闭；适配 / 优化与遗留问题见 `docs/vocab-module-plan.md` §9，其中「读单词功能疑似有问题」登记为 `docs/pending-fixes.md` **B-48**；原型反馈台账见 `docs/vocab-native-feedback.md`。
 - **背单词原生模块化**（暂缓）：目标与分阶段计划见 `docs/vocab-module-plan.md` §10；当前仍用 iframe，不急于实施。
 - **插件生态与交互补齐批次**（待排期）：指令表面板 P3、页面 ⋮ 菜单批 1c、插件 API v2 P3–P7、AI 学堂中心界面、AI 教学体验问题 5 条——登记在 `docs/pending-fixes.md` **B-55～B-59**，方案原文在 DP。
-- **AI 助手 harness 对齐 P1**（进行中）：P0 已随 v3.31.0 落码；P1 第 1 项「AI 操作 journal + 撤销本次运行」随 v3.32.0、第 2 项「`terminal.inspect` 只读通道」随 v3.33.0 落码，下一项是终端 `exec` 增强（`tailLines` / `filter` / 后台任务），清单见 `docs/agent-harness-alignment-plan.md` §8。
+- **AI 助手 harness 对齐 P1**（进行中）：P0 已随 v3.31.0 落码；P1 第 1 项「AI 操作 journal + 撤销本次运行」（v3.32.0）、第 2 项「`terminal.inspect` 只读通道」（v3.33.0）、第 3 项「终端 `exec` 增强：tailLines / filter / 续读 / 后台任务」（v3.34.0）已落码，下一项是只读规划模式 + 通用 todo，清单见 `docs/agent-harness-alignment-plan.md` §8。
 - 用户问「还有什么工作」时，默认先回答：**背单词功能的软件适配与优化（延后中）**；再按需展开 §9 / B-48。
 
 ## 技术栈

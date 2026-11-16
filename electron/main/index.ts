@@ -138,6 +138,7 @@ import { registerDocsReadHandlers } from '../lib/docsIpc'
 import { registerLanShareHandlers } from '../lib/lanShare'
 import { registerCompanionHandlers, companionAutoStartIfConfigured } from '../lib/phoneCompanion'
 import { registerTerminalHandlers } from '../database/repositories/terminalRepo'
+import { killAllAiJobs } from '../lib/terminalService'
 import { applyBookMarketProxy, initBookMarketProxy } from '../lib/bookMarket/netSession'
 import { registerClipperHandlers, startClipperServer, stopClipperServer } from '../lib/clipperServer'
 import { registerWorkspaceHandlers, trashAllRegisteredVaults, clearVaultRegistry } from '../lib/workspaceManager'
@@ -1718,6 +1719,8 @@ app.on('before-quit', () => {
   stopIntelScheduler()
   disposeDayPanel()
   stopClipperServer()
+  // P1-3：后台 AI 命令不能活过主进程（Windows 子进程默认会继续跑）
+  killAllAiJobs()
   // v3.2.0 条目 ④：关掉仓库文件监听（防句柄泄漏、防 dev 重启后重复挂载）
   closeVaultWatcher()
   // Flush pending settings writes

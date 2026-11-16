@@ -1,7 +1,7 @@
 # AI 助手 Harness 对齐实现方案
 
-> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 第 1 项「AI 操作 journal + 撤销本次运行」已落码（2026-11-16，v3.32.0）；第 2 项「终端只读通道 `terminal.inspect`」已落码（2026-11-16，v3.33.0），其余待排期。
-> **目标版本**：`v3.31.0`（P0，新功能）；P1 逐项随 `v3.32.0` / `v3.33.0`（均为新功能）。
+> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 第 1 项「AI 操作 journal + 撤销本次运行」已落码（v3.32.0）；第 2 项「终端只读通道 `terminal.inspect`」已落码（v3.33.0）；第 3 项「终端 `exec` 增强（tailLines / filter / 续读 / 后台任务）」已落码（v3.34.0），其余待排期。
+> **目标版本**：`v3.31.0`（P0，新功能）；P1 逐项随 `v3.32.0` / `v3.33.0` / `v3.34.0`（均为新功能）。
 > **范围**：P0 四批 —— A 文件策略与通用文件原语 / B 工作区信任 / C 索引与默认忽略 / D MCP、Skill 与工具发现；P1 只给提纲。
 > **关联**：`AGENTS.md` 铁律 1 / 2 / 16 / 17 / 18 / 25；`docs/ui-animation-plan.md`；`docs/pending-fixes.md`。
 
@@ -312,7 +312,7 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 |---|---|---|
 | 1 ✅ | AI 操作 journal + 撤销本次运行 | 每次运行记 write / edit / rename / move / trash；删除先快照到 `.knowbase/agent/undo/<runId>/`；面板加「撤销本次运行」；容量与保留期上限。落码见 §15 |
 | 2 ✅ | 终端只读通道 `terminal.inspect` | 白名单命令（git status/diff/log/show、ls、cat、head/tail、wc、rg、find、file、which）；`spawn` 直呼 argv、不走 shell；规划模式可用。落码见 §16 |
-| 3 | 终端 `exec` 增强 | `tailLines` / `filter` / 输出续读；后台任务 + 事后读取 |
+| 3 ✅ | 终端 `exec` 增强 | `tailLines` / `filter` / 输出续读；后台任务 + 事后读取。落码见 §17 |
 | 4 | 只读规划模式 + 通用 todo | `writeMode` 增加 `plan`；todo 工具落到对话框清单 |
 | 5 | 长任务档 | `long/deep` 循环档（60 轮 / 150 写 / 64k 历史）；触顶后支持「继续」 |
 | 6 | 规则文件 | 自动注入仓库根 `AGENTS.md` / `CLAUDE.md`（+ 目录级），带长度上限、可关 |
@@ -423,3 +423,23 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 **取舍**：`ls/cat/head/tail/wc/find/file/which` 在 Windows 没有对应可执行文件（`find` 还是另一个程序），故用 Node 原生实现而不是 spawn；「不走 shell」的硬约束对所有路径成立。
 
 **契约**：`.AGENT/scripts/ai-harness/verify-terminal-inspect.mjs`（61 项断言：白名单、路径、git/rg/find/tail 参数、超时/截断、接线）。
+
+---
+
+## 17. P1-3 落码结果（2026-11-16，v3.34.0）
+
+| 落点 | 内容 |
+|---|---|
+| `electron/lib/terminalOutputPure.ts`（新） | 纯逻辑：`shapeAiOutput`（关键词 AND 过滤 → 末尾 N 行）、`sliceAiOutput`（offset / 8000 字符 / nextOffset / hasMore）、tail / filter 上限 |
+| `electron/lib/terminalService.ts` | `aiExec` 增加 `tailLines / filter / background`；输出按 `outputId` 保留最近 40 条 / 4M 字符；`aiReadOutput` 分页续读、查看状态、`kill` 终止；`killAllAiJobs` 应用退出清理 |
+| `builtinTools` | `builtin.terminal.exec` 暴露三个新参数；新增 `builtin.terminal.output`（requires read，可 kill，ondemand） |
+| `electron/main/index.ts` | `before-quit` 调 `killAllAiJobs`，防止后台命令活过主进程 |
+| 结果字段 | 前台/后台都返回 `outputId / totalChars / hasMore / nextOffset / status`；后台额外 `background:true`，`status=running` 时读到当前累计输出 |
+
+**口径**：
+- `filter` 是**关键词**过滤（空格分隔 = AND、不区分大小写），不是正则 —— 避免输出驱动的正则回溯爆炸；要做正则检索用 `vault.search`。
+- 整形顺序固定：先过滤、再取末尾 N 行、最后按 8000 字符切片；`offset` 是整形后视图内的字符偏移。
+- 后台任务默认 10 分钟、最多 30 分钟；前台默认 30 秒、最多 5 分钟。后台输出同样受 400k 原始上限保险丝保护。
+- 输出句柄不是审计日志：只保留最近 40 条 / 4M 字符，超出即不可续读（如实报错）。
+
+**契约**：`.AGENT/scripts/ai-harness/verify-terminal-exec.mjs`（30 项断言：整形、过滤、续读边界、接线）。

@@ -94,7 +94,7 @@ AI 可读写：知识库页面、笔记主题（虚拟集合，只改成员关�
 
 ## AI 执行终端命令（builtin.terminal.exec）
 
-这是 AI 唯一能运行系统命令的工具，默认**完全不开启**（开关：设置 → AI → 权限 → 终端执行；关闭时它不在 AI 的工具列表里）。开启后走四道门：本开关 → terminal 模块权限 → 支线会话硬拦 → **每条命令都在终端模块「AI 执行记录」里等你行内确认**（高危命令给严重警告，90 秒不确认视为拒绝）。执行固定在仓库根目录、默认 30 秒超时、输出自截。详见《终端》。
+这是 AI 唯一能运行系统命令的工具，默认**完全不开启**（开关：设置 → AI → 权限 → 终端执行；关闭时它不在 AI 的工具列表里）。开启后走四道门：本开关 → terminal 模块权限 → 支线会话硬拦 → **每条命令都在终端模块「AI 执行记录」里等你行内确认**（高危命令给严重警告，90 秒不确认视为拒绝）。执行固定在仓库根目录、默认 30 秒超时、输出自截。长输出可用 `tailLines` / `filter` 整形，或用返回的 `outputId` + `nextOffset` 续读；`background:true` 转后台执行，`builtin.terminal.output` 轮询与终止。详见《终端》。
 
 只读查看另有通道：`builtin.terminal.inspect` 支持 `git status/diff/log/show`、`ls / cat / head / tail / wc / rg / find / file / which / pwd`，传 program + args、不走 shell、无需逐条确认；仍受 terminal 模块 read 权限、仓库文件读权限、文件策略与本次作用域约束，写文件 / 执行外部程序的参数一律拒绝。写操作仍走 `builtin.terminal.exec`。
 
