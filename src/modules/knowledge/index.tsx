@@ -143,6 +143,10 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   expandedDirsRef.current = expandedDirs
   // 文件树头部（2026-10-11）：排序（与工作台文件树共用 kb.treeSort 偏好）+ 全部展开/关闭
   const [treeSort, setTreeSort] = useState<TreeSortMode>(() => getTreeSortMode())
+  /** 根层「软件生成项」名单（ws:listDir 的 softNames：AI教学 产物根 / .ignore 等）。
+   *  结构视图用它把 AI教学 沉到底部「软件文件」折叠节 —— 与主进程的索引排除配套：
+   *  最近/主题里已经没有它，结构里若还混在主列表会显得自相矛盾（2026-11-16）。 */
+  const [treeSoftNames, setTreeSoftNames] = useState<string[]>([])
   const changeTreeSort = (m: TreeSortMode) => { setTreeSort(m); setTreeSortMode(m) }
   const [sortMenuPos, setSortMenuPos] = useState<{ x: number; y: number } | null>(null)
   // 头部按钮＝「展开/收起选中目录的子树」开关（未选中＝根/全部）；选中变化在 onSelectDir 里复位
@@ -1070,11 +1074,22 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     // info：页签标题/类型（草稿直入编辑时由调用方自带，Phase 2 批次 1）
     let info: PageInfo | undefined = infoOverride
     if (!infoOverride) {
-      let found = [...allLoosePages, ...chapterPages, ...starredPages].find(p => p.id === pageId)
-      if (!found || !found.fileType) {
-        try { found = await getKnowledgePageById(pageId) ?? undefined } catch {}
+      // draft: 伪页（无索引文件：AI教学产物、PDF、代码等）——标题/类型按 relPath 现算。
+      // 2026-11-16：AI教学产物根移出索引后，错题本「打开源页面」等只传 pageId 的调用点
+      // 会拿不到页签标题（显示「无标题」），这里补上。
+      if (pageId.startsWith('draft:')) {
+        const rel = pageId.slice('draft:'.length)
+        const name = rel.slice(rel.lastIndexOf('/') + 1)
+        const dot = name.lastIndexOf('.')
+        info = { title: dot > 0 ? name.slice(0, dot) : name, fileType: dot > 0 ? name.slice(dot + 1).toLowerCase() : 'md' }
       }
-      if (found) info = { title: found.title, fileType: found.fileType || '' }
+      if (!info) {
+        let found = [...allLoosePages, ...chapterPages, ...starredPages].find(p => p.id === pageId)
+        if (!found || !found.fileType) {
+          try { found = await getKnowledgePageById(pageId) ?? undefined } catch {}
+        }
+        if (found) info = { title: found.title, fileType: found.fileType || '' }
+      }
     }
     if (info) {
       setOpenPageInfos(prev => ({ ...prev, [pageId]: info! }))
@@ -1253,6 +1268,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
       if (res?.error) return
       const nodes: TreeNode[] = (res.entries ?? []).map(e => ({ ...e, relPath: dirRel ? `${dirRel}/${e.name}` : e.name }))
       setDirCache(prev => ({ ...prev, [dirRel]: nodes }))
+      // 根层软件生成项名单（AI教学 产物根 / .ignore…）随每次根层刷新同步
+      if (!dirRel) setTreeSoftNames(res.softNames ?? [])
     } catch { /* 静默：树保留旧缓存 */ }
   }, [ensureVaultRoot])
 
@@ -2983,6 +3000,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                   dirCache={dirCache}
                   expanded={expandedDirs}
                   sort={treeSort}
+                  softNames={treeSoftNames}
                   activePath={allPages.find(p => p.id === activePageId)?.path ?? (activePageId?.startsWith('draft:') ? activePageId.slice(6) : null)}
                   onToggleDir={(p) => { lastTreeDirRef.current = p; handleToggleTreeDir(p) }}
                   onOpenFile={(n) => { lastTreeDirRef.current = parentDirOf(n.relPath); handleTreeOpenFile(n) }}

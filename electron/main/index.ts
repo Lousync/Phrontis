@@ -107,7 +107,7 @@ import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } 
 import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
 import { initDayPanel, disposeDayPanel, isPopoutOpen, dayPanelShortcutState } from './dayPanelWindow'
-import { registerWindowBus } from './windowBus'
+import { registerWindowBus, broadcastDataChanged } from './windowBus'
 import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from 'phrontis-core/appUsageStore'
 import { registerDevtoolsHandlers } from './devtools'
 import { registerUpdateHandlers } from '../lib/updateService'
@@ -124,7 +124,7 @@ import { registerAgentCompressHandlers } from '../lib/agentCompress'
 import { registerInlineSuggestHandlers } from '../lib/aiAssistant/inlineSuggest'
 import { registerSemanticIndexHandlers } from '../lib/semanticIndex'
 import { registerKnowledgeSearchHandlers } from '../lib/knowledgeSearch'
-import { registerAiTeachingFolderHandlers, migrateRootDir as migrateAiTeachRootDir } from '../lib/aiTeachingFolders'
+import { registerAiTeachingFolderHandlers, migrateRootDir as migrateAiTeachRootDir, rootDirName as aiTeachRootDirName } from '../lib/aiTeachingFolders'
 import { registerAssistantConstraintsHandlers } from '../lib/assistantConstraints'
 import { registerAiTeachingWorkspaceHandlers } from '../lib/aiTeachingWorkspaces'
 import { registerAiTeachingSourceHandlers } from '../lib/aiTeachingSources'
@@ -147,6 +147,7 @@ import { checkXdgTrash, detectStatusNotifierHost, statusNotifierHostCached } fro
 import { readClipboardFilePaths } from '../lib/clipboardFiles'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
 import { getCurrentVault, setCurrentVault, getVaultAttachmentsRoot } from 'phrontis-core/kbStore/vaultContext'
+import { setSystemExcludeRoots, getSystemExcludeRoots } from 'phrontis-core/kbStore/knowledgeIndex'
 import { SETTINGS } from '../../src/lib/settings'
 import { applyUiZoomTo, applyUiZoomToAll, getEffectiveUiZoom, registerUiMinSize, setUiZoom, setUiZoomBoostResolver } from './uiZoom'
 
@@ -271,6 +272,24 @@ function flushSettingsToDisk(): void {
     const merged = { ...existing, ...settingsCache }
     writeFileSync(settingsPath, JSON.stringify(merged, null, 2))
   } catch (err) { console.error('Failed to persist settings:', err) }
+}
+
+/**
+ * AI教学产物根 = 软件生成区（P0-D，2026-11-16 用户拍板）：
+ * 整棵从知识库索引排除 —— 笔记区只装个人知识，教学运行时文件（会话锚点 / CONSTRAINTS /
+ * 教材 / 练习 / visuals …）只在 AI教学模块与文件树「软件文件」节里出现。
+ *
+ * 三处必须重灌（任一处漏 = 排除集与设置分叉）：
+ *  ① 启动读完 settings（本函数在 whenReady 里紧跟 loadSettingsFromDisk 调用）；
+ *  ② 设置里改「AI教学产物根目录」（含改名迁移后）；
+ *  ③ 「清空所有数据」重置 settings 之后。
+ * 排除集随产物根动态，所以只能从设置里取，不能写死目录名。
+ */
+function applyAiTeachIndexExclude(): void {
+  const before = getSystemExcludeRoots().join('\n')
+  setSystemExcludeRoots([aiTeachRootDirName((k) => settingsCache[k])])
+  // 排除集真的变了（启动首灌 / 改名 / 重置）才广播 —— 笔记区索引内容随之变化，各面板要重读
+  if (before !== getSystemExcludeRoots().join('\n')) broadcastDataChanged('knowledge')
 }
 
 // 允许打包后 file:// 环境下加载本地 module worker（pdf.js 阅读器需要）
@@ -1005,12 +1024,15 @@ function registerWindowHandlers(): void {
         settingsCache[key] = value
         const r = migrateAiTeachRootDir(prev, value)
         if (!r.ok && r.error === '目录名不合法') { settingsCache[key] = prev; return false }
+        // 产物根改名 = 索引排除集变化（旧名漏回来 / 新名还被排除会同时发生）
+        applyAiTeachIndexExclude()
         if (saveTimer) clearTimeout(saveTimer)
         saveTimer = setTimeout(flushSettingsToDisk, 500)
         return true
       }
     }
     settingsCache[key] = value
+    if (key === 'aiTeachRootDir') applyAiTeachIndexExclude()
     // 界面缩放（v3.13.2）：立刻应用到所有窗口（含日程小窗），不等 500ms 落盘防抖
     if (key === 'zoom') setUiZoom(value)
     // 最大化自动放大开关：只影响「是否乘 1.2」，改了要立刻重算当前窗口
@@ -1043,6 +1065,7 @@ function registerWindowHandlers(): void {
 
       // 3) settings 恢复默认
       settingsCache = {}
+      applyAiTeachIndexExclude()
       setUiZoom(SETTINGS.zoom.default)
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
       flushSettingsToDisk()
@@ -1071,6 +1094,8 @@ app.whenReady().then(async () => {
 
   // Initialize settings cache once at startup
   settingsCache = loadSettingsFromDisk()
+  // AI教学产物根 = 软件生成区：索引读层整棵排除（必须在任何索引读取之前灌入）
+  applyAiTeachIndexExclude()
 
   // 界面缩放（v3.13.2）：窗口态基础档默认 100%，窗口最大化 / 全屏时自动再乘 1.3（用户实测：
   // 1280 窗口下 ~100% 舒服、1920 最大化下 ~130% 舒服；两者逻辑宽度差 1.5 倍，单一系数无法兼顾）。

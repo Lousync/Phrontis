@@ -2877,3 +2877,18 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **改动点**：卡片标题栏右侧新增「撤销本次运行」（`Undo2` 图标 + 文字，`lastRun` 存在时才出现）；点击按运行 journal 逆序还原本次直接写入 / 编辑 / 改名 / 移动 / 删除的文件，运行后又被手动改过的文件跳过并如实提示；成功后收起改动卡并刷新会话。切会话 / 新建消息时收起，避免撤销到别的运行。
 
 **验收**：双端 `tsc` 0 错；`verify-run-journal.mjs` 44 项全绿；`npm run build` 通过。
+
+## 2026-11-16 · 笔记区不再收录 AI 教学产物
+
+**现状 / 用户反馈**：改造后的笔记区「最近」被 AI教学 的运行时文件挤满 —— `.session` 锚点、`CONSTRAINTS.md`、`交接.md`、`课程.md`、`教材/`、`练习·*`、`visuals/` 里的 html（真机 545 个文件里 151 个来自产物根，占列表约三分之一），个人笔记被挤到下面。
+
+**根因**：`AI教学/` 是普通目录，`scanVaultFiles` 一视同仁地把其中的 md / html 建进索引；而文件树那边它早已被当「软件文件」（`ws:listDir` 的 `softNames`），只有索引读层没有这个分区概念。索引又是笔记流 / 主题 / 总览统计 / 搜索 / 图谱 / 反链的共同数据源，于是一处混进来、处处被挤。
+
+**改动点**：
+- `phrontis-core/kbStore/knowledgeIndex`：新增「系统排除根」（`setSystemExcludeRoots`）。目录整棵剪枝，位置在 `.ignore` 判定之前 —— 用户写 `!AI教学` 也救不回（分区边界，不是内容过滤）；旧版本留下的产物根分类节点在产出层一并隐藏；schema bump 到 v9，磁盘缓存带排除集对账（产物根改名后不收养旧索引）。
+- 主进程 `applyAiTeachIndexExclude()`：启动 / 改「AI教学产物根目录」（含改名迁移）/ 清空数据 三处重灌，目录名从 `rootDirName(aiTeachRootDir)` 取、不写死；排除集真的变化时广播 `knowledge`。
+- 知识库「结构」视图接 `softNames`，`AI教学` 沉到底部「软件文件」折叠节（与工作台文件树一致）；`draft:` 页签按 relPath 补标题，错题本「打开源页面」等只传 pageId 的入口不再显示「无标题」。
+- AI教学模块与文件树不受影响：模块自己的资源管理器 / 阅读视图照旧，点文件经 `kb-open-note` 打开（索引里没有时走 draft 兜底）。
+- 契约：新增 `.AGENT/scripts/knowledge-index/verify-ai-teach-exclude.mjs`（31 项：整棵排除 / `!` 不可取反 / 改名跟随 / 缓存对账 / 源码接线）。
+
+**验收**：双端 `tsc --noEmit` 0 错；`verify-ai-teach-exclude` 31 项、`verify-md-entry-fields`、`verify-vault-ignore` 19 项全绿；`verify-topic-ai-tools` 运行时 34 项（2 项存量为 AI 手册工具数脱节）。
