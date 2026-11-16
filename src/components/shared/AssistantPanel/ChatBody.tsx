@@ -120,7 +120,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
     sessions, providersOk, activeId, messages, windowStart, loadEarlier, reveal, input, setInput, inputRef, pending,
     liveSteps, draft, lastChanges, lastRun, undoRun, compressing, pickedSkill, setPickedSkill,
-    slashSkills, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
+    slashSkills, slashCommands, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
     send, newSession, loadSession, removeSession, togglePin, regenerate, resume, resumeInfo, editSubmit, deleteMessage,
     abort, dismissChanges, runStateOf,
@@ -280,13 +280,21 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   const [slashActive, setSlashActive] = useState(0)
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
   const slashItems = useMemo(
-    () => filterSlashItems(buildSlashItems(scheduleMode ? [] : slashSkills, [], surface), slashQuery ?? ''),
-    [slashSkills, slashQuery, scheduleMode, surface],
+    () => filterSlashItems(
+      buildSlashItems(
+        scheduleMode ? [] : slashSkills,
+        [],
+        surface,
+        surface === 'assistant' ? slashCommands : [],
+      ),
+      slashQuery ?? '',
+    ),
+    [slashSkills, slashCommands, slashQuery, scheduleMode, surface],
   )
   const slashOpen = slashQuery !== null
   /** 弹层选中：指令 → 补全到输入框（回车执行走既有拦截链）；Skill → 挂 chip、清输入继续写正文 */
   const pickSlash = (it: SlashMenuItem) => {
-    if (it.kind === 'command') {
+    if (it.kind === 'command' || it.kind === 'custom') {
       setInput('/' + it.name + ' ')
       setSlashActive(0)
       inputRef.current?.focus()

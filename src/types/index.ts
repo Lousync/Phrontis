@@ -3122,6 +3122,12 @@ export interface ElectronAPI {
   assistantConstraintsEnsureGlobal: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   assistantConstraintsEnsureSession: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   assistantConstraintsEnsureGlossary: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  // P2：自定义斜杠指令 + 提示型钩子（.assistant/commands、.assistant/hooks.json）
+  assistantCommandsList: () => Promise<{ ok: boolean; commands: Array<{ name: string; description: string }>; error?: string }>
+  assistantCommandsRead: (name: string, args?: string) => Promise<{ ok: boolean; command?: { name: string; description: string; prompt: string }; error?: string }>
+  assistantCommandsCreate: (name: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  assistantCommandsEnsureDir: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  assistantHooksEnsure: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   // P5 工作区两层（§3.2-6；元数据入 .knowbase/modules/aiTeaching/workspaces.json）
   aiTeachListWorkspaces: () => Promise<{ workspaces: AiTeachWorkspaceInfo[]; sessionWs: Record<string, string>; unassignedCount: number; lastWorkspaceId: string | null }>

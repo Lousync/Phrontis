@@ -16,7 +16,7 @@
  *    交给宿主发出去（由模型据 system 注入自行处理），用于 `/简报`、`/排这周` 这类
  *    「向助手提一句」的指令。宿主经 `ctx.onSend` 接线。
  */
-import { agentCompressSession } from './ipc'
+import { agentCompressSession, assistantCommandsList, assistantCommandsRead } from './ipc'
 import { showToast } from './toast'
 
 export type ChatSurface = 'assistant' | 'aiTeaching' | 'aiLearn' | 'schedule'
@@ -140,7 +140,10 @@ let running = false
 export async function handleChatCommand(raw: string, ctx: ChatCommandCtx): Promise<boolean> {
   const text = raw.trim()
   if (!text.startsWith('/')) return false
-  const name = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+  const body = text.slice(1).trim()
+  const rawName = body.split(/\s+/)[0] ?? ''
+  const name = rawName.toLowerCase()
+  const args = body.slice(rawName.length).trim()
   // 「放行给模型」的指令：不拦截、不 toast，斜杠原文照发（由模型据 system 规则调工具）。
   // 查 PASSTHROUGH_COMMANDS 表 —— 收口前这里是针对 /mindmap 的一行按面硬编码判断。
   const pt = passthroughCommandsForSurface(ctx.surface).find((c) => c.name.toLowerCase() === name)
@@ -149,7 +152,28 @@ export async function handleChatCommand(raw: string, ctx: ChatCommandCtx): Promi
     (c) => c.name === name && (!c.surfaces || c.surfaces.includes(ctx.surface)),
   )
   if (!cmd) {
-    showToast({ type: 'info', message: `未知指令 ${text.split(/\s+/)[0]}。可用指令：${chatCommandHint(ctx.surface)}` })
+    // P2：自定义指令（.assistant/commands/*.md）—— 仅统一助手；参数由主进程替换进提示词
+    if (ctx.surface === 'assistant' && rawName) {
+      const custom = await assistantCommandsRead(rawName, args).catch(() => null)
+      if (custom?.ok && custom.command?.prompt) {
+        if (!ctx.onSend) {
+          showToast({ type: 'info', message: `/${rawName} 在当前聊天面不可用` })
+          return true
+        }
+        ctx.onSend(custom.command.prompt)
+        return true
+      }
+      if (custom && !custom.ok && custom.error && !/没有找到自定义指令/.test(custom.error)) {
+        showToast({ type: 'error', message: custom.error })
+        return true
+      }
+    }
+    const customHint = ctx.surface === 'assistant'
+      ? await assistantCommandsList().then((r) => (r.ok && r.commands.length > 0
+        ? `；自定义：${r.commands.map((c) => `/${c.name}`).join('、')}`
+        : '')).catch(() => '')
+      : ''
+    showToast({ type: 'info', message: `未知指令 ${text.split(/\s+/)[0]}。可用指令：${chatCommandHint(ctx.surface)}${customHint}` })
     return true
   }
   // 提示型命令：不进本地执行，转交宿主当作用户消息发出

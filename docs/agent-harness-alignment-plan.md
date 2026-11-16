@@ -323,7 +323,7 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 ## 9. P2 提纲
 
 - 子代理 / 任务委派；
-- hooks、自定义斜杠命令、`ask_user` 结构化提问；
+- hooks、自定义斜杠命令（已落码，见 `docs/assistant-commands-hooks-plan.md`）、`ask_user` 结构化提问；
 - 符号索引、LSP 诊断、原生 Git 工具；
 - 沙箱（Windows 先做命令白名单 + 路径约束）；
 - 多模态输入（截图 / 设计稿）。

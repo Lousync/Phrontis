@@ -70,6 +70,8 @@ import { toolActionLabel } from '../../src/lib/toolLabels'
 import type { AgentTodoItem } from './agentTodoPure'
 import { LONG_TASK_HINT, resolveResumeProfile } from './agentLongTaskPure'
 import { readRepoRulesFrom, ruleDirsForScopePaths } from './repoRules'
+import { readAssistantHooks } from './assistantHooks'
+import { MAX_AFTER_TOOL_PER_ROUND, matchToolPattern, renderAfterToolHooks, renderRunStartHooks } from './assistantHooksPure'
 
 /**
  * 单轮估算费用（USD）：把 provider 的 prompt/completion/cached 拆成 `modelPricing` 的四桶
@@ -1219,6 +1221,12 @@ async function runAgentLoopInner(
   const aiScope = unifiedAssistant && !scopeAll ? normalizeSessionScope(rawScope) : undefined
   const aiPropose = unifiedAssistant && writeMode === 'confirm'
   const planMode = unifiedAssistant && writeMode === 'plan'
+  // P2：提示型钩子（.assistant/hooks.json）—— 每次运行读一次；只注入文本，不执行命令
+  const hookRead = unifiedAssistant && !manual && getSettingReader()('agentPromptHooks') !== false
+    ? readAssistantHooks()
+    : { hooks: [], warnings: [] }
+  const promptHooks = hookRead.hooks
+  if (hookRead.warnings.length > 0) console.warn('[agent] hooks.json 部分条目已忽略：', hookRead.warnings.join('；'))
   // 会话级模型 / 思考强度：请求没显式带时回落到会话行（regenerate / edit 等路径不传 modelId）
   if (llmOpts) {
     llmOpts = {
@@ -1388,6 +1396,8 @@ async function runAgentLoopInner(
   const profileHint = source === 'aiTeaching' ? resolveProfilesForInjection(sessionId, getSettingReader()) : ''
   // P1-5：长任务档（点「继续」自动升档）—— 告诉模型预算更宽，鼓励先规划、批量取证
   const longTaskHint = profileId === 'long' ? LONG_TASK_HINT : ''
+  // P2：提示型钩子（run-start）—— 每次运行开始注入一次，整轮 system 稳定
+  const hookStartHint = renderRunStartHooks(promptHooks)
   // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
   // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
   const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
@@ -1542,7 +1552,7 @@ async function runAgentLoopInner(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint + hookStartHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1669,6 +1679,11 @@ async function runAgentLoopInner(
   // 下一条消息重计）；7 次硬上限对「建任务+排期+工作流」式复杂任务不够用 → 设置化，默认 20
   const maxSessionWrites = clampMaxSessionWrites(budgetOf('agentMaxSessionWrites', loopBudget.maxSessionWrites))
   let runTokens = 0
+  // P2：提示型钩子 —— 同一条钩子每次运行最多触发一次 after-tool
+  const firedHookIdx = new Set<number>()
+  const afterToolHooks = promptHooks
+    .map((h, idx) => ({ h, idx }))
+    .filter(({ h }) => h.event === 'after-tool' && h.enabled)
   let softLanded = false
   /** token 预算触顶（或已到最后一轮）：本轮执行完后立即断出循环 → 强制总结轮 */
   let budgetCapped = false
@@ -1692,6 +1707,8 @@ async function runAgentLoopInner(
       convo.push({ role: 'user', content: FINAL_ROUND_NOTICE })
     }
     emitStream?.({ kind: 'round-start', round: i + 1 })
+    /** P2：本轮成功执行（且不是暂存）的工具名，供 after-tool 钩子匹配 */
+    const roundOkTools: string[] = []
     const t0 = Date.now()
     // 思考时长统计（reasoning 全文不落库，只记时长，见 AgentTraceStep.thinkingMs）
     let thinkFrom = 0
@@ -1791,6 +1808,9 @@ async function runAgentLoopInner(
 
     /** 单个工具调用的执行后记账（tool.request 重建 / trace / 实时步骤 / 改动清单 / 结果回喂），按调用顺序执行 */
     const finishToolCall = (tc: { id: string }, realName: string, args: Record<string, unknown>, exec: AiToolInvokeResult, durationMs: number): void => {
+      if (exec.ok && !(exec.data && typeof exec.data === 'object' && (exec.data as Record<string, unknown>).staged === true)) {
+        roundOkTools.push(realName)
+      }
       // P3：tool.request 成功 → 并入会话启用集合并重建工具 payload（下一轮 LLM 调用生效）
       if (realName === 'builtin.tool.request' && exec.ok) {
         const enabled = (typeof exec.data === 'object' && exec.data !== null && Array.isArray((exec.data as Record<string, unknown>).enabled))
@@ -2061,6 +2081,21 @@ async function runAgentLoopInner(
       for (let idx = 0; idx < batch.items.length; idx++) {
         finishToolCall(batch.items[idx].tc, batch.items[idx].realName, batch.items[idx].args, execs[idx].exec, execs[idx].durationMs)
       }
+    }
+    // P2：after-tool 钩子 —— 本轮有成功工具、且还有下一轮 LLM 时，注入一条不落库的提醒。
+    // 同一条钩子每次运行最多触发一次；每轮最多 MAX_AFTER_TOOL_PER_ROUND 条。
+    if (!budgetCapped && afterToolHooks.length > 0 && roundOkTools.length > 0) {
+      const prompts: string[] = []
+      for (const { h, idx } of afterToolHooks) {
+        if (firedHookIdx.has(idx)) continue
+        const hit = h.tools.length === 0 || h.tools.some((p) => roundOkTools.some((n) => matchToolPattern(p, n)))
+        if (!hit) continue
+        firedHookIdx.add(idx)
+        prompts.push(h.prompt)
+        if (prompts.length >= MAX_AFTER_TOOL_PER_ROUND) break
+      }
+      const hint = renderAfterToolHooks(prompts)
+      if (hint) convo.push({ role: 'user', content: hint })
     }
     // 收场轮的工具结果已回喂，不再进入下一轮 → 走循环后的强制总结（模型无视提示仍开工具时兜底）
     if (budgetCapped) break

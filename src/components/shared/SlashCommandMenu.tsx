@@ -17,7 +17,7 @@ import { commandsForSurface, passthroughCommandsForSurface, type ChatSurface } f
 import { Zap, Wrench, Check } from 'lucide-react'
 
 export interface SlashMenuItem {
-  kind: 'command' | 'skill'
+  kind: 'command' | 'custom' | 'skill'
   /** 指令名（不带 /）或 Skill 注册名 */
   name: string
   /** 展示标题：指令 = /name；Skill = title */
@@ -42,7 +42,7 @@ function shortDesc(d: string): string {
  * `extra` 供调用面注入临时项（当前两面都已改用 PASSTHROUGH_COMMANDS，参数保留给插件/将来用）。
  * `surface` 非空时按聊天面过滤内置指令（日程助手只出 `/简报` 体系，通用助手只出 `/compress` + `/生图`）。
  */
-export function buildSlashItems(skills: SkillInfo[], extra: SlashMenuItem[] = [], surface?: ChatSurface): SlashMenuItem[] {
+export function buildSlashItems(skills: SkillInfo[], extra: SlashMenuItem[] = [], surface?: ChatSurface, customCommands: Array<{ name: string; description: string }> = []): SlashMenuItem[] {
   const cmds: SlashMenuItem[] = [
     ...commandsForSurface(surface).map((c) => ({
       kind: 'command' as const,
@@ -61,10 +61,18 @@ export function buildSlashItems(skills: SkillInfo[], extra: SlashMenuItem[] = []
     })),
     ...extra,
   ]
+  // P2：仓库自定义指令（仅统一助手传入）—— 正文是提示词，命中后作为用户消息发出
+  const customs: SlashMenuItem[] = customCommands.map((c) => ({
+    kind: 'custom' as const,
+    name: c.name,
+    title: `/${c.name}`,
+    desc: shortDesc(c.description),
+    search: `${c.name} ${c.description}`,
+  }))
   const sks: SlashMenuItem[] = (skills ?? [])
     .filter((s) => !s.disabled)
     .map((s) => ({ kind: 'skill', name: s.registryName, title: s.title, desc: shortDesc(s.description), search: `${s.title} ${s.description}` }))
-  return [...cmds, ...sks]
+  return [...cmds, ...customs, ...sks]
 }
 
 /** 前缀过滤：匹配 title 或 desc 或全文（大小写不敏感）；query 为空返回全部 */
@@ -82,13 +90,14 @@ interface Props {
 }
 
 export function SlashCommandMenu({ items, activeIndex, onHover, onPick }: Props) {
-  // 分组边界：items 已按 buildSlashItems 顺序（指令段在前），按 kind 切组渲染组标题
+  // 分组边界：items 已按 buildSlashItems 顺序（指令 → 自定义 → Skill），按 kind 切组渲染组标题
   const groups = useMemo(() => {
-    const g: { kind: 'command' | 'skill'; label: string; start: number; list: SlashMenuItem[] }[] = []
+    const labels = { command: '指令', custom: '自定义指令 · .assistant/commands', skill: 'Skill · 已安装' } as const
+    const g: { kind: 'command' | 'custom' | 'skill'; label: string; start: number; list: SlashMenuItem[] }[] = []
     items.forEach((it, i) => {
       const last = g[g.length - 1]
       if (last && last.kind === it.kind) last.list.push(it)
-      else g.push({ kind: it.kind, label: it.kind === 'command' ? '指令' : 'Skill · 已安装', start: i, list: [it] })
+      else g.push({ kind: it.kind, label: labels[it.kind], start: i, list: [it] })
     })
     return g
   }, [items])
@@ -137,6 +146,9 @@ export function SlashCommandMenu({ items, activeIndex, onHover, onPick }: Props)
                       </span>
                       {it.kind === 'skill' && (
                         <span className="shrink-0 text-[10px] px-1 rounded bg-[var(--bg-hover)] text-[var(--text-muted)]">显式调用</span>
+                      )}
+                      {it.kind === 'custom' && (
+                        <span className="shrink-0 text-[10px] px-1 rounded border border-[color-mix(in_srgb,var(--accent)_35%,var(--border-color))] text-[var(--accent)]">自定义</span>
                       )}
                     </span>
                     <span className="block text-[11px] leading-snug text-[var(--text-muted)] line-clamp-2">{it.desc}</span>

@@ -22,7 +22,7 @@
 - **背单词功能的软件适配与优化**（延后中，目标版本待定——原计划 v3.18.0 已过期未开放）：v3.17.0 已合入代码 / IPC / AI 工具 / 静态资源，但用户入口由 `src/lib/featureFlags.ts` 的 `VOCAB_ENTRY_ENABLED = false` 关闭；适配 / 优化与遗留问题见 `docs/vocab-module-plan.md` §9，其中「读单词功能疑似有问题」登记为 `docs/pending-fixes.md` **B-48**；原型反馈台账见 `docs/vocab-native-feedback.md`。
 - **背单词原生模块化**（暂缓）：目标与分阶段计划见 `docs/vocab-module-plan.md` §10；当前仍用 iframe，不急于实施。
 - **插件生态与交互补齐批次**（待排期）：指令表面板 P3、页面 ⋮ 菜单批 1c、插件 API v2 P3–P7、AI 学堂中心界面、AI 教学体验问题 5 条——登记在 `docs/pending-fixes.md` **B-55～B-59**，方案原文在 DP。
-- **AI 助手 harness 对齐（P1 已完成）**：P0 已随 v3.31.0 落码；P1 第 1 项「AI 操作 journal + 撤销本次运行」（v3.32.0）、第 2 项「`terminal.inspect` 只读通道」（v3.33.0）、第 3 项「终端 `exec` 增强」（v3.34.0）、第 4 项「只读规划模式 + 通用任务清单」（v3.35.0）、第 5 项「长任务档」（v3.36.0）、第 6 项「仓库规则文件」（v3.37.0）、第 7 项「`vault.write-batch`」（v3.38.0）已落码，P1 清单全部完成；P2 方向待排期（见 `docs/agent-harness-alignment-plan.md` §9）。
+- **AI 助手 harness 对齐（P1 已完成 / P2 进行中）**：P0 随 v3.31.0，P1 七项随 v3.32.0～v3.38.0 全部落码；P2 首个批次「提示型 hooks + 自定义 `/` 指令」已随 v3.39.0 落码（方案 `docs/assistant-commands-hooks-plan.md`）。子代理按用户决定暂缓；P2 剩余方向（`ask_user` 结构化提问、符号索引 / LSP、原生 Git、沙箱、多模态）待排期，清单见 `docs/agent-harness-alignment-plan.md` §9。
 - 用户问「还有什么工作」时，默认先回答：**背单词功能的软件适配与优化（延后中）**；再按需展开 §9 / B-48。
 
 ## 技术栈

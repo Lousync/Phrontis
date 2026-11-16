@@ -10,6 +10,7 @@ import {
   agentSessions, agentMessages, agentDeleteSession, agentSetSessionPinned,
   agentChat, agentRegenerate, agentResume, agentEditMessage, agentDeleteMessage,
   llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
+  assistantCommandsList, type AssistantCommandInfo,
   agentSetSessionScope, agentSetSessionPrefs, agentRenameSession, agentUsageGet,
   aiAssistantPlanGet, aiAssistantPlanApply, aiAssistantPlanReject, aiAssistantTaskRollback, aiJournalUndo,
 } from '../../../lib/ipc'
@@ -97,6 +98,8 @@ export interface AssistantChatController {
   pickedSkill: SkillInfo | null
   setPickedSkill: Dispatch<SetStateAction<SkillInfo | null>>
   slashSkills: SkillInfo[]
+  /** P2：仓库自定义指令（.assistant/commands），供 `/` 弹层使用 */
+  slashCommands: AssistantCommandInfo[]
   editing: { id: string; draft: string } | null
   setEditing: Dispatch<SetStateAction<{ id: string; draft: string } | null>>
   copiedIdx: number | null
@@ -297,6 +300,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   }, [draftSource, newDraftKey])
   // / 弹层（指令 + 已装 Skill）与 Skill 显式调用 chip、压缩进行时占位
   const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
+  const [slashCommands, setSlashCommands] = useState<AssistantCommandInfo[]>([])
   const [pickedSkill, setPickedSkill] = useState<SkillInfo | null>(null)
   const [compressing, setCompressing] = useState(false)
   /** 同值的 ref：Enter 连按两下时第二次可能拿到旧闭包（state 尚未重渲染），闸门必须同步生效 */
@@ -437,6 +441,13 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       .then(r => setProvidersOk(r.providers.some(p => p.enabled && p.models.length > 0)))
       .catch(() => setProvidersOk(false))
     aiToolsListSkills().then(r => setSlashSkills(r.skills)).catch(() => setSlashSkills([]))
+    assistantCommandsList().then(r => setSlashCommands(r.ok ? r.commands : [])).catch(() => setSlashCommands([]))
+    // P2：新建 / 删除命令后刷新弹层候选（助手定制菜单派发）
+    const onChanged = () => {
+      assistantCommandsList().then(r => setSlashCommands(r.ok ? r.commands : [])).catch(() => setSlashCommands([]))
+    }
+    window.addEventListener('assistant-commands-changed', onChanged)
+    return () => window.removeEventListener('assistant-commands-changed', onChanged)
   }, [active])
 
   const refreshSessions = useCallback(async (): Promise<AgentSessionInfo[]> => {
@@ -1192,6 +1203,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     pickedSkill,
     setPickedSkill,
     slashSkills,
+    slashCommands,
     editing,
     setEditing,
     copiedIdx,

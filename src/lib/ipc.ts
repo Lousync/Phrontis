@@ -784,6 +784,14 @@ export const assistantConstraintsEnsureGlobal = (): Promise<AssistantFileResult>
 export const assistantConstraintsEnsureSession = (id: string): Promise<AssistantFileResult> => a().assistantConstraintsEnsureSession(id)
 /** 术语表 `.assistant/glossary.json`（预填骨架、可改 —— N-7 拍板） */
 export const assistantConstraintsEnsureGlossary = (): Promise<AssistantFileResult> => a().assistantConstraintsEnsureGlossary()
+// P2：自定义斜杠指令 + 提示型钩子（.assistant/commands、.assistant/hooks.json）
+export interface AssistantCommandInfo { name: string; description: string }
+export interface AssistantCommandDetail extends AssistantCommandInfo { prompt: string }
+export const assistantCommandsList = (): Promise<{ ok: boolean; commands: AssistantCommandInfo[]; error?: string }> => a().assistantCommandsList()
+export const assistantCommandsRead = (name: string, args?: string): Promise<{ ok: boolean; command?: AssistantCommandDetail; error?: string }> => a().assistantCommandsRead(name, args)
+export const assistantCommandsCreate = (name: string): Promise<AssistantFileResult> => a().assistantCommandsCreate(name)
+export const assistantCommandsEnsureDir = (): Promise<AssistantFileResult> => a().assistantCommandsEnsureDir()
+export const assistantHooksEnsure = (): Promise<AssistantFileResult> => a().assistantHooksEnsure()
 // P5 工作区两层（§3.2-6）
 export const aiTeachListWorkspaces = () => a().aiTeachListWorkspaces()
 export const aiTeachCreateWorkspace = (name: string) => a().aiTeachCreateWorkspace(name)

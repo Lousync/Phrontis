@@ -887,6 +887,11 @@ export default function App() {
   const [pendingOpenRel, setPendingOpenRel] = useState<{ relPath: string; seq: number; startEdit?: boolean } | null>(null)
   const pendingOpenRelSeqRef = useRef(0)
   const consumePendingOpenRel = useCallback(() => setPendingOpenRel(null), [])
+  // P2：从助手定制菜单「自定义指令文件夹」→ 切到知识库并在左栏文件树展开目标目录。
+  // 与 pendingOpenRel 同范式：state + props，知识库冷挂载后仍能消费。
+  const [pendingRevealRel, setPendingRevealRel] = useState<{ relPath: string; seq: number } | null>(null)
+  const pendingRevealRelSeqRef = useRef(0)
+  const consumePendingRevealRel = useCallback(() => setPendingRevealRel(null), [])
   // UI 优化条目6：跳转来源记录——kb-open-note 带 from（如 aiTeaching），编辑器出「← 返回 X」chip；
   // 新跳转覆盖旧来源，任何手动切 Tab（handleTabChange / openTab）清除
   // 转发给 knowledge 的通道见上方 pendingOpenRel（知识页/草稿/PDF/源码统一由文件视图语境消化）。
@@ -909,6 +914,20 @@ export default function App() {
     }
     window.addEventListener('kb-open-note', handler)
     return () => window.removeEventListener('kb-open-note', handler)
+  }, [])
+
+  // P2 文件树定位：只切 Tab + 投递「展开这个目录」，不打开右侧编辑区
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { relPath?: string } | undefined
+      const relPath = String(detail?.relPath ?? '').trim()
+      if (!relPath) return
+      setActiveTab('knowledge')
+      pendingRevealRelSeqRef.current += 1
+      setPendingRevealRel({ relPath, seq: pendingRevealRelSeqRef.current })
+    }
+    window.addEventListener('kb-reveal-tree', handler)
+    return () => window.removeEventListener('kb-reveal-tree', handler)
   }, [])
 
   // v3.4.0 PDF 划词 → AI 教学（pdf-reader 方案 §6）：事件只送意图，payload 走 state+props
@@ -1781,7 +1800,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} onMigratePageTab={(oldId, newId) => setPageSplit((p) => p ? { ...p, secondaryPageIds: p.secondaryPageIds.map((x) => (x === oldId ? newId : x)), secondaryActiveId: p.secondaryActiveId === oldId ? newId : p.secondaryActiveId } : p)} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} pendingRevealRel={pendingRevealRel} onPendingRevealConsumed={consumePendingRevealRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} onMigratePageTab={(oldId, newId) => setPageSplit((p) => p ? { ...p, secondaryPageIds: p.secondaryPageIds.map((x) => (x === oldId ? newId : x)), secondaryActiveId: p.secondaryActiveId === oldId ? newId : p.secondaryActiveId } : p)} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule

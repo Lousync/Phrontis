@@ -100,7 +100,7 @@ const topicTabId = (id: string) => `topic:${id}`
 /** 「未归类」虚拟主题 id：不是真主题，不能改名/删除，也不落 topics.json */
 const UNFILED_TOPIC_ID = '__unfiled__'
 
-export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench, onMigratePageTab }: { sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void; onMigratePageTab?: (oldId: string, newId: string) => void }) {
+export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, pendingRevealRel = null, onPendingRevealConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench, onMigratePageTab }: { sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; pendingRevealRel?: { relPath: string; seq: number } | null; onPendingRevealConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void; onMigratePageTab?: (oldId: string, newId: string) => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -1316,6 +1316,24 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     void refreshTreeDir('')
   }, [refreshTreeDir])
 
+  // P2：从助手定制菜单「自定义指令文件夹」投递 → 预加载祖先目录 + 在文件树定位并展开
+  const pendingReveal = pendingRevealRel
+  useEffect(() => {
+    if (!pendingReveal) return
+    onPendingRevealConsumed?.()
+    void (async () => {
+      const root = await ensureVaultRoot()
+      if (!root) return
+      const parts = pendingReveal.relPath.split('/')
+      for (let i = 1; i <= parts.length; i++) {
+        await refreshTreeDir(parts.slice(0, i).join('/'))
+      }
+      handleLocateInTree(pendingReveal.relPath, { expandSelf: true })
+    })()
+    // 只依赖 pendingReveal：消费后置 null，函数身份变化不重跑
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingReveal])
+
   /** 按 relPath 打开（统一通道，Phase 2 批次 2）：树点击与 App 的 pendingRelPath 转发共用——
    *  知识页走页签；无 id md/txt/PDF/代码 → draft 页签（PDF 内嵌阅读器、源码走 Monaco）；不再跳编辑器模块。
    *  反馈 8（2026-09-27）：冷挂载时 allPages 是空的（IPC 异步装载），真实页面会在这里被误判成
@@ -1612,13 +1630,14 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
    *  expandedDirs 与滚动，**不动树组件本身**。
    *  ★ 两帧后才滚：目录展开是异步的（子目录懒加载 + setState），当帧行还没渲染出来。
    *  ★ 找不到就给一句提示 —— 不静默（可能是 .ignore 规则收起了这一条）。 */
-  const handleLocateInTree = useCallback((rel: string) => {
+  const handleLocateInTree = useCallback((rel: string, opts?: { expandSelf?: boolean }) => {
     if (!rel) return
     setFeedView('tree')
     setManualFeed(true)
     const parts = rel.split('/')
     const dirs = ['']
-    for (let i = 1; i < parts.length; i++) dirs.push(parts.slice(0, i).join('/'))
+    const upto = opts?.expandSelf ? parts.length : parts.length - 1
+    for (let i = 1; i <= upto; i++) dirs.push(parts.slice(0, i).join('/'))
     setExpandedDirs(prev => new Set([...prev, ...dirs]))
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const el = document.querySelector<HTMLElement>(`[data-wb-tree-path="${CSS.escape(rel)}"]`)

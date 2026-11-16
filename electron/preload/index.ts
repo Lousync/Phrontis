@@ -413,6 +413,12 @@ const api = {
   assistantConstraintsEnsureGlobal: () => ipcRenderer.invoke('assistantConstraints:ensureGlobal'),
   assistantConstraintsEnsureSession: (id: string) => ipcRenderer.invoke('assistantConstraints:ensureSession', id),
   assistantConstraintsEnsureGlossary: () => ipcRenderer.invoke('assistantConstraints:ensureGlossary'),
+  // P2：自定义斜杠指令 + 提示型钩子（.assistant/commands、.assistant/hooks.json）
+  assistantCommandsList: () => ipcRenderer.invoke('assistantCommands:list'),
+  assistantCommandsRead: (name: string, args?: string) => ipcRenderer.invoke('assistantCommands:read', name, args),
+  assistantCommandsCreate: (name: string) => ipcRenderer.invoke('assistantCommands:create', name),
+  assistantCommandsEnsureDir: () => ipcRenderer.invoke('assistantCommands:ensureDir'),
+  assistantHooksEnsure: () => ipcRenderer.invoke('assistantHooks:ensure'),
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => ipcRenderer.invoke('aiTeach:organizeDoc', id, title, content, prefix),
   // AI教学 P5：工作区两层（§3.2-6）
   aiTeachListWorkspaces: () => ipcRenderer.invoke('aiTeach:listWorkspaces'),
