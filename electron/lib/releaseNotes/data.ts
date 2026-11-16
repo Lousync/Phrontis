@@ -4,11 +4,75 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：85
+ * 版本数：86
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.36.0",
+    "date": "2026-11-16",
+    "summary": "本版一句话：大任务不用再每隔十几轮被打断 —— 中断后点「继续」会自动换成「长任务档」，预算放宽到 60 轮 / 150 次写入。",
+    "groups": [
+      {
+        "title": "AI 助手 · 长任务档",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "继续即升档",
+            "rest": "任务因轮数 / token 触顶或网络中断后，点中断卡上的「继续」，本次续跑自动使用长任务档：最多 60 轮推理 / 150 次写入 / 64k 历史上下文（单次 token 预算 3M）。第一次运行仍按常规预算跑，先看看进展。",
+            "sub": []
+          },
+          {
+            "lead": "不会掉档",
+            "rest": "续跑现场会记下档位，第二次、第三次「继续」保持长任务档。",
+            "sub": []
+          },
+          {
+            "lead": "卡片提前说明",
+            "rest": "常规档中断且可续时，中断卡会写明「续跑会自动使用长任务档」，点之前就知道能拿到更宽的预算。",
+            "sub": []
+          },
+          {
+            "lead": "尊重你的设置",
+            "rest": "在「设置 → AI → Agent 循环」里显式改过最大轮数 / 写入上限 / 历史预算时以设置为准，长任务档只在设置仍是默认值时才覆盖。",
+            "sub": []
+          },
+          {
+            "lead": "AI 教学不受影响",
+            "rest": "教学面续跑仍按长资料档位自动检测，不会被强制切到通用长任务档。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "`ToolResultProfileId` 增加 `long`；`LOOP_BUDGET_PROFILES.long` = 60 轮 / 3M token / 150 写 / 64k 历史；Vault 工具限额与 `long-128k` 同量级。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "`SessionResume.profile` 随续跑现场落库；`resolveResumeProfile()`（`electron/lib/agentLongTaskPure.ts`）决定续跑档位。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "长任务档不参与「读到超长内容自动升 long-1m」—— 后者轮数预算（48）反而更小，会把长任务提前截断。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本 `.AGENT/scripts/ai-harness/verify-long-task.mjs`（32 项断言）；方案与取舍见 `docs/agent-harness-alignment-plan.md` §19。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.35.0",
     "date": "2026-11-16",

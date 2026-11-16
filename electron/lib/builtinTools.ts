@@ -234,7 +234,7 @@ export const MAX_VAULT_LIST_ENTRIES = 200
 
 // ===== vault 工具限额 profile（长资料方案 §7.2）：run 开始 setVaultToolProfile 一次，整轮不变 =====
 
-export type VaultProfileId = 'normal' | 'long-128k' | 'long-1m'
+export type VaultProfileId = 'normal' | 'long' | 'long-128k' | 'long-1m'
 
 export interface VaultToolLimits {
   /** vault.read 文本/文档 默认 / 上限字符 */
@@ -250,6 +250,8 @@ export interface VaultToolLimits {
 
 export const VAULT_TOOL_LIMITS: Record<VaultProfileId, VaultToolLimits> = {
   normal: { readDefault: 16_000, readMax: 60_000, listEntries: 500, searchHits: 50, searchFiles: 400, searchFileMax: 1_000_000 },
+  // 长任务档（P1-5）：上下文 64k，与 long-128k 同量级；单次读取略保守，靠多轮取证
+  long: { readDefault: 32_000, readMax: 80_000, listEntries: 800, searchHits: 80, searchFiles: 800, searchFileMax: 2_000_000 },
   'long-128k': { readDefault: 32_000, readMax: 80_000, listEntries: 800, searchHits: 80, searchFiles: 800, searchFileMax: 2_000_000 },
   'long-1m': { readDefault: 40_000, readMax: 100_000, listEntries: 1000, searchHits: 100, searchFiles: 1200, searchFileMax: 2_000_000 },
 }

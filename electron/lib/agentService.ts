@@ -68,6 +68,7 @@ import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { suggestScope } from './aiAssistantScopeSuggestPure'
 import { toolActionLabel } from '../../src/lib/toolLabels'
 import type { AgentTodoItem } from './agentTodoPure'
+import { LONG_TASK_HINT, resolveResumeProfile } from './agentLongTaskPure'
 
 /**
  * 单轮估算费用（USD）：把 provider 的 prompt/completion/cached 拆成 `modelPricing` 的四桶
@@ -161,10 +162,12 @@ export interface ToolResultProfile {
   compressThreshold: number
 }
 
-export type ToolResultProfileId = 'normal' | 'long-128k' | 'long-1m'
+export type ToolResultProfileId = 'normal' | 'long' | 'long-128k' | 'long-1m'
 
 export const TOOL_RESULT_PROFILES: Record<ToolResultProfileId, ToolResultProfile> = {
   normal: { resultChars: 48_000, maxStringChars: 8_000, maxItems: 50, previewChars: 8_000, recentBudgetChars: 120_000, recentMaxItems: 6, recentMinItems: 2, compressThreshold: 4_000 },
+  // 长任务档（P1-5）：与 long-128k 同量级（64k 历史），但轮数/写入预算更大
+  long: { resultChars: 64_000, maxStringChars: 10_000, maxItems: 80, previewChars: 10_000, recentBudgetChars: 200_000, recentMaxItems: 8, recentMinItems: 2, compressThreshold: 4_000 },
   'long-128k': { resultChars: 64_000, maxStringChars: 10_000, maxItems: 80, previewChars: 10_000, recentBudgetChars: 200_000, recentMaxItems: 8, recentMinItems: 2, compressThreshold: 4_000 },
   'long-1m': { resultChars: 120_000, maxStringChars: 20_000, maxItems: 120, previewChars: 20_000, recentBudgetChars: 400_000, recentMaxItems: 12, recentMinItems: 2, compressThreshold: 10_000 },
 }
@@ -173,6 +176,8 @@ export const TOOL_RESULT_PROFILES: Record<ToolResultProfileId, ToolResultProfile
  *  normal 的历史上下文取当前默认 24k（与既有行为一致，方案表中 32k 未落地过，不借机改行为）。 */
 export const LOOP_BUDGET_PROFILES: Record<ToolResultProfileId, { maxRounds: number; runTokenBudget: number; maxSessionWrites: number; contextBudgetTokens: number; parallelChunk: number }> = {
   normal: { maxRounds: 16, runTokenBudget: 500_000, maxSessionWrites: 20, contextBudgetTokens: 24_000, parallelChunk: 4 },
+  // 长任务档（P1-5）：点「继续」自动启用（60 轮 / 150 写 / 64k 历史 / 3M token）
+  long: { maxRounds: 60, runTokenBudget: 3_000_000, maxSessionWrites: 150, contextBudgetTokens: 64_000, parallelChunk: 4 },
   'long-128k': { maxRounds: 32, runTokenBudget: 3_000_000, maxSessionWrites: 80, contextBudgetTokens: 64_000, parallelChunk: 4 },
   'long-1m': { maxRounds: 48, runTokenBudget: 10_000_000, maxSessionWrites: 300, contextBudgetTokens: 200_000, parallelChunk: 6 },
 }
@@ -978,6 +983,10 @@ interface InterruptContext {
   carry?: string
   /** 是否写会话 resume（支线旁问 / 手册通道传 false：重问成本低，不给「继续」） */
   writeResume?: boolean
+  /** 本次运行的预算档位（P1-5；随续跑现场落库，下次「继续」沿用） */
+  profile?: ToolResultProfileId
+  /** 续跑会自动升长任务档（卡片上提前说明） */
+  longTaskResume?: boolean
 }
 
 /** 归因事实 → 卡片正文用的事实（改动清单只搬卡片要展示的字段；旁白取 trace 里最后一条带 processText 的轮次） */
@@ -999,7 +1008,7 @@ function interruptFactsOf(
 }
 
 /** 写续跑现场（尽力而为：失败只留日志，**绝不**因为「记不上现场」而改变本次调用的返回结果） */
-function persistResume(sessionId: string, messageId: string, facts: InterruptFacts, carry: string): void {
+function persistResume(sessionId: string, messageId: string, facts: InterruptFacts, carry: string, profile?: ToolResultProfileId): void {
   try {
     updateSessionResume(sessionId, {
       at: nowLocal(),
@@ -1009,6 +1018,8 @@ function persistResume(sessionId: string, messageId: string, facts: InterruptFac
       tool_calls: facts.toolCalls,
       changes: facts.changes,
       carry,
+      // 常规档不落字段（旧会话行保持原样）；长档落库，续跑据此沿用
+      ...(profile && profile !== 'normal' ? { profile } : {}),
     })
   } catch (err) {
     console.error('[agent] 续跑现场落库失败', err)
@@ -1066,6 +1077,7 @@ function interruptResult(
     ...(facts.lastProcessText ? { lastProcessText: facts.lastProcessText } : {}),
     aborted: facts.aborted,
     canResume: willResume,
+    longTaskResume: ctx?.longTaskResume === true,
     // 「用户停止」不贴诊断块：原因自明，贴了反而像出故障
     ...(it.code === 'USER_ABORTED' ? {} : { diagnostics: buildDiagnostics(it, dt) }),
   })
@@ -1077,7 +1089,7 @@ function interruptResult(
     console.error('[agent] 中断记录落库失败', err)
   }
   // 有中断卡才有可挂「继续」的锚点（缺锚点的现场按钮无处可挂，等于没有）
-  if (ctx?.writeResume !== false && messageId) persistResume(sessionId, messageId, facts, ctx?.carry ?? '')
+  if (ctx?.writeResume !== false && messageId) persistResume(sessionId, messageId, facts, ctx?.carry ?? '', ctx?.profile)
   return {
     ok: false,
     sessionId,
@@ -1166,9 +1178,11 @@ async function runAgentLoopInner(
     const def = Number((SETTINGS as Record<string, { default?: unknown }>)[key]?.default)
     return cur === def ? profileValue : cur
   }
-  /** §7.1 运行时兜底：vault.read 读到 >100k 字符 / >100 页当场升档（只升不降；轮数等一次性预算不回补） */
+  /** §7.1 运行时兜底：vault.read 读到 >100k 字符 / >100 页当场升档（只升不降；轮数等一次性预算不回补）
+   *  P1-5：长任务档不参与这次升档 —— long-1m 的上下文更大但轮数预算（48）比长任务档（60）小，
+   *  切过去等于把长任务的轮数砍掉。 */
   const escalateProfile = () => {
-    if (profileId === 'long-1m') return
+    if (profileId === 'long-1m' || profileId === 'long') return
     profileId = profileId === 'normal' ? 'long-128k' : 'long-1m'
     setVaultToolProfile(profileId)
   }
@@ -1358,6 +1372,8 @@ async function runAgentLoopInner(
   // P8（§3.14）+ UI 优化条目8.2.2：三层学习者画像注入（全局 → 工作区 → 会话，细颗粒覆盖粗颗粒）
   // + 更新建议协议（3-33 Plan B）
   const profileHint = source === 'aiTeaching' ? resolveProfilesForInjection(sessionId, getSettingReader()) : ''
+  // P1-5：长任务档（点「继续」自动升档）—— 告诉模型预算更宽，鼓励先规划、批量取证
+  const longTaskHint = profileId === 'long' ? LONG_TASK_HINT : ''
   // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
   // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
   const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
@@ -1512,7 +1528,7 @@ async function runAgentLoopInner(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1606,6 +1622,10 @@ async function runAgentLoopInner(
     carry: buildResumeCarry(carryRows),
     // 支线旁问 / 手册通道不给「继续」：职责是答一点，重问成本低（方案 §3.7）
     writeResume: !isSideLane && !manual,
+    // P1-5：档位随现场落库，续跑据此沿用（长任务档不会被第二次「继续」打回常规档）
+    profile: profileId,
+    // 常规档触顶 / 中断时，续跑会升长任务档 —— 卡片上先把这件事说清（教学面走长资料检测，不适用）
+    longTaskResume: source !== 'aiTeaching' && !isSideLane && !manual && profileId !== 'long',
   })
   // P3b：本对话模型覆盖（'pid:mid' 串拆分）——解析一次，全轮次复用
   let providerId: string | undefined
@@ -1735,7 +1755,7 @@ async function runAgentLoopInner(
         const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
         // 截断 = 有断点可续（「接着往下写」）：现场与失败出口同款（支线/手册通道不写）
         const ictx = interruptCtxOf(i + 1)
-        if (ictx.writeResume !== false) persistResume(sessionId, msgId, interruptFactsOf(r.interruption, dt, trace, ictx), ictx.carry ?? '')
+        if (ictx.writeResume !== false) persistResume(sessionId, msgId, interruptFactsOf(r.interruption, dt, trace, ictx), ictx.carry ?? '', ictx.profile)
         return {
           ok: true, sessionId, reply, changes, trace, injection,
           interruption: r.interruption, interruptDetail: dt,
@@ -2066,11 +2086,12 @@ async function runAgentLoopInner(
         toolCalls: facts.toolCalls,
         changes: [],
         canResume: ictx.writeResume !== false,
+        longTaskResume: ictx.longTaskResume === true,
         ...(facts.lastProcessText ? { lastProcessText: facts.lastProcessText } : {}),
       })
     const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
     // 预算触顶 = 任务没做完（不是失败）：留现场让「继续」能带着已有信息接着跑
-    if (ictx.writeResume !== false) persistResume(sessionId, msgId, facts, ictx.carry ?? '')
+    if (ictx.writeResume !== false) persistResume(sessionId, msgId, facts, ictx.carry ?? '', ictx.profile)
     return {
       ok: true, sessionId, reply, changes, trace, injection, hitCap: true,
       interruption: capIt, interruptDetail: capDetail,
@@ -2119,10 +2140,14 @@ async function agentResume(req: AgentChatRequest, signal: AbortSignal): Promise<
   }
   const injection = buildResumeInjection(facts, String(rs.carry ?? ''))
   updateSessionResume(sessionId, null) // claim：现场只消费一次
+  // P1-5：点「继续」自动升长任务档 —— 常规档触顶说明任务没做完，续跑给足 60 轮 / 150 写；
+  // 现场里已记长档则原样沿用（第二次、第三次继续不会掉档）；AI 教学交给长资料自动检测。
+  const resumeSource = req.source || getAgentSession(sessionId)?.source
+  const profile = resolveResumeProfile(rs.profile, resumeSource)
   const result = await runAgentLoop(
     sessionId, req.context, signal, trace, req.source,
     { modelId: req.modelId, effort: req.effort },
-    { resumeInjection: injection },
+    { resumeInjection: injection, profile },
   )
   // 支线旁问：按本轮结果落运行态（成功 done / 其余 cut）；普通会话 no-op
   setSideLaneStatus(sessionId, result.ok ? 'done' : 'cut')

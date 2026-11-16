@@ -56,6 +56,8 @@ export interface SessionResume {
   changes: InterruptChange[]
   /** 机器可读的现场（已获得的工具结果摘要，新→旧） */
   carry: string
+  /** 本次运行使用的预算档位（P1-5；缺省 = 常规档。续跑据此沿用长任务档） */
+  profile?: string
 }
 
 /** 会话列表出口的摘要（**结构上就不含 carry**：负向断言锁 JSON.stringify 里搜不到 carry 正文） */
@@ -99,6 +101,8 @@ export interface InterruptContentInput {
   canResume?: boolean
   /** buildDiagnostics 的产出；缺省 = 不带诊断块（如「用户停止」不值得贴诊断） */
   diagnostics?: string
+  /** 续跑会自动升到长任务档（P1-5）：卡片上提前说明，用户知道「继续」拿到的预算更宽 */
+  longTaskResume?: boolean
 }
 
 /**
@@ -120,7 +124,7 @@ export function buildInterruptContent(input: InterruptContentInput): string {
     if (changes.length > 20) body.push(`…另有 ${changes.length - 20} 处（见「本次改动」面板）`)
   }
   if (input.lastProcessText) body.push(`中断前最后一步：${clean(input.lastProcessText, 160)}`)
-  if (input.canResume !== false) body.push(RESUMABLE_NOTE)
+  if (input.canResume !== false) body.push(RESUMABLE_NOTE + (input.longTaskResume ? '续跑会自动使用长任务档（最多 60 轮推理 / 150 次写入，你的自定义设置优先）。' : ''))
   parts.push(body.join('\n'))
   let human = parts.join('\n\n')
   if (human.length > INTERRUPT_CONTENT_CAP) human = human.slice(0, INTERRUPT_CONTENT_CAP) + '\n…（正文过长，已截断）'
