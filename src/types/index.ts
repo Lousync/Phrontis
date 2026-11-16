@@ -1831,6 +1831,24 @@ export interface AgentChatResult {
   hitCap?: boolean
   /** 本次请求前自动压缩了历史（会话压缩 §6.1；渲染层据此 toast 告知） */
   compressed?: { covered: number; digestChars: number }
+  /** P1-1 运行 journal：本次直接执行的文件改动可整体撤销（无文件改动时不出现） */
+  journal?: RunJournalSummary
+}
+
+/** 一次 AI 运行的 journal 摘要（P1-1；渲染层「撤销本次运行」入口数据源） */
+export interface RunJournalSummary {
+  runId: string
+  ops: number
+}
+
+/** 撤销本次运行的回执（P1-1） */
+export interface AgentRunUndoResult {
+  ok: boolean
+  runId: string
+  reverted: number
+  skipped: number
+  failed: number
+  errors: string[]
 }
 
 /** 会话压缩结果（agent:compressSession；AgentCompressResult 的渲染层镜像） */
@@ -3062,6 +3080,8 @@ export interface ElectronAPI {
   }>
   aiAssistantPlanReject: (sessionId: string) => Promise<boolean>
   aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number; skipped?: number; failed?: number; errors?: string[] }>
+  /** P1-1：撤销本次运行（直接执行模式的文件改动，逆序还原；冲突项跳过） */
+  aiJournalUndo: (runId: string) => Promise<AgentRunUndoResult>
   aiAssistantTasks: () => Promise<AiTaskSummary[]>
   aiAssistantScopeSuggest: (query: string, limit?: number) => Promise<AiScopeSuggestion[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>

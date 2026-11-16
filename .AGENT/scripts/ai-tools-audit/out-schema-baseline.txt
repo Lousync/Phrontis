@@ -9,7 +9,7 @@
   builtin.tool.request                3257 字符  ~1172 tok  schema  157  [read/terminal]
   builtin.pomodoro.summary            2489 字符  ~ 648 tok  schema   83  [read/pomodoro]
   builtin.habits.stats                2438 字符  ~ 684 tok  schema  241  [read/checkin]
-  builtin.vault.list                  2304 字符  ~ 707 tok  schema  237  [read/-]
+  builtin.vault.list                  2326 字符  ~ 714 tok  schema  237  [read/-]
   builtin.quiz.stats                  2280 字符  ~ 693 tok  schema   96  [read/quiz]
   builtin.schedule.list-todos         1897 字符  ~ 593 tok  schema  164  [read/schedule]
   builtin.tool.list                   1481 字符  ~ 444 tok  schema  246  [read/-]
@@ -20,19 +20,19 @@
   builtin.web.read                     932 字符  ~ 308 tok  schema  174  [read/-]
   builtin.web.search                   722 字符  ~ 245 tok  schema  173  [read/-]
   builtin.schedule.list-recurring      570 字符  ~ 167 tok  schema   34  [read/schedule]
-  小计: 42199 字符  ~12827 tok
+  小计: 42221 字符  ~12834 tok
 
 【ondemand —— 默认折叠，tool.request 后才注入】56 个
   builtin.quiz.gen-paper              4961 字符  ~1631 tok  schema  713  [write/quiz]
   image                               4422 字符  ~1632 tok  schema  362  [write/-]
   builtin.knowledge.graph-topology    4346 字符  ~1345 tok  schema  264  [read/knowledge]
-  builtin.vault.write                 4283 字符  ~1354 tok  schema  481  [write/-]
+  builtin.vault.write                 4253 字符  ~1346 tok  schema  481  [write/-]
   builtin.vault.edit                  3854 字符  ~1235 tok  schema  605  [write/-]
   builtin.booksource.draft            3599 字符  ~1305 tok  schema  790  [write/bookMarket]
-  builtin.vault.rename                3476 字符  ~1092 tok  schema  192  [write/-]
+  builtin.vault.rename                3575 字符  ~1129 tok  schema  192  [write/-]
   builtin.schedule.create-todo        3441 字符  ~1028 tok  schema  694  [write/schedule]
-  builtin.vault.move                  3101 字符  ~ 921 tok  schema  297  [write/-]
-  builtin.vault.trash                 2962 字符  ~1008 tok  schema  176  [write/-]
+  builtin.vault.move                  3198 字符  ~ 957 tok  schema  297  [write/-]
+  builtin.vault.trash                 3026 字符  ~1033 tok  schema  176  [write/-]
   builtin.schedule.create-recurring   2932 字符  ~ 989 tok  schema  985  [write/schedule]
   builtin.schedule.update-recurring   2788 字符  ~ 820 tok  schema  847  [write/schedule]
   builtin.schedule.create-workflow    2586 字符  ~ 697 tok  schema  623  [write/schedule]
@@ -79,10 +79,10 @@
   course.outline.remove-unit           619 字符  ~ 211 tok  schema  106  [write/-]
   builtin.schedule.delete-workflow     601 字符  ~ 174 tok  schema   96  [write/schedule]
   builtin.schedule.get-workflow        594 字符  ~ 173 tok  schema   96  [read/schedule]
-  小计: 101524 字符  ~32621 tok
+  小计: 101754 字符  ~32711 tok
 
-合计若全部装载: ~45448 tok
-实际常驻(默认权限 read 态): ~12827 tok / 轮
+合计若全部装载: ~45545 tok
+实际常驻(默认权限 read 态): ~12834 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】
   ⚠️ 超线 3 个：builtin.schedule.create-recurring 985；builtin.intel.query 974；builtin.schedule.update-recurring 847

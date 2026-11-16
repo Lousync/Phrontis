@@ -4,11 +4,70 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：81
+ * 版本数：82
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.32.0",
+    "date": "2026-11-16",
+    "summary": "本版一句话：AI 改完文件可以一键退回 —— 每次运行都留一份可撤销记录，删掉的文件也有快照。",
+    "groups": [
+      {
+        "title": "AI 助手 · 撤销本次运行",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "改动卡多一个按钮",
+            "rest": "AI 直接执行完、面板底部出现「本次已改动 N 项」时，标题栏右侧新增「撤销本次运行」，点一下按逆序把这次运行改过的文件全部还原。",
+            "sub": []
+          },
+          {
+            "lead": "覆盖范围",
+            "rest": "写入 / 编辑 / 重命名 / 移动（含批量） / 删除文件。新建的文件撤销时移入回收站，改过的文件写回运行前内容（保留原编码、换行与权限位），删掉的文件从运行前快照恢复。",
+            "sub": []
+          },
+          {
+            "lead": "不覆盖你的后续修改",
+            "rest": "如果某个文件在运行结束后又被你手动改过，撤销会跳过它并在提示里说明，绝不把新内容盖掉。有跳过或失败时不会锁死记录，可处理后重试。",
+            "sub": []
+          },
+          {
+            "lead": "只撤文件改动",
+            "rest": "日程、习惯、错题等模块数据不在文件撤销范围内，遇混合改动时会如实提示「另有 N 项模块写入需手动撤销」。",
+            "sub": []
+          },
+          {
+            "lead": "自带清理",
+            "rest": "运行记录与删除快照留在仓库 `.knowbase/agent/` 内，默认保留最近 20 次 / 7 天 / 总量 50 MB，超出从最旧开始清理（最新一次永远保留）。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "新增 `electron/lib/runJournalPure.ts` / `runJournal.ts`；直接执行的写工具统一经 `aiAssistantCommit` 记账，先预览模式仍由变更方案负责回滚，两套记录不重复。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本 `.AGENT/scripts/ai-harness/verify-run-journal.mjs`（44 项断言）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "方案与取舍：`docs/agent-harness-alignment-plan.md` §15。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.31.0",
     "date": "2026-11-15",

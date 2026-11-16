@@ -1,7 +1,7 @@
 # AI 助手 Harness 对齐实现方案
 
-> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 待排期。
-> **目标版本**：`v3.31.0`（新功能，不发 3.30.x）。
+> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 第 1 项「AI 操作 journal + 撤销本次运行」已落码（2026-11-16，v3.32.0），其余待排期。
+> **目标版本**：`v3.31.0`（P0，新功能）；P1-1 随 `v3.32.0`（新功能）。
 > **范围**：P0 四批 —— A 文件策略与通用文件原语 / B 工作区信任 / C 索引与默认忽略 / D MCP、Skill 与工具发现；P1 只给提纲。
 > **关联**：`AGENTS.md` 铁律 1 / 2 / 16 / 17 / 18 / 25；`docs/ui-animation-plan.md`；`docs/pending-fixes.md`。
 
@@ -310,7 +310,7 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 
 | 顺序 | 内容 | 关键点 |
 |---|---|---|
-| 1 | AI 操作 journal + 撤销本次运行 | 每次运行记 write / edit / rename / move / trash；删除先快照到 `.knowbase/agent/undo/<runId>/`；面板加「撤销本次运行」；容量与保留期上限 |
+| 1 ✅ | AI 操作 journal + 撤销本次运行 | 每次运行记 write / edit / rename / move / trash；删除先快照到 `.knowbase/agent/undo/<runId>/`；面板加「撤销本次运行」；容量与保留期上限。落码见 §15 |
 | 2 | 终端只读通道 `terminal.inspect` | 白名单命令（git status/diff/log/show、ls、cat、head/tail、wc、rg、find、file、which）；`spawn` 直呼 argv、不走 shell；规划模式可用 |
 | 3 | 终端 `exec` 增强 | `tailLines` / `filter` / 输出续读；后台任务 + 事后读取 |
 | 4 | 只读规划模式 + 通用 todo | `writeMode` 增加 `plan`；todo 工具落到对话框清单 |
@@ -386,3 +386,23 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 **实测（`measure-tool-schema.mjs`）**：builtin 74 个（core 18 / ondemand 56）；core schema 3544 → 4847 字符（+1303，约 +390 tok/轮），来自新增 find（430）/ tool.list（246）与 read/search 的行区间、正则参数；`tool.request` 的长清单删除后其描述缩短约 300 字符。净增约 190 tok/轮 —— 与 §7「净减少」的预估不符，如实记录；若后续要压回去，首选把 `vault.find` 降为 ondemand。
 
 **契约**（`.AGENT/scripts/ai-harness/`）：`verify-ai-file-policy`、`verify-text-codec`、`verify-vault-find`、`verify-vault-search`、`verify-vault-dir-tools`、`verify-ai-permission`、`verify-vault-ignore`、`verify-ai-tool-discovery`；另更新 `verify-ai-read-exts.mjs` 与 `verify-batch-move.mjs` 以匹配新口径。
+
+---
+
+## 15. P1-1 落码结果（2026-11-16，v3.32.0）
+
+| 落点 | 内容 |
+|---|---|
+| `electron/lib/runJournalPure.ts`（新） | 纯逻辑：撤销顺序（逆序 + 跳过已撤销）、冲突判定（运行后文件被改过 → 跳过，不覆盖用户修改）、保留期选择（最新一次永远保留） |
+| `electron/lib/runJournal.ts`（新） | 运行内 journal（内存）→ 运行结束落 `<vault>/.knowbase/agent/journal/<runId>.json`；删除前原始字节快照落 `.knowbase/agent/undo/<runId>/`；`undoRun` 逆序还原并校验仓库 `rootId` |
+| `electron/lib/aiAssistantCommit.ts` | 直接执行路径统一在此记账：落盘前 `beginRunOp`（trash 先快照）、成功后 `commitRunOp`（写后读盘算内容指纹）、失败 `abortRunOp`；先预览仍走 ChangePlan，不重复记 |
+| `electron/lib/agentService.ts` | 每次运行分配 `runId`，两处工具执行注入 ctx；结束把 journal 摘要挂到 `AgentChatResult.journal`（失败/中止也保留，便于撤销半途改动）；新增 IPC `aiJournal:undo` |
+| 渲染层 | `useAssistantChat` 暴露 `lastRun` / `undoRun`（切会话即收起）；`ChatBody` 的「本次改动」卡新增「撤销本次运行」；模块数据写入不在文件撤销范围内时如实提示 |
+| 保留上限 | `agentRunUndoKeepRuns` / `agentRunUndoKeepDays` / `agentRunUndoMaxMb`（`ui:false`，默认 20 次 / 7 天 / 50 MB） |
+
+**口径**：
+- 只覆盖统一助手「直接执行」模式的 `vault.write/edit/rename/move/trash`（含目录改名，撤销走分类通道）；`mkdir` 不记、目录删除无快照（沿用 §12「先覆盖文件级」）。
+- 运行后文件又被改过 → 跳过并如实告知（用户拍板），绝不覆盖后续手动修改。
+- 撤销成功才写 `undoneAt`；有跳过/失败时保留记录，已还原的项不重放，可处理后重试。
+
+**契约**：`.AGENT/scripts/ai-harness/verify-run-journal.mjs`（44 项断言：撤销顺序、冲突矩阵、保留期、快照命名、工具/UI/IPC 接线）。

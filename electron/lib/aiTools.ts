@@ -97,6 +97,11 @@ export interface ToolInvokeCtx {
   apply?: boolean
   /** 统一 AI 助手会话标记（用于日程写工具硬过滤等） */
   unifiedAssistant?: boolean
+  /**
+   * 本次 Agent 运行的 id（P1-1 运行 journal）。
+   * 只有统一助手「直接执行」路径注入；写工具落盘成功后据此记账，运行结束可整体撤销。
+   */
+  runId?: string
 }
 
 export type ToolHandler = (args: Record<string, unknown>, ctx?: ToolInvokeCtx) => unknown | Promise<unknown>

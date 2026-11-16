@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
-  RotateCcw, CalendarDays, Star, FolderTree, Zap,
+  RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
@@ -119,7 +119,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   const {
 
     sessions, providersOk, activeId, messages, windowStart, loadEarlier, reveal, input, setInput, inputRef, pending,
-    liveSteps, draft, lastChanges, compressing, pickedSkill, setPickedSkill,
+    liveSteps, draft, lastChanges, lastRun, undoRun, compressing, pickedSkill, setPickedSkill,
     slashSkills, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
     send, newSession, loadSession, removeSession, togglePin, regenerate, resume, resumeInfo, editSubmit, deleteMessage,
@@ -131,6 +131,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   } = chat
 
   const isNarrow = variant === 'docked'
+  /** P1-1：撤销本次运行的一次性忙碌态（防连点；正常毫秒级） */
+  const [undoingRun, setUndoingRun] = useState(false)
 
   // 输入卡外壳样式（设置 → 外观 →「AI 助手输入样式」；未知值回落 v1）
   const shell = useInputShell()
@@ -491,18 +493,31 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
               </div>
             )}
 
-            {/* 本次改动卡片（AI 执行完成的写操作清单，可一键关闭） */}
-            {lastChanges && lastChanges.length > 0 && (
+            {/* 本次改动卡片（AI 执行完成的写操作清单；直接执行模式下带「撤销本次运行」） */}
+            {((lastChanges && lastChanges.length > 0) || lastRun) && (
               <div className={`pb-1 shrink-0 ${CARD_WRAP[variant]}`}>
                 <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden">
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] border-b border-[var(--border-color)]">
                     <Wrench size={10} className="text-[var(--accent)]" />
-                    <span className="flex-1">本次已改动 {lastChanges.length} 项</span>
+                    <span className="flex-1">本次已改动 {lastChanges?.length ?? lastRun?.ops ?? 0} 项</span>
+                    {lastRun && (
+                      <button
+                        type="button"
+                        disabled={undoingRun}
+                        onClick={() => { setUndoingRun(true); void undoRun().finally(() => setUndoingRun(false)) }}
+                        data-tip="把本次运行直接写入的文件改动按逆序还原（运行后又被改过的文件会跳过）"
+                        aria-label="撤销本次运行"
+                        className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] disabled:opacity-50">
+                        <Undo2 size={10} />
+                        撤销本次运行
+                      </button>
+                    )}
                     <button onClick={dismissChanges} data-tip="关闭" aria-label="关闭"
                       className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
                       <X size={11} />
                     </button>
                   </div>
+                  {lastChanges && lastChanges.length > 0 && (
                   <ul className="py-1 max-h-32 overflow-y-auto">
                     {lastChanges.map((c, i) => {
                       const canOpen = Boolean(c.file)
@@ -531,6 +546,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       )
                     })}
                   </ul>
+                  )}
                 </div>
               </div>
             )}

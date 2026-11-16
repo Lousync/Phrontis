@@ -382,6 +382,7 @@ const api = {
   aiAssistantPlanApply: (sessionId: string, acceptedIds: string[]) => ipcRenderer.invoke('aiAssistant:plan:apply', sessionId, acceptedIds),
   aiAssistantPlanReject: (sessionId: string) => ipcRenderer.invoke('aiAssistant:plan:reject', sessionId),
   aiAssistantTaskRollback: (sessionId: string) => ipcRenderer.invoke('aiAssistant:task:rollback', sessionId),
+  aiJournalUndo: (runId: string) => ipcRenderer.invoke('aiJournal:undo', runId),
   aiAssistantTasks: () => ipcRenderer.invoke('aiAssistant:tasks'),
   aiAssistantScopeSuggest: (query: string, limit?: number) => ipcRenderer.invoke('aiAssistant:scope:suggest', query, limit),
   agentRenameSession: (id: string, title: string) => ipcRenderer.invoke('agent:renameSession', id, title),

@@ -11,6 +11,7 @@
 
 import type { ToolInvokeCtx } from './aiTools'
 import { stageOp, type PlanOpInput } from './aiAssistantPlan'
+import { beginRunOp, commitRunOp, abortRunOp, type PendingRunOp } from './runJournal'
 
 export interface StagedResult {
   ok: true
@@ -68,8 +69,11 @@ export function stageToolOp(
 }
 
 /**
- * 暂存或执行。`makeOp` 只在 propose 模式下求值（避免无谓读盘）；
+ * 暂存或执行。`makeOp` 只在需要时求值（propose 记方案 / 直接执行记运行 journal）；
  * `run` 是原落盘逻辑，非 propose 时原样执行。
+ *
+ * P1-1：直接执行 + 统一助手运行（ctx.runId）时，落盘成功后把同一份 op 记进本次运行的 journal，
+ * 供面板「撤销本次运行」。journal 本身失败绝不影响真实文件操作。
  */
 export async function commitOrStage<R>(
   ctx: ToolInvokeCtx | undefined,
@@ -90,5 +94,19 @@ export async function commitOrStage<R>(
       summary: op.summary,
     }
   }
-  return run()
+  // 运行 journal：只有统一助手 + Agent 循环注入 runId 的直接执行路径才记
+  let pending: PendingRunOp | null = null
+  if (ctx?.runId && ctx.unifiedAssistant) {
+    try {
+      pending = beginRunOp(ctx.runId, ctx.sessionId ?? '', makeOp())
+    } catch { pending = null }
+  }
+  try {
+    const result = await run()
+    try { commitRunOp(pending) } catch { /* 记账失败不影响落盘结果 */ }
+    return result
+  } catch (e) {
+    try { abortRunOp(pending) } catch { /* ignore */ }
+    throw e
+  }
 }

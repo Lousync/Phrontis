@@ -11,11 +11,11 @@ import {
   agentChat, agentRegenerate, agentResume, agentEditMessage, agentDeleteMessage,
   llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
   agentSetSessionScope, agentSetSessionPrefs, agentRenameSession, agentUsageGet,
-  aiAssistantPlanGet, aiAssistantPlanApply, aiAssistantPlanReject, aiAssistantTaskRollback,
+  aiAssistantPlanGet, aiAssistantPlanApply, aiAssistantPlanReject, aiAssistantTaskRollback, aiJournalUndo,
 } from '../../../lib/ipc'
 // 新建会话走包装层：会话随仓库走，无仓库时要给提示而不是静默失败
 import { newAgentSession } from '../../../lib/agentSession'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource, ResumeInfo, AiChangePlan } from '../../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource, ResumeInfo, AiChangePlan, RunJournalSummary } from '../../../types'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import {
   MAX_PARALLEL, subscribeAssistantRunState, getRunBucket, isSessionRunning, runningSessionCount,
@@ -89,6 +89,10 @@ export interface AssistantChatController {
   liveSteps: AgentTraceStep[]
   draft: StreamDraft | null
   lastChanges: AgentChange[] | null
+  /** P1-1：本次运行的文件操作 journal（直接执行模式；有则可整体撤销） */
+  lastRun: RunJournalSummary | null
+  /** 撤销本次运行（冲突项跳过并如实告知） */
+  undoRun: () => Promise<void>
   compressing: boolean
   pickedSkill: SkillInfo | null
   setPickedSkill: Dispatch<SetStateAction<SkillInfo | null>>
@@ -302,6 +306,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   /** 本次请求的真实改动清单（agentChat 返回 changes）→ 完成后卡片 */
   const [lastChanges, setLastChanges] = useState<AgentChange[] | null>(null)
+  /** P1-1：本次运行的 journal（可撤销的文件操作） */
+  const [lastRun, setLastRun] = useState<RunJournalSummary | null>(null)
   // 统一助手：文件作用域 / 写入策略 / 变更方案 / 会话级模型与思考强度
   const [scope, setScopeState] = useState<string[]>([])
   const [scopeAll, setScopeAllState] = useState(true)
@@ -614,6 +620,9 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setActiveIdState(id)
     setPlan(null)
     setReveal(null)
+    // 改动卡与运行撤销都属于「当前会话的本次运行」，切会话即收起（避免撤销到别的会话）
+    setLastChanges(null)
+    setLastRun(null)
     closeDrawer()
     try {
       const rows: AgentStoredMessage[] = await agentMessages(id)
@@ -681,6 +690,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setWindowStart(0)
     setReveal(null)
     setPlan(null)
+    setLastChanges(null)
+    setLastRun(null)
     setScopeState(targetScope)
     setScopeAllState(targetScopeAll)
     setWriteModeState(targetWriteMode)
@@ -695,6 +706,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setMessages([])
       setWindowStart(0)
       setReveal(null)
+      setLastChanges(null)
+      setLastRun(null)
       return
     }
     void loadSession(id)
@@ -710,6 +723,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setMessages([])
       setWindowStart(0)
       setReveal(null)
+      setLastChanges(null)
+      setLastRun(null)
     }
   }, [draftSource])
 
@@ -888,6 +903,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     clearInputFor(sid)
     beginRun(sid)
     setLastChanges(null)
+    setLastRun(null)
     const cid = crypto.randomUUID()
     try {
       // Skill chip 随消息一次性消费，发出即清
@@ -910,6 +926,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         const canResume = r.interruption?.resumable === true
         showToast({ type: 'error', message: `AI 调用失败：${r.error ?? '未知错误'}${canResume ? ' · 可点「继续」接着做' : ''}` })
       }
+      // P1-1：失败/中止前也可能已经落盘了一部分；只要 journal 有记录就提供「撤销本次运行」
+      if (r.journal) setLastRun(r.journal)
       // 以会话库为准刷新（拿到落库 id/trace；中止时仅剩用户消息也保持一致）
       await refreshMessages(sid)
     } catch (err) {
@@ -938,6 +956,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     if (messages.length === 0 || messages[messages.length - 1].role !== 'assistant') return
     beginRun(sid)
     setLastChanges(null)
+    setLastRun(null)
     const cid = crypto.randomUUID()
     try {
       const baseCtx = (unified && !scopeAll) || contextRemoved ? null : resolveCtx()
@@ -948,6 +967,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}${again}` })
       }
       else if (activeIdRef.current === sid && r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      if (activeIdRef.current === sid && r.journal) setLastRun(r.journal)
       await refreshMessages(sid)
     } catch (err) {
       // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
@@ -977,6 +997,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
     beginRun(sid)
     setLastChanges(null)
+    setLastRun(null)
     const cid = crypto.randomUUID()
     try {
       const baseCtx = (unified && !scopeAll) || contextRemoved ? null : resolveCtx()
@@ -986,6 +1007,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         const again = r.interruption?.resumable === true ? ' · 可再点一次「继续」' : ''
         showToast({ type: 'error', message: `继续失败：${r.error ?? '未知错误'}${again}` })
       } else if (activeIdRef.current === sid && r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      if (activeIdRef.current === sid && r.journal) setLastRun(r.journal)
       await refreshMessages(sid)
     } catch (err) {
       // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
@@ -1013,6 +1035,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setEditing(null)
     beginRun(sid)
     setLastChanges(null)
+    setLastRun(null)
     const cid = crypto.randomUUID()
     try {
       const baseCtx = (unified && !scopeAll) || contextRemoved ? null : resolveCtx()
@@ -1023,6 +1046,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}${again}` })
       }
       else if (activeIdRef.current === sid && r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      if (activeIdRef.current === sid && r.journal) setLastRun(r.journal)
       await refreshMessages(sid)
     } catch (err) {
       // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
@@ -1113,6 +1137,36 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
   }, [plan, refreshPlan])
 
+  /** P1-1：撤销本次运行（直接执行模式的文件改动）。冲突项跳过、不覆盖用户后续修改。 */
+  const undoRunAction = useCallback(async () => {
+    if (!lastRun) return
+    try {
+      const r = await aiJournalUndo(lastRun.runId)
+      if (r.failed > 0 || r.skipped > 0) {
+        showToast({
+          type: r.failed > 0 ? 'error' : 'info',
+          message: r.failed > 0
+            ? `撤销未完成：已还原 ${r.reverted} 项，${r.failed} 项失败${r.skipped > 0 ? `，${r.skipped} 项跳过` : ''}`
+            : `已还原 ${r.reverted} 项；${r.skipped} 项因运行后又被修改，未覆盖`,
+          detail: r.errors.slice(0, 3).join('；') || undefined,
+        })
+        return
+      }
+      const otherWrites = Math.max(0, (lastChanges?.length ?? 0) - lastRun.ops)
+      showToast({
+        type: 'success',
+        message: `已撤销本次运行的文件改动（${r.reverted} 项）`,
+        detail: otherWrites > 0 ? `另有 ${otherWrites} 项改动不在文件撤销范围内（模块数据 / 目录删除等），需手动处理` : undefined,
+      })
+      setLastChanges(null)
+      setLastRun(null)
+      const sid = activeIdRef.current
+      if (sid) await refreshMessages(sid)
+    } catch (e) {
+      showToast({ type: 'error', message: '撤销失败', detail: String((e as Error)?.message ?? e) })
+    }
+  }, [lastRun, lastChanges, refreshMessages])
+
   const runStateOf = useCallback((sid: string) => runMarkOf(sid), [])
   const runMark = activeId ? runStateOf(activeId) : null
   const pendingCount = plan?.ops.filter(o => o.status === 'pending').length ?? 0
@@ -1132,6 +1186,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     draft,
     runStateOf,
     lastChanges,
+    lastRun,
+    undoRun: undoRunAction,
     compressing,
     pickedSkill,
     setPickedSkill,
@@ -1178,7 +1234,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     editSubmit,
     deleteMessage,
     abort,
-    dismissChanges: () => setLastChanges(null),
+    dismissChanges: () => { setLastChanges(null); setLastRun(null) },
     refreshSessions,
     modelId,
     setModelId,

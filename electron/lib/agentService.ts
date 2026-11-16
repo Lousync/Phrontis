@@ -62,6 +62,7 @@ import type { IntelSection } from '../../src/types'
 import { computeLaneUnread, deriveLaneStatus } from './sideLaneMeta'
 import { buildScopeManifest } from './aiAssistantScope'
 import { getPlan, applyPlan, rejectPlan, rollbackTask, listTasks } from './aiAssistantPlan'
+import { finishRun, undoRun } from './runJournal'
 import { MAX_BATCH_MOVE_ITEMS_PER_MESSAGE } from './vaultMovePure'
 import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { suggestScope } from './aiAssistantScopeSuggestPure'
@@ -428,6 +429,8 @@ export interface AgentChatResult {
   hitCap?: boolean
   /** 本次请求前自动压缩了历史（会话压缩 §6.1；渲染层据此 toast 告知） */
   compressed?: { covered: number; digestChars: number }
+  /** P1-1 运行 journal：本次直接执行的文件改动可整体撤销（无文件改动时不出现） */
+  journal?: { runId: string; ops: number }
 }
 
 /** AI教学 system 注入分段字符数（基础人设 / CONSTRAINTS / 三层画像 / SOURCE 目录 / 教学规则） */
@@ -1086,7 +1089,33 @@ function withTruncationNotice(reply: string, it: Interruption, detail: Interrupt
   return reply + '\n' + buildInterruptNotice(it, detail, { separator: true, diagnostics: true })
 }
 
+/**
+ * Agent 循环入口（P1-1）：每次运行分配 runId，循环内的直接文件写操作据此记账；
+ * 结束后把「可撤销的运行」摘要挂到结果上（有文件操作才有）。
+ */
 async function runAgentLoop(
+  sessionId: string,
+  context: AgentContextInfo | undefined,
+  signal: AbortSignal,
+  trace: AgentTraceStep[],
+  source?: string,
+  llmOpts?: { modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string },
+  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId }
+): Promise<AgentChatResult> {
+  const runId = randomUUID()
+  try {
+    const result = await runAgentLoopInner(sessionId, context, signal, trace, source, llmOpts, { ...opts, runId })
+    let summary: { runId: string; ops: number } | null = null
+    try { summary = finishRun(runId) } catch { summary = null }
+    return summary ? { ...result, journal: summary } : result
+  } catch (e) {
+    // 异常退出也落盘已发生的改动（保留期清理照常），但不改变原异常语义
+    try { finishRun(runId) } catch { /* ignore */ }
+    throw e
+  }
+}
+
+async function runAgentLoopInner(
   sessionId: string,
   context: AgentContextInfo | undefined,
   signal: AbortSignal,
@@ -1102,7 +1131,7 @@ async function runAgentLoop(
    * 所以守卫要放行「末条不是 user」；注入文本作为**一条不落库的合成 user 轮**追加在 convo 末尾
    * （不进 requestInjection 槽：续跑指令必须是「最近一条指令」才有牵引力）。
    */
-  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId }
+  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId; runId?: string }
 ): Promise<AgentChatResult> {
   const runStarted = Date.now() // 归因 P0：中断卡的「耗时」与诊断块用它
   const resumeInjection = String(opts?.resumeInjection ?? '')
@@ -1921,7 +1950,7 @@ async function runAgentLoop(
       const t1 = Date.now()
       const exec = await invokeToolInternal(realName, args, '', {
         sessionId, source, signal,
-        scope: aiScope, scopeAll, writeMode, propose: aiPropose, unifiedAssistant,
+        scope: aiScope, scopeAll, writeMode, propose: aiPropose, unifiedAssistant, runId: opts?.runId,
       })
       finishToolCall(tc, realName, args, exec, Date.now() - t1)
     }
@@ -1964,7 +1993,7 @@ async function runAgentLoop(
           const t1 = Date.now()
           const exec = await invokeToolInternal(c.realName, c.args, '', {
             sessionId, source, signal,
-            scope: aiScope, scopeAll, writeMode, propose: aiPropose, unifiedAssistant,
+            scope: aiScope, scopeAll, writeMode, propose: aiPropose, unifiedAssistant, runId: opts?.runId,
           })
           return { exec, durationMs: Date.now() - t1 }
         })))
@@ -2310,6 +2339,8 @@ export function registerAgentHandlers(): void {
     return true
   })
   ipcMain.handle('aiAssistant:task:rollback', (_e, sessionId: string) => rollbackTask(String(sessionId ?? '')))
+  // P1-1：撤销本次运行（直接执行模式的文件改动，按运行 journal 逆序还原）
+  ipcMain.handle('aiJournal:undo', (_e, runId: string) => undoRun(String(runId ?? '')))
   ipcMain.handle('aiAssistant:tasks', () => listTasks())
   ipcMain.handle('aiAssistant:scope:suggest', (_e, query: string, limit?: number) => {
     const pages = getKnowledgeIndex().pages.map((p) => ({ relPath: p.path, title: p.title, tags: p.tags, entryKind: p.entryKind }))
