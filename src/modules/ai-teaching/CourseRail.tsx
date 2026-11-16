@@ -23,13 +23,15 @@ interface Props {
   search: string
   onSearch: (v: string) => void
   hasOutline: boolean
+  /** 已结课：未学知识点不可点、复习只能看历史讲义、段只读打开 */
+  readOnly?: boolean
 }
 
 export function CourseRail(props: Props) {
   const {
     chapters, activeChapterId, collapsed, onToggleChapter, onActivateChapter,
     onUnit, onReview, onSegment, activeSegmentId,
-    assistantActive, onAssistant, search, onSearch, hasOutline,
+    assistantActive, onAssistant, search, onSearch, hasOutline, readOnly = false,
   } = props
   const [segOverride, setSegOverride] = useState<Record<string, boolean>>({})
   const searching = !!search.trim()
@@ -48,6 +50,7 @@ export function CourseRail(props: Props) {
   }
 
   const renderUnitButton = (ch: RailChapterInput, u: RailUnit) => {
+    const disabled = readOnly && !u.learned
     const dot = u.active
       ? 'bg-[var(--accent)]'
       : u.learned
@@ -55,19 +58,22 @@ export function CourseRail(props: Props) {
         : u.inSegment
           ? 'border border-[var(--accent)] bg-transparent'
           : 'bg-[var(--text-disabled)]'
-    const title = u.active
-      ? `${u.name} · 当前聚焦`
-      : u.learned
-        ? `${u.name} · 已学，点击回看`
-        : u.inSegment
-          ? `${u.name} · 本段内，点击切换聚焦`
-          : `${u.name} · 点击开段`
+    const title = disabled
+      ? `${u.name} · 未学`
+      : u.active
+        ? `${u.name} · 当前聚焦`
+        : u.learned
+          ? `${u.name} · 已学，点击回看`
+          : u.inSegment
+            ? `${u.name} · 本段内，点击切换聚焦`
+            : `${u.name} · 点击开段`
     return (
       <button
         key={u.id}
-        onClick={() => onUnit(ch.id, u.id)}
+        onClick={() => { if (!disabled) onUnit(ch.id, u.id) }}
+        disabled={disabled}
         data-tip={title} aria-label={title}
-        className={`w-full flex items-center gap-1.5 pl-4 pr-2 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] ${u.active ? 'bg-[var(--bg-selected)]' : ''}`}
+        className={`w-full flex items-center gap-1.5 pl-4 pr-2 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] disabled:hover:bg-transparent disabled:cursor-not-allowed ${u.active ? 'bg-[var(--bg-selected)]' : ''}`}
       >
         <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${dot}`} />
         <span className={`min-w-0 flex-1 truncate text-[11.5px] ${u.active ? 'text-[var(--accent)] font-medium' : u.learned ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'}`}>{u.name}</span>
@@ -173,9 +179,10 @@ export function CourseRail(props: Props) {
                       )
                     })}
                     <button
-                      onClick={() => onReview(ch.id)}
-                      data-tip={ch.review.state === 'locked' ? `本章还有 ${ch.review.remaining} 个知识点没学完` : ch.review.state === 'done' ? '查看复习讲义' : '开始章末复习'} aria-label={ch.review.state === 'locked' ? `本章还有 ${ch.review.remaining} 个知识点没学完` : ch.review.state === 'done' ? '查看复习讲义' : '开始章末复习'}
-                      className={`w-full flex items-center gap-1.5 pl-4 pr-2 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] ${ch.review.state === 'locked' ? 'opacity-70' : ''}`}
+                      onClick={() => { if (!(readOnly && ch.review.state !== 'done')) onReview(ch.id) }}
+                      disabled={readOnly && ch.review.state !== 'done'}
+                      data-tip={readOnly && ch.review.state !== 'done' ? '本章没有复习讲义' : ch.review.state === 'locked' ? `本章还有 ${ch.review.remaining} 个知识点没学完` : ch.review.state === 'done' ? '查看复习讲义' : '开始章末复习'} aria-label={readOnly && ch.review.state !== 'done' ? '本章没有复习讲义' : ch.review.state === 'locked' ? `本章还有 ${ch.review.remaining} 个知识点没学完` : ch.review.state === 'done' ? '查看复习讲义' : '开始章末复习'}
+                      className={`w-full flex items-center gap-1.5 pl-4 pr-2 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] disabled:hover:bg-transparent disabled:cursor-not-allowed ${ch.review.state === 'locked' ? 'opacity-70' : ''}`}
                     >
                       {ch.review.state === 'done' ? <Check size={10} className="shrink-0 text-[var(--success)]" /> : ch.review.state === 'unlocked' ? <Sparkles size={10} className="shrink-0 text-[var(--accent)]" /> : <Lock size={10} className="shrink-0 text-[var(--text-muted)]" />}
                       <span className={`min-w-0 flex-1 truncate text-[11px] ${ch.review.state === 'unlocked' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>章末复习</span>

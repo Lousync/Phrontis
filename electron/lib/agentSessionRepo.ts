@@ -575,7 +575,13 @@ export function sessionExists(id: string): boolean {
  * 返回新消息 id（A 方案：中断卡要把「继续」按钮挂在自己的 id 上）。
  * `role==='user'` 时**清空续跑现场**：用户改主意发了新消息 = 旧现场作废（中断卡保留为历史）。
  */
-export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant', content: string, trace?: unknown): string {
+export function appendAgentMessage(
+  sessionId: string,
+  role: 'user' | 'assistant',
+  content: string,
+  trace?: unknown,
+  images?: Array<{ relPath: string; mime: string; name?: string; w?: number; h?: number; bytes?: number }>,
+): string {
   ensureMigrated()
   const id = randomUUID()
   appendMessage(requireAgentDir(), {
@@ -583,6 +589,7 @@ export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant'
     session_id: sessionId,
     role,
     content,
+    ...(images && images.length > 0 ? { images } : {}),
     trace_json: trace ? JSON.stringify(trace) : null,
     created_at: nowLocal(),
   })

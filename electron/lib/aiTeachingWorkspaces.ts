@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from 'fs'
-import { join } from 'path'
+import { join, relative } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 import { listAgentSessions } from './agentSessionRepo'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
+import { classifyArtifact } from './aiTeachingCourseEndPure'
+import { summarizeCourseWorkspace, type CourseSummary } from './aiTeachingCourseSummary'
 
 /**
  * AI教学模块 · 工作区两层（总纲 §3.2-6 / §3.5，P5；决策点 3-6/3-8 按建议：元数据入仓库 `.knowbase/`，工作区跟随当前激活仓库）
@@ -20,6 +22,8 @@ export interface AiWorkspace {
   id: string
   name: string
   createdAt: string
+  /** 结课时间；null / 缺省 = 进行中。状态唯一真相源，不派生自进度（允许未学完结课） */
+  endedAt?: string | null
 }
 
 interface WsMeta {
@@ -39,12 +43,16 @@ export interface WorkspaceRecentSession {
 
 export interface WorkspaceInfo extends AiWorkspace {
   sessionCount: number
-  /** 工作区文件夹内 .md 产物数（不含 CONSTRAINTS/锚点/模板，深度≤2 封顶 500） */
+  /** 工作区文件夹内课程产物数（五类可沉淀产物 + 题单；不含结构文件 / 素材 / 暂存区） */
   docCount: number
   folderRel: string
   lastActive: string | null
   /** 最近活跃的 2 条对话（按 updated_at 倒序；无对话为空数组） */
   recentSessions: WorkspaceRecentSession[]
+  /** 结课时间（冗余便于渲染层直接判断；真相源仍是 `AiWorkspace.endedAt`） */
+  endedAt: string | null
+  /** 课程摘要；没有 `课程.md` 的主题工作区为 null */
+  course: CourseSummary | null
 }
 
 const KEY = 'workspaces.json'
@@ -91,6 +99,29 @@ export function getWorkspaceOfSession(sessionId: string): string | null {
   return meta()?.sessionWs[sessionId] ?? null
 }
 
+/** 工作区元数据（不存在返回 null） */
+export function getWorkspace(wsId: string): AiWorkspace | null {
+  const m = meta()
+  return m?.workspaces.find((w) => w.id === wsId) ?? null
+}
+
+/** 结课时间（null = 进行中 / 工作区不存在） */
+export function getWorkspaceEndedAt(wsId: string): string | null {
+  const ws = getWorkspace(wsId)
+  const v = ws?.endedAt
+  return typeof v === 'string' && v ? v : null
+}
+
+/** 写结课状态（`endedAt=null` = 重新开课）；不改其他字段 */
+export function setWorkspaceEndedAt(wsId: string, endedAt: string | null): { ok: boolean; error?: string } {
+  const m = meta()
+  const ws = m?.workspaces.find((w) => w.id === wsId)
+  if (!m || !ws) return { ok: false, error: '工作区不存在' }
+  ws.endedAt = endedAt || null
+  persist(m)
+  return { ok: true }
+}
+
 /** 工作区文件夹相对路径（不建目录；工作区不存在返回 null） */
 export function workspaceFolderRel(wsId: string, getSetting: (key: string) => unknown): string | null {
   const m = meta()
@@ -98,20 +129,32 @@ export function workspaceFolderRel(wsId: string, getSetting: (key: string) => un
   return ws ? `${rootDirName(getSetting)}/${wsFolderName(ws.name)}` : null
 }
 
+/**
+ * 产物计数（选择页「产物」统计）：五类可沉淀产物 + 题单。
+ * 口径与结课盘点共用 `classifyArtifact()` —— 课程.md / 交接 / 要求 / 画像 / 素材 / 暂存区都不再抬高数字。
+ */
 function countDocs(dirAbs: string): number {
   let n = 0
-  const stack = [dirAbs]
+  const stack: Array<{ abs: string; depth: number }> = [{ abs: dirAbs, depth: 0 }]
   let guard = 0
   while (stack.length && n < 500 && guard++ < 2000) {
-    const cur = stack.pop() as string
-    let entries: { name: string; isDir: boolean }[]
+    const cur = stack.pop() as { abs: string; depth: number }
+    let entries: import('fs').Dirent[]
     try {
-      entries = readdirSync(cur, { withFileTypes: true }).map((e) => ({ name: e.name, isDir: e.isDirectory() }))
+      entries = readdirSync(cur.abs, { withFileTypes: true })
     } catch { continue }
     for (const e of entries) {
-      if (e.name.startsWith('.') || e.name === '_templates') continue
-      if (e.isDir) { stack.push(join(cur, e.name)); continue }
-      if (e.name.toLowerCase().endsWith('.md') && e.name !== 'CONSTRAINTS.md' && e.name !== 'SOURCE.md' && e.name !== 'PROFILE.md') n++
+      if (e.name.startsWith('.')) continue
+      if (e.isDirectory()) {
+        if (cur.depth >= 5) continue
+        if (e.name === '_templates' || e.name === '待整理' || e.name === 'SOURCES' || e.name === 'node_modules' || e.name === '教材' || e.name === '_extracts') continue
+        stack.push({ abs: join(cur.abs, e.name), depth: cur.depth + 1 })
+        continue
+      }
+      if (!e.isFile()) continue
+      const rel = relative(dirAbs, join(cur.abs, e.name)).replace(/\\/g, '/')
+      const group = classifyArtifact(rel)
+      if (group !== 'excluded') n++
     }
   }
   return n
@@ -123,9 +166,11 @@ export function listWorkspaces(getSetting: (key: string) => unknown): { workspac
   const rootDir = rootDirName(getSetting)
   const vault = getCurrentVault()
   const sessions = listAgentSessions()
+  const progressAbs = vault ? join(vault.rootPath, '.knowbase', 'modules', 'aiTeaching', 'progress.json') : undefined
   const workspaces = m.workspaces.map((w) => {
     const own = sessions.filter((s) => m.sessionWs[s.id] === w.id)
     const folderRel = `${rootDir}/${wsFolderName(w.name)}`
+    const wsAbs = vault ? join(vault.rootPath, folderRel) : null
     let lastActive: string | null = null
     for (const s of own) if (!lastActive || s.updated_at > lastActive) lastActive = s.updated_at
     // 选择页预览的「最近对话」：own 已在内存里，排序取 2 条不产生额外读盘
@@ -135,11 +180,13 @@ export function listWorkspaces(getSetting: (key: string) => unknown): { workspac
       .map((s) => ({ id: s.id, title: s.title, updatedAt: s.updated_at ?? '' }))
     return {
       ...w,
+      endedAt: typeof w.endedAt === 'string' && w.endedAt ? w.endedAt : null,
       sessionCount: own.length,
-      docCount: vault ? countDocs(join(vault.rootPath, folderRel)) : 0,
+      docCount: wsAbs ? countDocs(wsAbs) : 0,
       folderRel,
       lastActive,
       recentSessions,
+      course: wsAbs ? summarizeCourseWorkspace(wsAbs, w.id, progressAbs) : null,
     }
   })
   const unassignedCount = sessions.filter((s) => !m.sessionWs[s.id]).length

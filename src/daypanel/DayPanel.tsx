@@ -127,8 +127,8 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
     }
   }, [])
 
-  const openInMain = useCallback((tab: string) => {
-    window.api?.dayPanelOpenInMain?.(tab)
+  const openInMain = useCallback((tab: string, tool?: string) => {
+    window.api?.dayPanelOpenInMain?.(tab, tool)
   }, [])
 
   // 四工具 Tab 按钮组：嵌入式渲染在表头下方，脱离态渲染在底部（替代原模块导航栏）
@@ -224,7 +224,7 @@ export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus =
         {tab === 'habit' && <HabitWidget onManage={() => openInMain('toolbox')} />}
         {tab === 'pomo' && (mode === 'embedded'
           ? <PomoWidget />
-          : <PomodoroPopoutPanel status={pomodoroStatus} onOpenInMain={() => openInMain('toolbox')} />)}
+          : <PomodoroPopoutPanel status={pomodoroStatus} onOpenInMain={() => openInMain('toolbox', 'pomodoro')} />)}
         {tab === 'nav' && <NavWidget onManage={() => openInMain('toolbox')} />}
       </div>
 

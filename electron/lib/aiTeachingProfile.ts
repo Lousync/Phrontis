@@ -4,6 +4,7 @@ import { app, ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcastTreeRefresh, rootDirName, ensureSessionFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { assertWorkspaceEditable, assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import { getSessionUnitFolderRels } from './aiTeachingCourse'
 import { applyProfileEntries } from './profilePatch'
 import type { ProfileApplyOutcome, ProfileApplySkipped, ProfileEntry } from './profilePatch'
@@ -225,6 +226,7 @@ export function readWorkspaceProfile(wsId: string, getSetting: (key: string) => 
 
 export function writeWorkspaceProfile(wsId: string, text: string, getSetting: (key: string) => unknown): ProfileResult {
   try {
+    assertWorkspaceEditable(wsId)
     const folderRel = workspaceFolderRel(wsId, getSetting)
     if (!folderRel) return { ok: false, error: '工作区不存在或未打开仓库' }
     const vault = getCurrentVault()
@@ -254,6 +256,7 @@ export function readSessionProfile(sessionId: string, getSetting: (key: string) 
 
 export function writeSessionProfile(sessionId: string, text: string, getSetting: (key: string) => unknown): ProfileResult {
   try {
+    assertCourseEditableBySession(sessionId)
     const dir = thirdProfileDir(sessionId, getSetting)
     if (!dir) return { ok: false, error: '会话/知识点文件夹不可用' }
     mkdirSync(dir.abs, { recursive: true })

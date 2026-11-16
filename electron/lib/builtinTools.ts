@@ -10,6 +10,7 @@ import { readConstraintsForAiTeaching, writeConstraintsForAiTeaching, type AiTea
 import { CONSTRAINT_AUTHORING_TEXT_PARAM, CONSTRAINT_AUTHORING_TOOL_RULES, CONSTRAINT_LAYER_HINTS } from './constraintAuthoring'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
+import { assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import {
   inventoryWorkspaceSource, writeOutlineFromAssistant, removeCourseUnit, archiveOrganizedPage, writeChapterReviewDoc,
   readCourseOutline,
@@ -541,7 +542,10 @@ function normalizeAiTeachingWritePath(rel: string, ctx?: ToolInvokeCtx): string 
  * AI 教学落盘硬边界（2026-11-09）：用户四层要求可以改落点，但不能越过这些。
  * 返回错误消息；非教学面不调用本函数。
  */
-function aiTeachingWriteBoundaryError(rel: string, op: 'vault.write' | 'vault.edit' | 'vault.rename'): string | null {
+function aiTeachingWriteBoundaryError(rel: string, op: 'vault.write' | 'vault.edit' | 'vault.rename', ctx?: ToolInvokeCtx): string | null {
+  if (ctx?.source === 'aiTeaching' && ctx.sessionId) {
+    try { assertCourseEditableBySession(String(ctx.sessionId)) } catch (e) { return (e as Error).message }
+  }
   const segs = String(rel ?? '').replace(/\\/g, '/').split('/').filter(Boolean)
   if (segs.some((s) => s.toUpperCase() === 'SOURCES')) {
     return 'SOURCES/ 是只读素材目录，禁止写入 / 移动进去（用户要求也不能覆盖）'
@@ -2884,7 +2888,7 @@ export function registerBuiltinTools(): void {
     // 2026-11-09：SOURCES / 点目录 / 系统生成文件是硬边界，先于归一化拦截，用户要求也不能覆盖。
     const rawPath = str(args.path).trim()
     if (ctx?.source === 'aiTeaching') {
-      const boundary = aiTeachingWriteBoundaryError(rawPath, 'vault.write')
+      const boundary = aiTeachingWriteBoundaryError(rawPath, 'vault.write', ctx)
       if (boundary) throw new Error(boundary)
     }
     const rel = normalizeAiTeachingWritePath(rawPath, ctx)
@@ -3001,7 +3005,7 @@ export function registerBuiltinTools(): void {
       const rawPath = str(item?.path).trim()
       if (!rawPath) throw new Error(`第 ${i + 1} 条缺少 path`)
       if (ctx?.source === 'aiTeaching') {
-        const boundary = aiTeachingWriteBoundaryError(rawPath, 'vault.write')
+        const boundary = aiTeachingWriteBoundaryError(rawPath, 'vault.write', ctx)
         if (boundary) throw new Error(`第 ${i + 1} 条：${boundary}`)
       }
       const rel = normalizeAiTeachingWritePath(rawPath, ctx)
@@ -3110,7 +3114,7 @@ export function registerBuiltinTools(): void {
     const append = args.append === true
     if (!rel) throw new Error('缺少必填参数: path')
     if (ctx?.source === 'aiTeaching') {
-      const boundary = aiTeachingWriteBoundaryError(rel, 'vault.edit')
+      const boundary = aiTeachingWriteBoundaryError(rel, 'vault.edit', ctx)
       if (boundary) throw new Error(boundary)
     }
     assertCanWrite(rel, ctx)
@@ -3233,7 +3237,7 @@ export function registerBuiltinTools(): void {
     const newRel = str(args.newPath).trim()
     if (!rel || !newRel) throw new Error('缺少必填参数: path / newPath')
     if (ctx?.source === 'aiTeaching') {
-      const boundary = aiTeachingWriteBoundaryError(rel, 'vault.rename') ?? aiTeachingWriteBoundaryError(newRel, 'vault.rename')
+      const boundary = aiTeachingWriteBoundaryError(rel, 'vault.rename', ctx) ?? aiTeachingWriteBoundaryError(newRel, 'vault.rename', ctx)
       if (boundary) throw new Error(boundary)
     }
     assertCanWrite(rel, ctx)

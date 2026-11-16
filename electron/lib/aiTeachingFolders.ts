@@ -5,6 +5,7 @@ import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { getAgentSession } from './agentSessionRepo'
 import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { ensureQuizDocFrontmatter, sameQuizDocBody } from './quizDocPure'
 
@@ -242,6 +243,7 @@ export function readConstraints(sessionId: string, getSetting: (key: string) => 
 /** 写会话 CONSTRAINTS.md（懒建文件夹后落盘；空文本=写空文件保留编辑入口） */
 export function writeConstraints(sessionId: string, text: string, getSetting: (key: string) => unknown): ConstraintsResult {
   try {
+    assertCourseEditableBySession(sessionId)
     const ensured = ensureSessionFolder(sessionId, getSetting)
     if (!ensured.ok || !ensured.relPath) return { ok: false, error: ensured.error ?? '会话文件夹不可用' }
     const vault = getCurrentVault()
@@ -585,6 +587,7 @@ export function migrateRootDir(oldName: string, newName: string): { ok: boolean;
  */
 export function organizeDoc(sessionId: string, title: string, content: string, getSetting: (key: string) => unknown, prefix = '讲义'): FolderResult {
   try {
+    assertCourseEditableBySession(sessionId)
     const ensured = ensureSessionFolder(sessionId, getSetting)
     if (!ensured.ok || !ensured.relPath) return { ok: false, error: ensured.error ?? '会话文件夹不可用' }
     const vault = getCurrentVault()

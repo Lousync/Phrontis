@@ -54,7 +54,7 @@ interface Props {
   dayPanelDetached?: boolean
   /** 收回脱离窗口回嵌右栏（互斥条目点击 / 快捷键同语义） */
   onDockDayPanel?: () => void
-  /** 工具入口点击（App：pomodoro 特判派发全屏面板，其余开中间工具标签页） */
+  /** 工具入口点击（App：开对应工具标签页；番茄钟同样走标签页） */
   onOpenTool: (toolId: string) => void
   /** 插件工具入口点击（App 开插件工具标签页） */
   onOpenPluginTool: (tool: PluginTool) => void

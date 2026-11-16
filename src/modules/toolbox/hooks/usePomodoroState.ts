@@ -48,6 +48,8 @@ export const RATING_LABELS: Record<number, string> = {
 
 export interface PomodoroState {
   visible: boolean
+  /** 兼容字段（2026-11-16）：番茄钟改为工具标签页后显隐由标签决定，`expanded` 不再参与渲染，
+   *  仅保留在跨窗口状态快照契约里（DayPanel / popout 快照类型仍带它）。 */
   expanded: boolean
   presetIdx: number
   phase: Phase

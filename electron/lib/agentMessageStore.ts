@@ -25,6 +25,8 @@ export interface AgentMessageRow {
   session_id: string
   role: 'user' | 'assistant'
   content: string
+  /** 用户消息携带的图片（P2 多模态；历史回放 / 缩略图） */
+  images?: Array<{ relPath: string; mime: string; name?: string; w?: number; h?: number; bytes?: number }>
   trace_json: string | null
   created_at: string
 }

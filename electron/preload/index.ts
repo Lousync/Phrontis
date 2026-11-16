@@ -319,6 +319,7 @@ const api = {
   llmAddModel: (id: string, model: string) => ipcRenderer.invoke('llm:addModel', id, model),
   llmSetDefaultModel: (value: string) => ipcRenderer.invoke('llm:setDefaultModel', value),
   llmVisionModels: () => ipcRenderer.invoke('llm:visionModels'),
+  llmVisionChatCapable: (spec?: string) => ipcRenderer.invoke('llm:visionChatCapable', spec),
   llmTestModel: (providerId: string, model: string) => ipcRenderer.invoke('llm:testModel', { providerId, model }),
   llmGetUsage: () => ipcRenderer.invoke('llm:getUsage'),
   llmReasoningCapable: (model: string) => ipcRenderer.invoke('llm:reasoningCapable', model),
@@ -428,6 +429,16 @@ const api = {
   aiTeachAssignSession: (id: string, wsId: string) => ipcRenderer.invoke('aiTeach:assignSession', id, wsId),
   aiTeachUnassignSession: (id: string) => ipcRenderer.invoke('aiTeach:unassignSession', id),
   aiTeachSetLastWorkspace: (wsId: null | string) => ipcRenderer.invoke('aiTeach:setLastWorkspace', wsId),
+  // AI教学·结课与资料沉淀（workspaces.endedAt + 结课报告 + 待整理 + deposits.json）
+  aiTeachCourseGetEndState: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getEndState', wsId),
+  aiTeachCourseListEndArtifacts: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:listEndArtifacts', wsId),
+  aiTeachCourseCollectEndArtifacts: (wsId: string, rels: string[]) => ipcRenderer.invoke('aiTeachCourse:collectEndArtifacts', wsId, rels),
+  aiTeachCourseGetEndStaging: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getEndStaging', wsId),
+  aiTeachCourseDepositEndArtifacts: (wsId: string, ids: string[], target: unknown) => ipcRenderer.invoke('aiTeachCourse:depositEndArtifacts', wsId, ids, target),
+  aiTeachCourseEndCourse: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:endCourse', wsId),
+  aiTeachCourseReopenCourse: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:reopenCourse', wsId),
+  aiTeachCourseGetEndReport: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getEndReport', wsId),
+  aiTeachCourseGetDepositTargets: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getDepositTargets', wsId),
   // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
   aiTeachCourseGetState: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getState', wsId),
   aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) =>

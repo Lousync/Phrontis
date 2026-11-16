@@ -250,9 +250,14 @@ ok(/BUILTIN_TOOLS/.test(srcToolbox) && /ToolHost/.test(srcToolbox) && /PluginToo
 ok(!/const DATA_TOOLS: ToolDefinition\[\] = \[/.test(srcToolbox) && !/renderTool = \(\) => \{\s*switch/.test(srcToolbox),
   'D1c 工具箱本地 TOOLS 常量与 renderTool case 映射已删除（单一真相源）')
 
-// D2 工具入口区：双列 + toolboxHiddenTools 选显 + pomodoro 特例在 App
+// D2 工具入口区：双列 + toolboxHiddenTools 选显 + 番茄钟走普通工具标签页
 ok(/toolTabId|TOOL_TAB_PREFIX/.test(srcApp) && /handleOpenTool/.test(srcApp), 'D2 App 有工具标签打开通道（handleOpenTool + tool: 前缀）')
-ok(/'pomodoro'[\s\S]{0,120}pomodoro:activate/.test(srcApp), 'D2b 番茄钟入口 = pomodoro:activate 全屏面板（不开工具标签，既有语义）')
+ok(/case 'pomodoro'/.test(srcRegistry) && /<PomodoroPanel \/>/.test(srcRegistry),
+  'D2b 番茄钟走工具标签页宿主（ToolHost 有 pomodoro 分支，与其余工具一致）')
+ok(/addEventListener\('pomodoro:activate'/.test(srcApp) && !/toolId === 'pomodoro'/.test(srcApp),
+  'D2b2 番茄钟外部入口统一由 App 激活工具标签页（handleOpenTool 不再特判覆盖面板）')
+ok(!/<PomodoroPanel \/>/.test(srcApp),
+  'D2b3 App 不再挂载番茄钟覆盖层（面板只在工具标签页宿主里渲染）')
 ok(/toolboxHiddenTools/.test(srcZone), 'D2c 入口区选显复用 toolboxHiddenTools 键（方案 §10.4-③，不新增键）')
 ok(/addEventListener\('change', onChange\)/.test(srcZone), 'D2d 入口区菜单项走原生事件委托（portal 首菜单合成事件不稳定，同 🔖 手法）')
 ok(/WorkbenchRightPanel/.test(srcApp) && /ToolLauncherZone/.test(srcRight), 'D2e App 右栏 = WorkbenchRightPanel，其上段 = ToolLauncherZone')

@@ -1441,6 +1441,93 @@ export interface AiTeachWorkspaceInfo {
   lastActive: string | null
   /** 最近活跃的 2 条对话（按 updated_at 倒序；无对话为空数组） */
   recentSessions: AiTeachRecentSession[]
+  /** 结课时间；null = 进行中 */
+  endedAt: string | null
+  /** 课程摘要；没有课程大纲的主题工作区为 null */
+  course: AiTeachCourseSummary | null
+}
+
+/** 课程摘要（选择页分组 / 预览 / 结课判定共用） */
+export interface AiTeachCourseSummary {
+  chapters: number
+  total: number
+  learned: number
+  reviewsDone: number
+  /** 全部知识点学完且每章复习讲义已生成（空章不计入） */
+  ready: boolean
+}
+
+/** 结课候选产物（五类可沉淀资料） */
+export type AiTeachEndArtifactGroup = 'review' | 'lecture' | 'summary' | 'mindmap' | 'visual'
+export interface AiTeachEndArtifact {
+  /** 课程内工作区相对路径（同时用作去重键） */
+  id: string
+  group: AiTeachEndArtifactGroup
+  title: string
+  relInWs: string
+  chapterRel: string | null
+  kind: 'md' | 'json' | 'html'
+  sizeBytes: number
+}
+
+/** 暂存区条目（`.manifest.json` 同构） */
+export interface AiTeachEndStagingEntry {
+  id: string
+  group: AiTeachEndArtifactGroup
+  title: string
+  sourceRelInWs: string
+  stageRelInWs: string
+  chapterRel: string | null
+  kind: 'md' | 'json' | 'html'
+  size: number
+}
+
+/** 沉淀目标（只传名称，绝对路径由主进程解析） */
+export interface AiTeachEndTarget {
+  space: string
+  notebook: string
+  subfolder: string
+  keepChapter: boolean
+}
+
+export interface AiTeachDepositSpaceNode {
+  id: string
+  name: string
+  path: string
+  notebooks: Array<{ id: string; name: string; path: string }>
+}
+
+export interface AiTeachDepositTargets {
+  spaces: AiTeachDepositSpaceNode[]
+  lastTarget: AiTeachEndTarget | null
+  defaults: AiTeachEndTarget
+}
+
+export interface AiTeachDepositResult {
+  ok: boolean
+  deposited: number
+  skipped: number
+  failed: number
+  targetRel: string | null
+  error?: string
+}
+
+export interface AiTeachEndState {
+  wsId: string
+  name: string
+  endedAt: string | null
+  startedAt: string
+  completion: AiTeachCourseSummary | null
+  segments: { segments: number; ended: number; open: number }
+  quiz: { quizzes: number; avgScore: number; wrong: number; topTags: string[] } | null
+  quizDocCount: number
+  artifacts: AiTeachEndArtifact[]
+  staging: AiTeachEndArtifact[]
+  deposit: { count: number; target: AiTeachEndTarget | null }
+  targets: AiTeachDepositTargets
+  report: { relInWs: string; summary: string } | null
+  assistantSessionId: string | null
+  totals: { artifacts: number; kept: number }
 }
 
 /** AI教学·课程模式（主进程 aiTeachingCourse.ts 同构；3.14 段模型） */
@@ -1469,6 +1556,8 @@ export interface AiTeachSourceCounts { total: number; assigned: number; unassign
 export interface AiTeachCourseState {
   /** 3.13 兼容：3.14 恒 true */
   enabled: boolean
+  /** 结课时间；null = 进行中 */
+  endedAt: string | null
   outline: AiTeachCourseOutline | null
   progress: Record<string, AiTeachCourseUnitProgress>
   lessons: Record<string, AiTeachLessonInfo>
@@ -1637,9 +1726,33 @@ export interface AgentStoredMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  /** 用户消息携带的图片（P2 多模态）：仓库相对路径 + 元信息；历史回放与缩略图用 */
+  images?: AgentImageRef[]
   /** JSON 字符串（原始行格式），前端自行解析 */
   traceJson?: string | null
   createdAt: string
+}
+
+/** 对话图片引用（存消息行；不含 base64） */
+export interface AgentImageRef {
+  relPath: string
+  mime: string
+  name?: string
+  w?: number
+  h?: number
+  bytes?: number
+  /** 仅渲染层临时预览（乐观消息）；落库消息行不含 */
+  dataUrl?: string
+}
+
+/** 渲染层待发送的图片（含 data URL；主进程落盘后换成 AgentImageRef） */
+export interface AgentImageInput {
+  name?: string
+  mime: string
+  dataUrl: string
+  w?: number
+  h?: number
+  bytes?: number
 }
 
 /** 单次请求对用户数据的写改动（UI 改动清单用） */
@@ -3026,6 +3139,8 @@ export interface ElectronAPI {
   llmRemoveAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; accounts?: LlmAccountInfo[]; activeAccountId?: string; error?: string }>
   llmTestAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; latencyMs: number; models?: string[]; error?: string }>
   llmVisionModels: () => Promise<{ models: LlmVisionModelInfo[] }>
+  /** P2 多模态：当前模型（空 = 全局默认）是否可用于图片输入 */
+  llmVisionChatCapable: (spec?: string) => Promise<boolean>
   llmRefreshModels: (id: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
   llmSetModelFamily: (id: string, model: string, family: LlmModelFamily | '') => Promise<{ ok: boolean; modelFamilies?: Record<string, LlmModelFamily>; error?: string }>
   llmAddModel: (id: string, model: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
@@ -3046,7 +3161,7 @@ export interface ElectronAPI {
   pdfExport: (payload: { data: Uint8Array; defaultName: string; kind?: 'pdf' | 'txt' }) => Promise<PdfExportResult>
   /** 界面逐页阅读：当前仓库内 .pptx → [{n,text}] */
   docsPptxPages: (relPath: string) => Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }>
-  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string }) => Promise<AgentChatResult>
+  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string; images?: AgentImageInput[] }) => Promise<AgentChatResult>
   agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   /** A 方案：从断点续跑（中断卡上的「继续」）；不追加用户消息，现场由主进程一次性 claim */
   agentResume: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
@@ -3137,6 +3252,16 @@ export interface ElectronAPI {
   aiTeachAssignSession: (id: string, wsId: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachUnassignSession: (id: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachSetLastWorkspace: (wsId: string | null) => Promise<{ ok: boolean; error?: string }>
+  // AI教学·结课与资料沉淀
+  aiTeachCourseGetEndState: (wsId: string) => Promise<AiTeachEndState | null>
+  aiTeachCourseListEndArtifacts: (wsId: string) => Promise<AiTeachEndArtifact[]>
+  aiTeachCourseCollectEndArtifacts: (wsId: string, rels: string[]) => Promise<{ ok: boolean; count: number; error?: string }>
+  aiTeachCourseGetEndStaging: (wsId: string) => Promise<AiTeachEndArtifact[]>
+  aiTeachCourseDepositEndArtifacts: (wsId: string, ids: string[], target: AiTeachEndTarget) => Promise<AiTeachDepositResult>
+  aiTeachCourseEndCourse: (wsId: string) => Promise<{ ok: boolean; endedAt?: string; reportRel?: string; error?: string }>
+  aiTeachCourseReopenCourse: (wsId: string) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseGetEndReport: (wsId: string) => Promise<{ relInWs: string; markdown: string; summary: string } | null>
+  aiTeachCourseGetDepositTargets: (wsId: string) => Promise<AiTeachDepositTargets>
   // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
   aiTeachCourseGetState: (wsId: string) => Promise<AiTeachCourseState>
   aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>

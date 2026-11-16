@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { PluginIcon } from '../shared/ModuleIcons'
 import { PasswordVault } from '../../modules/toolbox/components/PasswordVault'
+import { PomodoroPanel } from '../../modules/toolbox/components/PomodoroPanel'
 import { HabitTracker } from '../../modules/toolbox/components/habit-tracker'
 import { BookmarkNav } from '../../modules/toolbox/components/bookmark-nav'
 import { RemoteSupervise } from '../../modules/toolbox/components/remote-supervise'
@@ -101,7 +102,8 @@ export function toolIdOfTab(tabId: string): string {
  * 工具全屏宿主：按 toolId 渲染对应工具组件（原 toolbox renderTool 的 case 映射）。
  * 工具箱模块（画廊内进入）与右栏入口区开的工具标签页共用——
  * onBack 由宿主语境决定：工具箱 = 回画廊，标签页 = 关闭标签。
- * 番茄钟不走本宿主（点击 = pomodoro:activate 全屏面板，沿用既有语义）。
+ * 番茄钟 2026-11-16 起也走本宿主（此前是 pomodoro:activate 覆盖面板，不进页面条）：
+ * 面板自身不画「返回」钮，关闭走页面条 ✕。
  * sidebarEl/sidebarHosted：仅标签页语境由 App 传入（TOOLS_WITH_SIDEBAR 的 3 个工具
  * 侧栏 portal 进工作台左栏）；画廊语境不传 → 工具侧栏保持内嵌原位。
  */
@@ -109,6 +111,8 @@ export function ToolHost({ toolId, onBack, sidebarEl, sidebarHosted }: { toolId:
   switch (toolId) {
     case 'password-vault':
       return <PasswordVault onBack={onBack} />
+    case 'pomodoro':
+      return <PomodoroPanel />
     case 'habit-tracker':
       return <HabitTracker onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
     case 'remote-supervise':

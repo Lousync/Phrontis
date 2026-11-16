@@ -124,11 +124,27 @@ export const REASONING_MODEL_RE = /(reasoner|r1|qwq|qwen3|o[134]-|o[134]$|thinki
  * Responses 把「消息」与「工具调用 / 工具结果」摊平成一串 item：function_call 与
  * function_call_output 是与 message 平级的顶层项，不是嵌在 assistant 消息里的字段。
  */
+/** OpenAI 多模态 content 数组 → Responses input 部件（text / input_image） */
+function responsesParts(content: unknown): unknown[] {
+  if (typeof content === 'string') return [{ type: 'input_text', text: content }]
+  if (!Array.isArray(content)) return [{ type: 'input_text', text: String(content ?? '') }]
+  const out: unknown[] = []
+  for (const raw of content) {
+    const part = raw as Record<string, unknown>
+    if (part?.type === 'text') out.push({ type: 'input_text', text: String(part.text ?? '') })
+    else if (part?.type === 'image_url') {
+      const url = String((part.image_url as Record<string, unknown> | undefined)?.url ?? '')
+      if (url) out.push({ type: 'input_image', image_url: url })
+    }
+  }
+  return out.length > 0 ? out : [{ type: 'input_text', text: '' }]
+}
+
 export function buildResponsesInput(messages: PureMessage[]): unknown[] {
   const items: unknown[] = []
   for (const m of messages) {
     if (m.role === 'system' || m.role === 'user') {
-      items.push({ role: m.role, content: [{ type: 'input_text', text: String(m.content ?? '') }] })
+      items.push({ role: m.role, content: responsesParts(m.content) })
       continue
     }
     if (m.role === 'tool') {

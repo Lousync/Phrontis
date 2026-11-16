@@ -133,6 +133,7 @@ import { registerAiTeachingSourceHandlers } from '../lib/aiTeachingSources'
 import { registerAiTeachingSourceRegistryHandlers } from '../lib/aiTeachingSourceRegistry'
 import { registerAiTeachingProfileHandlers } from '../lib/aiTeachingProfile'
 import { registerAiTeachingCourseHandlers } from '../lib/aiTeachingCourse'
+import { registerAiTeachingCourseEndHandlers } from '../lib/aiTeachingCourseEnd'
 import { registerAiTeachingFavoriteHandlers } from '../lib/aiTeachingFavorites'
 import { registerTranslateHandlers } from '../lib/translateService'
 import { registerPdfHandlers } from '../lib/pdfService'
@@ -1555,6 +1556,8 @@ app.whenReady().then(async () => {
     registerAiTeachingProfileHandlers((key) => settingsCache[key])
     // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）
     registerAiTeachingCourseHandlers((key) => settingsCache[key])
+    // AI教学·结课与资料沉淀（workspaces.endedAt + 结课报告 + 待整理 + deposits.json）
+    registerAiTeachingCourseEndHandlers((key) => settingsCache[key])
     // AI教学·左栏「收藏」（favorites.json：钉住活文档随手翻）
     registerAiTeachingFavoriteHandlers((key) => settingsCache[key])
     // 划词翻译:离线词典 + LLM 翻译/AI 精讲

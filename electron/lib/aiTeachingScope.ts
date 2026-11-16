@@ -4,6 +4,7 @@ import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { CONSTRAINTS_FILE, broadcastTreeRefresh, ensureGlobalConstraints, ensureWorkspaceConstraints, readConstraints, readGlobalConstraints, rootDirName, unitConstraintsRel, writeConstraints } from './aiTeachingFolders'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import { getSessionLessonBrief, getSessionUnitFolderRels, readCourseOutline, unitFolderRel } from './aiTeachingCourse'
 import { parseSourceMd, unitSourceFileRel } from './aiTeachingSources'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
@@ -402,6 +403,9 @@ export function writeConstraintsForAiTeaching(
     if (!sid) return { ok: false, error: '仅可在 AI 教学对话中使用' }
     const level = String(input?.level ?? '') as AiTeachConstraintLevel
     if (!AI_CONSTRAINT_LEVELS.has(level)) return { ok: false, error: `未知要求层：${String(input?.level ?? '')}` }
+    if (level !== 'global') {
+      try { assertCourseEditableBySession(sid) } catch (e) { return { ok: false, error: (e as Error).message } }
+    }
     const text = normalizeConstraintText(input?.text).trim()
     if (!text) return { ok: false, error: 'text 不能为空' }
     if (text.length > AI_CONSTRAINT_TEXT_MAX) return { ok: false, error: `text 过长（上限 ${AI_CONSTRAINT_TEXT_MAX} 字符）` }

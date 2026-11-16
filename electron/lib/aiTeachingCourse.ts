@@ -3,7 +3,8 @@ import { dirname, isAbsolute, join } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
-import { getWorkspaceOfSession, workspaceFolderRel, assignSession } from './aiTeachingWorkspaces'
+import { getWorkspaceOfSession, getWorkspaceEndedAt, workspaceFolderRel, assignSession } from './aiTeachingWorkspaces'
+import { COURSE_ENDED_ERROR, assertWorkspaceEditable, assertCourseEditableBySession, isCourseEnded } from './aiTeachingCourseEndGuard'
 import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver, resolveWriteOwnerRel, sanitizeTitle, isCourseAssistantSession } from './aiTeachingFolders'
 import { writeInventoryIndex, todayLocal } from './aiTeachingInventory'
 import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
@@ -107,6 +108,8 @@ export interface ChapterReview {
 export interface CourseState {
   /** 3.13 兼容字段：3.14 恒 true；P4 删除 */
   enabled: boolean
+  /** 结课时间；null = 进行中（只读守卫与界面态共用） */
+  endedAt: string | null
   outline: CourseOutline | null
   progress: Record<string, CourseUnitProgress>
   lessons: Record<string, LessonInfo>
@@ -213,6 +216,7 @@ function remapReviewKeys(wsId: string, oldOutline: CourseOutline | null, newOutl
 }
 
 export function writeCourseOutline(wsId: string, outline: CourseOutline, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; error?: string } {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const vault = getCurrentVault()
   const loc = outlineRel(wsId, getSetting)
   if (!vault || !loc) return { ok: false, error: '尚未打开仓库或工作区不存在' }
@@ -245,6 +249,7 @@ export function getCourseState(wsId: string, getSetting: (key: string) => unknow
   const s = wsState(f, wsId)
   return {
     enabled: true,
+    endedAt: getWorkspaceEndedAt(wsId),
     outline: readCourseOutline(wsId, getSetting),
     progress: s.units,
     lessons: s.lessons as unknown as Record<string, LessonInfo>,
@@ -683,6 +688,7 @@ export function setCourseEnabled(_wsId: string, _enabled: boolean): { ok: boolea
 }
 
 export function setUnitProgress(wsId: string, unitId: string, patch: Partial<CourseUnitProgress>): { ok: boolean; error?: string } {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   if (!wsId || !unitId) return { ok: false, error: '参数缺失' }
   const f = readProgressFile()
   const s = wsState(f, wsId)
@@ -738,6 +744,7 @@ export interface SegmentOpenResult {
 export function openSegment(wsId: string, unitIdsRaw: string[], sources: SegmentSource[], getSetting: (key: string) => unknown): SegmentOpenResult {
   if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
   const id = String(wsId ?? '').trim()
+  if (isCourseEnded(id)) return { ok: false, error: COURSE_ENDED_ERROR }
   const unitIds = Array.from(new Set((unitIdsRaw ?? []).map((x) => String(x ?? '').trim()).filter(Boolean)))
   if (!id || !unitIds.length) return { ok: false, error: '缺少工作区或知识点' }
   const outline = readCourseOutline(id, getSetting)
@@ -792,6 +799,7 @@ export function openUnit(wsId: string, unitId: string, _kind: string | undefined
 
 /** 段内切换当前聚焦知识点（不新建会话）。 */
 export function setActiveUnit(sessionId: string, unitId: string): { ok: boolean; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return { ok: false, error: '会话未归属工作区' }
   const f = readProgressFile()
@@ -808,6 +816,7 @@ export function setActiveUnit(sessionId: string, unitId: string): { ok: boolean;
 
 /** 收尾一段：整段冻结；段内所有知识点置学完（不看掌握度）。 */
 export function endSegment(sessionId: string): { ok: boolean; wsId?: string; unitIds?: string[]; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return { ok: false, error: '会话未归属工作区' }
   const f = readProgressFile()
@@ -887,6 +896,10 @@ export function openChapterReview(wsId: string, chapterId: string, getSetting: (
   const s = wsState(f, id)
   if (!s.reviews) s.reviews = {}
   const existing = s.reviews[cid]
+  if (isCourseEnded(id)) {
+    if (existing?.sessionId && sessionExists(existing.sessionId)) return { ok: true, sessionId: existing.sessionId }
+    return { ok: false, error: COURSE_ENDED_ERROR }
+  }
   const st = reviewState(cid, chapter.units.map((u) => u.id), s.units, s.lessons, s.reviews)
   if (st.state === 'locked') {
     return { ok: false, error: `本章还有 ${st.remaining} 个知识点没学完，学完自动解锁` }
@@ -937,6 +950,7 @@ export function reviewFolderRel(wsId: string, chapterId: string, getSetting: (ke
 
 /** 写「复习讲义」到本章的章末复习目录并记录 rel（会话须是复习课会话）。返回相对/绝对路径。 */
 export function writeChapterReviewDoc(sessionId: string, content: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
   const hit = findReviewBySession(String(sessionId ?? ''))
@@ -1161,6 +1175,7 @@ function transcriptOf(sessionId: string, limit = 6000): string {
 /** 段收尾后：生成 交接.md（固定四段）落本段夹，并写 handoffRel。
  *  幂等：已有交接（handoffRel 优先，标准路径兜底）直接复用，不重复调用模型或覆盖文件。 */
 export async function finalizeSegment(sessionId: string, getSetting: (key: string) => unknown): Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean; reused?: boolean }> {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return { ok: false, error: '会话未归属工作区' }
   const vault = getCurrentVault()
@@ -1206,6 +1221,7 @@ export async function finalizeLesson(sessionId: string, getSetting: (key: string
 
 /** 知识点收尾：汇总各课时 → 生成 总结·{知识点}.md，置 finished */
 export async function finishUnit(wsId: string, unitId: string, getSetting: (key: string) => unknown, score?: { correct: number; total: number }): Promise<{ ok: boolean; summaryRel?: string; error?: string }> {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
   const f = readProgressFile()
@@ -1279,6 +1295,9 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
   }
   const f = readProgressFile()
   const s = wsState(f, wsId)
+  const endedNote = isCourseEnded(wsId)
+    ? '\n\n【本课程已结课】课程已结课且只读：可以回答课程内容、复盘、二轮计划，也可以只读查看讲义；不要调用 course.* 写工具，也不要写课程文件。需要改动大纲或重开学习段时，提醒用户点右上角「重新开课」。'
+    : ''
   // 课程助手会话（整门课一个）走「顾问」分支：无大纲也可用
   const isAssistant = !!s.assistantSessionId && sessionId === s.assistantSessionId
   // 章末复习课会话：走「复习」分支
@@ -1311,7 +1330,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     lines.push(assistantSourcesSummary(wsId, getSetting))
     lines.push('【建课流程与工具】① 素材先登记：用户给出文件/目录/URL 时用 course.sources.register 批量登记（外部文件会复制进本课 SOURCES；仓库内文件只引用）；② pdf/pptx 需要时用 course.sources.extract 提取页码区间；③ 用 inventory 清点目录素材（先清点再分章，别把整目录硬读进上下文）；④ 与用户定好目标、素材就绪后，生成**全量**大纲草稿（章 → 知识点；不要"先只给第一章"）；用户确认后调 course.outline.write 落盘；⑤ 用 course.sources.assign 把素材按章分配（能判断区间就带 anchor；判断不了就整章 whole）；⑥ 不主动开讲；只提醒用户去左栏点知识点开段，开段前会做素材预检；⑦ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档）；⑧ 落盘只走这些工具，不要另造文件；改大纲前先与用户确认；⑨ 用户要写要求/规范/限制时用 course.constraints.write 写四层 CONSTRAINTS.md（默认本课程层），不要用 course.organize.archive 或 vault.write 造普通文档；⑩ 教材 / 知识库正文按用户要求用 vault.write 写指定路径（.md 传 ensureId:true 带稳定 id）；用户四层要求指定落点时以用户要求为准，不要默认收进 output/。')
     lines.push('【大纲落盘后的终止规则】课程大纲写入 / 更新成功后，建课流程即结束：不要讲授知识点，不要问用户是否「开讲第 N 章」，也不要邀请用户继续在课程助手会话里听讲。只输出下一步引导：去左栏点知识点开段（会先做素材预检）、继续改大纲、查看 / 分配素材；用户主动问课程内容时可以答疑，但仍不进入逐知识点开讲。')
-    return '\n\n' + lines.join('\n') + longMaterialHint()
+    return '\n\n' + lines.join('\n') + longMaterialHint() + endedNote
   }
   // 复习课分支：章末复习（本章知识点串讲 + 查漏补缺，不引入新知识点）
   if (reviewHit && reviewHit.wsId === wsId) {
@@ -1343,7 +1362,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     }
     lines.push('复习方式**由你和学生讨论决定**：可按学生要求逐块回顾、出题检验、或把零散点串成体系。**先问学生想怎么过**，别自顾自开讲。')
     lines.push('当复习讨论到一定阶段、结论成型时，**主动提议**「把本次复习整理成《复习讲义》落盘」，学生同意后调用 course.review.write 写入本章目录；写好后把落盘路径告诉学生。')
-    return '\n\n' + lines.join('\n') + longMaterialHint()
+    return '\n\n' + lines.join('\n') + longMaterialHint() + endedNote
   }
   // 教师分支：必须有段；旧零散会话不再注入教学推进规则
   const curLesson = s.lessons[sessionId]
@@ -1384,7 +1403,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     lines.push('段内收尾协议：收尾只由学生点右上角「收尾本段」触发，你在任何情况下都**不得自动收尾**，也不要替学生调用任何收尾 / finalize 动作。当前知识点讲完、学生没有追问时，先问「继续本段下一个知识点，还是先收尾本段」；本段最后一个知识点也讲完、学生确认没有问题后，再主动建议：点「收尾本段」→ 系统会在本段夹生成《交接.md》→ 到左栏开下一段。')
     lines.push('要求文档：用户要写要求/规范/限制时用 course.constraints.write（本段用 segment＝默认；本课程用 workspace；本知识点用 unit；全局用 global），不要另建 `规范.md`。')
   }
-  return '\n\n' + lines.join('\n') + longMaterialHint()
+  return '\n\n' + lines.join('\n') + longMaterialHint() + endedNote
 }
 
 // ===== 素材注入（agentService 每轮调用）=====
@@ -1450,6 +1469,7 @@ export function parseQuizJson(text: string): UnitQuizQuestion[] | null {
 
 /** 收尾前出一套单选题（依据本知识点各课时的学习记录） */
 export async function makeUnitQuiz(wsId: string, unitId: string, getSetting: (key: string) => unknown): Promise<{ ok: boolean; questions?: UnitQuizQuestion[]; error?: string }> {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const f = readProgressFile()
   const s = wsState(f, wsId)
   const outline = readCourseOutline(wsId, getSetting)
@@ -1471,6 +1491,7 @@ export async function makeUnitQuiz(wsId: string, unitId: string, getSetting: (ke
 
 /** 写入增补（只增补合并，保留现有 id/进度） */
 export function applyOutlineAdditions(wsId: string, additions: OutlineAdditions, getSetting: (key: string) => unknown): { ok: boolean; added?: number; error?: string } {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const outline = readCourseOutline(wsId, getSetting)
   if (!outline) return { ok: false, error: '该工作区还没有课程大纲' }
   const { outline: merged, added } = mergeOutlineAdditions(outline, additions ?? { toExisting: [], newChapters: [] })
@@ -1537,6 +1558,7 @@ export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, get
   const id = String(wsId ?? '')
   if (!id) return { ok: false, error: '缺少工作区' }
   if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
+  try { assertWorkspaceEditable(id) } catch (e) { return { ok: false, error: (e as Error).message } }
   const norm = normalizeOutline(draft) // { title, goal, anchor, chapters[with ids] }
   if (!norm) return { ok: false, error: '大纲为空或不合法（需含 chapters[].units[].name）' }
   const existing = readCourseOutline(id, getSetting)
@@ -1568,6 +1590,7 @@ export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, get
 /** 删除知识点：未学习(todo/无进度) 直接删；已学/学一半 → 拒绝并要求先「整理对话并归档」。 */
 export function removeCourseUnit(wsId: string, ref: unknown, getSetting: (key: string) => unknown): { ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string } {
   const id = String(wsId ?? '')
+  try { assertWorkspaceEditable(id) } catch (e) { return { ok: false, error: (e as Error).message } }
   const outline = readCourseOutline(id, getSetting)
   if (!outline) return { ok: false, error: '该工作区还没有课程大纲' }
   const raw = String(ref ?? '').trim()
@@ -1594,6 +1617,7 @@ export function removeCourseUnit(wsId: string, ref: unknown, getSetting: (key: s
  *    progress.json 以 unit id 为键，重排即丢进度。本函数原位搬移、id 与进度都保留。 */
 export function moveCourseUnit(wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null, getSetting: (key: string) => unknown): { ok: boolean; error?: string } {
   const id = String(wsId ?? '')
+  try { assertWorkspaceEditable(id) } catch (e) { return { ok: false, error: (e as Error).message } }
   const outline = readCourseOutline(id, getSetting)
   if (!outline) return { ok: false, error: '该工作区还没有课程大纲' }
   const r = moveUnitInOutline(outline, unitId, targetChapterId, beforeUnitId)
@@ -1608,6 +1632,7 @@ export function moveCourseUnit(wsId: string, unitId: string, targetChapterId: st
  *  段会话只允许写本段目录（防止模型猜路径，把产物写到章根 / 错误知识点下）；
  *  课程助手保留自由 target，以便维护 `教材/` 等课程级资料。 */
 export function archiveOrganizedPage(sessionId: string, title: unknown, content: unknown, target: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
   if (isHandoffTitle(title)) return { ok: false, error: '交接由「收尾本段」统一生成，不能用整理归档创建。' }

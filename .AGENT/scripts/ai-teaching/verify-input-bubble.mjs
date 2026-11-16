@@ -146,8 +146,10 @@ for (const k of ['teach', 'side', 'assistant', 'learn']) {
 // ── ⑦ 行为面未被动（只换外观）────────────────────────────────────────────────────
 // 2026-10-13：`pending` 从发送键的禁用条件里退出（它改由「停止键」那一档接管），
 // `compressing`（历史压缩中）仍必须禁用发送 —— 见 docs/ai-reply-loading-plan.md §3.3。
-ok('assistant 发送键仍受 compressing / 空输入约束（pending 已由停止键分支接管）',
-  has('assistant', 'disabled={compressing || !input.trim()}'))
+// 2026-11-16（P2 多模态）：只发图片不带文字也要能发，故「空输入」放宽为「无文字且无图片」；
+// 另加 `imageBlocked`（当前模型不支持图片时禁用发送）。`compressing` 仍是硬约束。
+ok('assistant 发送键仍受 compressing / 空内容 / 模型不支持图片约束（pending 已由停止键分支接管）',
+  has('assistant', 'disabled={compressing || imageBlocked || (!input.trim() && !composerImages.hasImages)}'))
 ok('side 的 disabled={stopped} 仍在', has('side', 'disabled={stopped}'))
 ok('side Escape / Enter 键位未变',
   has('side', "e.key === 'Escape'") && has('side', "e.key === 'Enter' && !e.shiftKey"))

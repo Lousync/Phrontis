@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  AlertCircle, ArrowLeft, BarChart3, Check, ChevronRight, Coffee, Minus, Pause,
+  AlertCircle, BarChart3, Check, ChevronRight, Coffee, Minus, Pause,
   Play, RotateCcw, Sparkles, Square, Star, Target, Timer, TrendingDown, TrendingUp,
 } from 'lucide-react'
 import { usePomodoro } from '../hooks/PomodoroContext'
@@ -136,13 +136,6 @@ export function PomodoroPanel() {
   useEffect(() => { void loadSessions() }, [loadSessions])
   useDataChanged('pomodoro', loadSessions)
 
-  // 切换标签页时收起面板（计时继续；运行态由状态栏 / 右栏控件兜底）
-  useEffect(() => {
-    const handler = () => pom.collapse()
-    window.addEventListener('tab-switched', handler)
-    return () => window.removeEventListener('tab-switched', handler)
-  }, [pom.collapse])
-
   // 新的一场待评分 → 回到计时 Tab 并清空草稿
   useEffect(() => {
     if (!ps.pendingSession) return
@@ -152,27 +145,17 @@ export function PomodoroPanel() {
     setEndConfirm(false)
   }, [ps.pendingSession?.id])
 
+  // 准备态自动聚焦主题框（首次打开标签页 / 从统计切回计时都会经过这里；
+  // 标签被保活为 display:none 时 focus 静默不生效，不会抢别处的焦点）
   useEffect(() => {
-    if (!ps.expanded) return
     if (tab !== 'timer' || mode !== 'idle') return
     const t = window.setTimeout(() => topicRef.current?.focus(), 120)
     return () => window.clearTimeout(t)
-  }, [ps.expanded, tab, mode])
+  }, [tab, mode])
 
   useEffect(() => {
     if (mode !== 'running' && mode !== 'paused') setEndConfirm(false)
   }, [mode])
-
-  // 每次从收起态重新打开都回到计时页（统计页只作为当前停留视图，不变成下次默认）
-  const wasExpanded = useRef(false)
-  useEffect(() => {
-    if (ps.expanded && !wasExpanded.current) {
-      setTab('timer')
-      setEndConfirm(false)
-      setTopicError(false)
-    }
-    wasExpanded.current = ps.expanded
-  }, [ps.expanded])
 
   const today = useMemo(() => computePomodoroStats(rows, 'today'), [rows])
   const stats = useMemo(() => computePomodoroStats(rows, range), [rows, range])
@@ -182,8 +165,6 @@ export function PomodoroPanel() {
       : stats.sessions
     return [...list].sort((a, b) => b.endedAt - a.endedAt).slice(0, 8)
   }, [stats.sessions, selectedTopic])
-
-  if (!ps.expanded) return null
 
   const openStats = () => {
     setTab('stats')
@@ -270,17 +251,9 @@ export function PomodoroPanel() {
   const breakMin = pom.preset.break
 
   return (
-    <div data-pomo-panel data-pomo-mode={mode} className="absolute inset-0 z-30 flex flex-col bg-[var(--bg-primary)] kb-view-in">
-      {/* Header */}
+    <div data-pomo-panel data-pomo-mode={mode} className="kb-theme-surface flex h-full min-h-0 flex-col kb-view-in">
+      {/* Header（标签页语义：无「返回」钮，关闭走页面条 ✕） */}
       <div className="flex h-[38px] shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5">
-        <button
-          type="button"
-          onClick={pom.collapse}
-          className="grid h-7 w-7 place-items-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          data-tip="返回工作台（计时继续）" aria-label="返回工作台（计时继续）"
-        >
-          <ArrowLeft size={14} />
-        </button>
         <span className="text-[11.5px] font-semibold tracking-[0.2px] text-[var(--text-secondary)]">番茄钟</span>
         <span className="hidden text-[10px] text-[var(--text-muted)] sm:inline">专注主题 · 结束评分</span>
         <div className="ml-auto flex items-center gap-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">

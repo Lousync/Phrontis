@@ -31,7 +31,22 @@ export interface BudgetTrimResult<T> {
 
 export interface BudgetMessage {
   role: 'user' | 'assistant'
-  content?: string
+  /** 纯文本，或 OpenAI 多模态内容数组（图片按固定值粗估） */
+  content?: string | unknown[]
+}
+
+/** 多模态内容的 token 估算：文本按字折算，图片按固定值（避免每轮把图片正文当真文本算） */
+export function estimateContentTokens(content?: string | unknown[]): number {
+  if (typeof content === 'string') return estimateTokens(content)
+  if (!Array.isArray(content)) return 0
+  let n = 0
+  for (const raw of content) {
+    if (!raw || typeof raw !== 'object') continue
+    const part = raw as Record<string, unknown>
+    if (part.type === 'text') n += estimateTokens(String(part.text ?? ''))
+    else if (part.type === 'image_url') n += 1200
+  }
+  return n
 }
 
 /**
@@ -47,10 +62,10 @@ export function trimHistoryByBudget<T extends BudgetMessage>(
     if (m.role === 'user' || turns.length === 0) turns.push([m])
     else turns[turns.length - 1].push(m)
   }
-  const turnCost = (t: T[]) => t.reduce((n, m) => n + estimateTokens(m.content ?? ''), 0)
+  const turnCost = (t: T[]) => t.reduce((n, m) => n + estimateContentTokens(m.content), 0)
 
   if (budgetTokens <= 0 || turns.length === 0) {
-    return { kept: history, droppedTurns: 0, totalTurns: turns.length, estimatedTokens: history.reduce((n, m) => n + estimateTokens(m.content ?? ''), 0) }
+    return { kept: history, droppedTurns: 0, totalTurns: turns.length, estimatedTokens: history.reduce((n, m) => n + estimateContentTokens(m.content), 0) }
   }
 
   // 从尾往头收连续段；最后一轮无条件保留

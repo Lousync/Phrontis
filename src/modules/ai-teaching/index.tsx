@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentListSideLanes, agentResume,
@@ -13,15 +13,18 @@ import {
   aiTeachFavList, aiTeachFavAdd, aiTeachFavRemove,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
   aiTeachProfileWriteSession, aiTeachProfileApplyPatch, getSetting,
+  aiTeachCourseGetEndState, aiTeachCourseReopenCourse,
 } from '../../lib/ipc'
 import { AiTeachFileTree } from './AiTeachFileTree'
 import { CourseRail } from './CourseRail'
+import { CourseEndFlow } from './CourseEndFlow'
+import { CourseEndReportDrawer } from './CourseEndReportDrawer'
 import { Preflight } from './Preflight'
 import { CourseProgress } from './CourseProgress'
 import { CourseSources } from './CourseSources'
 import { RequirementsDrawer, type ReqLayer } from './RequirementsDrawer'
 import { buildCourseRail, activeChapterId as pickRailChapter, type RailChapterInput } from './courseRailPure'
-import { chapterSegments, courseProgressSummary, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
+import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
 import { SideLaneCenter } from './SideLaneCenter'
@@ -59,7 +62,7 @@ import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
  * `agent:listSideLanes` 带回的每条支线都带 `branchFromMessageId`，据此在回答下方显示
  * 「支线追问 · 已开」（点击进右栏支线中心重开）；不再落 localStorage（修掉清缓存/换机即失联）。
  */
-import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState } from '../../types'
+import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -96,8 +99,15 @@ import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTrac
  */
 
 /** P5：工作区卡片「最近活跃」相对时间（updated_at 'YYYY-MM-DD HH:MM:SS' 本地串） */
-function wsAgo(iso: string | null): string {
-  if (!iso) return '无'
+/** 结课日期（MM-DD；跨年补年份） */
+function fmtWsDay(iso: string | null): string {
+  const s = String(iso ?? '')
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (!m) return ''
+  return m[1] === String(new Date().getFullYear()) ? `${m[2]}-${m[3]}` : `${m[1]}-${m[2]}-${m[3]}`
+}
+
+function wsAgo(iso: string | null): string {  if (!iso) return '无'
   const t = new Date(iso.replace(' ', 'T')).getTime()
   if (Number.isNaN(t)) return '无'
   const d = Date.now() - t
@@ -534,6 +544,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [wsSwitcherOpen, setWsSwitcherOpen] = useState(false)
   // 3.26 选择页主从布局：左列表选中 → 右预览（单击选中，双击 / 按钮 / Enter 进入）
   const [selWsId, setSelWsId] = useState<string | null>(null)
+  /** 结课流程整页视图：{ 工作区 id, 起始步 }；null = 不在流程里 */
+  const [endFlow, setEndFlow] = useState<{ wsId: string; step: 1 | 2 | 3 } | null>(null)
+  /** 结课报告抽屉 */
+  const [endReportWs, setEndReportWs] = useState<string | null>(null)
+  /** 已结课预览的按需状态（沉淀份数 / 报告摘要 / 助手会话） */
+  const [selEndState, setSelEndState] = useState<AiTeachEndState | null>(null)
+  const [endStateSeq, setEndStateSeq] = useState(0)
+  /** 已结课分组展开态（默认展开；搜索时强制展开） */
+  const [doneOpen, setDoneOpen] = useState(true)
   /** 行内新建（列表底） */
   const [wsCreating, setWsCreating] = useState(false)
   const [wsCreateName, setWsCreateName] = useState('')
@@ -549,19 +568,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [wsDelBusy, setWsDelBusy] = useState(false)
   /** 刚创建的行：进场动画只放一次 */
   const [wsNewId, setWsNewId] = useState<string | null>(null)
-  /** 预览课程进度：按 wsId 缓存（选中才请求一次；从工作区返回 / 列表刷新时清空） */
-  const wsProgCache = useRef(new Map<string, { learned: number; total: number; pct: number } | 'none'>())
-  const wsProgPending = useRef(new Set<string>())
   const wsListRef = useRef<HTMLDivElement | null>(null)
-  const [wsProgTick, setWsProgTick] = useState(0)
   const refreshWorkspaces = useCallback(async () => {
     const r = await aiTeachListWorkspaces().catch(() => null)
     if (!r) return
-    // 进入工作区期间进度可能已变：列表刷新即视为缓存失效信号
-    wsProgCache.current.clear()
-    wsProgPending.current.clear()
-    setWsProgTick(v => v + 1)
     setWsList(r.workspaces); setWsSessionMap(r.sessionWs); setLastWsId(r.lastWorkspaceId)
+    setEndStateSeq(v => v + 1)
   }, [])
   useEffect(() => { void refreshWorkspaces() }, [refreshWorkspaces])
   // ---------- 课程（3.14：课程 = 工作区；章 → 知识点；段）----------
@@ -599,6 +611,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [handoffOpen, setHandoffOpen] = useState(true)
   const courseEnabled = !!activeWs && activeWs !== '__none__'
   const courseReadonly = !!activeSegmentSid && activeId === activeSegmentSid && segmentStatus === 'ended'
+  /** 已结课：章节 / 大纲只读，课程助手仍可用 */
+  const courseEnded = !!courseState?.endedAt
   const courseUnits = useMemo(() => (courseState?.outline?.chapters ?? []).flatMap(c => c.units), [courseState])
   /** L4 引用网络：知识点名（归一化） → 最近已收尾段 / 旧总结篇（跳转 chip 点击打开） */
   const courseJumpByName = useMemo(() => {
@@ -1269,6 +1283,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       setAssistantSid(s?.assistantSessionId ?? null)
       const first = s?.outline?.chapters.find((c) => c.units.some((u) => !unitLearned(u.id, s.progress, s.lessons))) ?? s?.outline?.chapters[0]
       setActiveChapterState(first?.id ?? null)
+      // 已结课：章节与大纲只读，默认打开课程助手；不再自动进入未收尾段
+      if (s?.endedAt) {
+        setActiveSegmentSid(null); setActiveUnitId(null); setSegmentStatus('open'); setCourseReviewChapter(null)
+        let sid = s.assistantSessionId ?? null
+        if (!sid) {
+          const r = await aiTeachCourseOpenAssistant(id).catch(() => null)
+          sid = r?.ok && r.sessionId ? r.sessionId : null
+        }
+        if (sid) { setAssistantSid(sid); void openSession(sid, '课程助手') }
+        else {
+          activeIdRef.current = null
+          setActiveId(null); setActiveTitle(''); setMessages([]); setLastChanges(null); setArtTabs([]); setArtActive(null)
+          setActiveInstr(''); setInstrRel('')
+        }
+        void refreshSessions()
+        return
+      }
       const open = s ? Object.entries(s.lessons).find(([, l]) => l.status === 'open') : null
       if (open) {
         const l = open[1]
@@ -1299,27 +1330,56 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   useEffect(() => {
     if (wsBootRef.current || wsList.length === 0) return
     wsBootRef.current = true
-    if (activeWs === null && lastWsId && wsList.some(w => w.id === lastWsId)) enterWs(lastWsId)
+    const candidate = lastWsId ? wsList.find(w => w.id === lastWsId) : null
+    if (activeWs === null && candidate && !candidate.endedAt) enterWs(candidate.id)
   }, [wsList, lastWsId, activeWs, enterWs])
   const exitToPicker = useCallback(() => {
     setActiveWs(null); activeWsRef.current = null
     void refreshWorkspaces()
   }, [refreshWorkspaces])
-  /** 选择页排序：上次工作区置顶 → 最近活跃倒序（空值最后）→ 名称 */
+  /** 结课流程入口（选择页「提前结课…」/ 已结课预览「资料沉淀」） */
+  const startEndFlow = useCallback((wsId: string, step: 1 | 2 | 3 = 1) => setEndFlow({ wsId, step }), [])
+  const exitEndFlow = useCallback(() => {
+    setEndFlow(null)
+    void refreshWorkspaces()
+  }, [refreshWorkspaces])
+  const enterFromEnd = useCallback((id: string) => { setEndFlow(null); enterWs(id) }, [enterWs])
+  /** 重新开课：清 endedAt，保留报告与进度 */
+  const reopenCourse = useCallback(async (wsId: string) => {
+    const r = await aiTeachCourseReopenCourse(wsId).catch(() => null)
+    if (!r?.ok) { showToast({ type: 'error', message: r?.error ?? '重新开课失败' }); return }
+    await refreshWorkspaces()
+    if (activeWsRef.current === wsId) await reloadCourse()
+    showToast({ type: 'info', message: '已重新开课' })
+  }, [refreshWorkspaces, reloadCourse])
+  /** 选择页排序：进行中（最近活跃倒序）在前，已结课（结课时间倒序）整体沉底 */
   const wsFiltered = useMemo(() => {
     const q = wsSearch.trim().toLowerCase()
     const rows = q
       ? wsList.filter(w => w.name.toLowerCase().includes(q) || w.folderRel.toLowerCase().includes(q))
       : [...wsList]
-    return rows.sort((a, b) => {
-      if (a.id === lastWsId) return -1
-      if (b.id === lastWsId) return 1
+    const active = rows.filter(w => !w.endedAt).sort((a, b) => {
       const la = a.lastActive ?? ''
       const lb = b.lastActive ?? ''
       if (la !== lb) return lb.localeCompare(la)
       return a.name.localeCompare(b.name, 'zh')
     })
-  }, [wsList, wsSearch, lastWsId])
+    const done = rows.filter(w => !!w.endedAt).sort((a, b) => {
+      const ea = a.endedAt ?? ''
+      const eb = b.endedAt ?? ''
+      if (ea !== eb) return eb.localeCompare(ea)
+      return a.name.localeCompare(b.name, 'zh')
+    })
+    return [...active, ...done]
+  }, [wsList, wsSearch])
+  /** 已结课分组（列表渲染 + 计数） */
+  const wsActiveRows = useMemo(() => wsFiltered.filter(w => !w.endedAt), [wsFiltered])
+  const wsDoneRows = useMemo(() => wsFiltered.filter(w => !!w.endedAt), [wsFiltered])
+  /** 「继续上次」只认进行中工作区 */
+  const wsResume = useMemo(() => {
+    const rows = wsList.filter(w => !w.endedAt)
+    return [...rows].sort((a, b) => (b.lastActive ?? '').localeCompare(a.lastActive ?? ''))[0] ?? null
+  }, [wsList])
   /** 选中回落：初始选上次工作区，否则第一条；过滤 / 删除后不在结果里则回落到第一条可见项 */
   const wsSelInit = useRef(false)
   useEffect(() => {
@@ -1332,17 +1392,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [wsFiltered, lastWsId])
   // 切课程时收起行内改名 / 删除确认（避免把上一个工作区的表单带到下一个）
   useEffect(() => { setWsRenaming(false); setWsRenameErr(''); setWsConfirmDel(false) }, [selWsId])
-  // 选中才取一次课程进度（按 wsId 缓存；离开 / 刷新列表时缓存已清空，这里重取）
-  useEffect(() => {
-    if (activeWs) return
-    const id = selWsId
-    if (!id || wsProgCache.current.has(id) || wsProgPending.current.has(id)) return
-    wsProgPending.current.add(id)
-    void aiTeachCourseGetState(id)
-      .then(s => { wsProgCache.current.set(id, courseProgressSummary(s?.outline, s?.progress, s?.lessons)) })
-      .catch(() => { wsProgCache.current.set(id, 'none') })
-      .finally(() => { wsProgPending.current.delete(id); setWsProgTick(v => v + 1) })
-  }, [selWsId, activeWs, wsProgTick])
 
   const openWsCreate = useCallback(() => {
     setWsCreateErr(''); setWsCreateName(''); setWsCreating(true)
@@ -1423,10 +1472,43 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (e.key === 'Enter' && selWsId) { e.preventDefault(); enterWs(selWsId) }
   }, [wsFiltered, selWsId, enterWs])
   const selWs = useMemo(() => wsFiltered.find(w => w.id === selWsId) ?? null, [wsFiltered, selWsId])
-  const selWsProgress = useMemo(() => {
-    void wsProgTick
-    return selWs ? (wsProgCache.current.get(selWs.id) ?? null) : null
-  }, [selWs, wsProgTick])
+  const selWsProg = selWs?.course ?? null
+  const selWsPct = selWsProg && selWsProg.total > 0 ? Math.round((selWsProg.learned / selWsProg.total) * 100) : 0
+  useEffect(() => {
+    setSelEndState(null)
+    const w = selWs
+    if (!w?.course) return
+    let alive = true
+    void aiTeachCourseGetEndState(w.id).then(s => { if (alive) setSelEndState(s) }).catch(() => null)
+    return () => { alive = false }
+  }, [selWs?.id, selWs?.endedAt, endStateSeq])
+  /** 选择页单行：进行中 = 文件夹图标 + 活跃时间；已结课 = 对勾 + 灰名 + 结课日期 */
+  const wsRow = (w: AiTeachWorkspaceInfo) => {
+    const on = w.id === selWs?.id
+    const done = !!w.endedAt
+    const ready = !done && !!w.course?.ready
+    const meta = done
+      ? `${w.course?.chapters ?? 0} 章 · ${w.course && w.course.learned < w.course.total ? `已学 ${w.course.learned}/${w.course.total}` : w.course?.learned ?? 0} 知识点`
+      : `${w.sessionCount} 对话 · ${w.docCount} 产物`
+    const tail = done
+      ? `已结课 ${fmtWsDay(w.endedAt)}`
+      : ready ? <span className="text-[var(--accent)]">可结课</span> : wsAgo(w.lastActive)
+    return (
+      <button key={w.id} role="option" aria-selected={on} data-ws-row={w.id}
+        onClick={() => setSelWsId(w.id)} onDoubleClick={() => enterWs(w.id)}
+        className={`relative flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${on ? 'bg-[var(--accent)]/12' : 'hover:bg-[var(--bg-hover)]'} ${w.id === wsNewId ? 'kb-item-in' : ''} ${done ? 'opacity-80' : ''}`}>
+        {on && <span className="absolute bottom-1.5 left-0 top-1.5 w-[2px] rounded-full bg-[var(--accent)]" />}
+        {done
+          ? <CircleCheck size={13} className="mt-0.5 shrink-0 text-[var(--success)]" />
+          : <Folder size={13} className={`mt-0.5 shrink-0 ${on ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />}
+        <span className="min-w-0 flex-1">
+          <span className={`block truncate text-[12.5px] font-medium ${done ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'}`}>{w.name}</span>
+          <span className="mt-0.5 block truncate text-[10.5px] text-[var(--text-muted)]">{meta}</span>
+        </span>
+        <span className="mt-0.5 shrink-0 text-[10px] text-[var(--text-muted)]">{tail}</span>
+      </button>
+    )
+  }
 
   /** 打开已存在的段（不新建） */
   const openSegmentBySid = useCallback(async (sid: string) => {
@@ -1437,14 +1519,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const ch = cs?.outline?.chapters.find((c) => c.units.some((u) => ids.includes(u.id)))
     setActiveSegmentSid(sid)
     setActiveUnitId(l.activeUnitId ?? ids[0] ?? null)
-    setSegmentStatus(l.status)
+    setSegmentStatus(cs?.endedAt ? 'ended' : l.status)
     setCourseReviewChapter(null)
     setPreflight(null)
     if (ch) setActiveChapterState(ch.id)
     await openSession(sid, sessions.find((s) => s.id === sid)?.title ?? `第${l.order}段`)
     setActiveSegmentSid(sid)
     setActiveUnitId(l.activeUnitId ?? ids[0] ?? null)
-    setSegmentStatus(l.status)
+    setSegmentStatus(cs?.endedAt ? 'ended' : l.status)
     setCourseReviewChapter(null)
   }, [openSession, sessions])
 
@@ -1542,6 +1624,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!ch) return
     const st = reviewState(chapterId, ch.units.map((u) => u.id), cs.progress, cs.lessons, cs.reviews)
     if (st.state === 'locked') { showToast({ type: 'warning', message: `本章还有 ${st.remaining} 个知识点没学完，学完自动解锁` }); return }
+    const reviewRel = cs.reviews[chapterId]?.rel
+    if (cs.endedAt && reviewRel) { void openArtFile(reviewRel); return }
     const r = await aiTeachCourseOpenChapterReview(ws, chapterId).catch(() => null)
     if (!r?.ok || !r.sessionId) { showToast({ type: 'warning', message: r?.error ?? '打开复习课失败' }); return }
     setActiveSegmentSid(null); setActiveUnitId(null); setSegmentStatus('open')
@@ -1551,7 +1635,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setActiveSegmentSid(null); setActiveUnitId(null)
     await reloadCourse()
     void refreshSessions()
-  }, [openSession, reloadCourse, refreshSessions])
+  }, [openSession, reloadCourse, refreshSessions, openArtFile])
 
   /** 收尾当前段：冻结 + 置学完 + 异步生成交接 */
   const courseEndSegment = useCallback(async () => {
@@ -2471,6 +2555,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 </div>
   )
 
+  if (endFlow) {
+    return (
+      <div className="kb-theme-surface kb-theme-surface--solid h-full flex flex-col min-h-0 relative">
+        <CourseEndFlow
+          wsId={endFlow.wsId}
+          initialStep={endFlow.step}
+          onExit={exitEndFlow}
+          onEnded={() => void refreshWorkspaces()}
+          onEnterCourse={enterFromEnd}
+          onOpenReport={(id) => setEndReportWs(id)}
+        />
+        {endReportWs && <CourseEndReportDrawer wsId={endReportWs} onClose={() => setEndReportWs(null)} />}
+      </div>
+    )
+  }
+
   return (
     /* kb-theme-surface--solid（2026-11-14）：本模块**内部自带实色分栏**（左课程树 / 中栏右侧工件 / 右进度素材
        三条 ResizablePanel 都是实底 `--bg-primary`）。昼夜主题把模块面带透明后，中间那栏会透出天空，
@@ -2500,6 +2600,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
 
           {/* 顶栏工具组：**只图标不带文字**（窄栏不挤，含义靠 title 气泡；状态用右上角小圆点 / 数字）
               非当前会话不需要的入口不渲染；工件分栏 chip 只有存在工件页签时才出现 */}
+          {courseEnded && activeWs && (
+            <>
+              <button onClick={() => setEndReportWs(activeWs)} data-tip="查看结课报告" aria-label="查看结课报告"
+                className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                <ScrollText size={14} />
+              </button>
+              <button onClick={() => void reopenCourse(activeWs)} data-tip="重新开课（保留结课报告与进度）" aria-label="重新开课（保留结课报告与进度）"
+                className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                <RotateCcw size={14} />
+              </button>
+            </>
+          )}
+          {!courseEnded && (
           <button
             onClick={() => { if (activeId) void openProfile('session'); else showToast({ type: 'warning', message: '本主题画像随对话存放：先选择或新建一个对话' }) }}
             data-tip="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准" aria-label="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准"
@@ -2507,6 +2620,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             <User size={14} />
             {profPending && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" data-tip="AI 有画像更新建议待确认" aria-label="AI 有画像更新建议待确认" />}
           </button>
+          )}
           {/* 工件分栏开关（v3.8.0：工件 = 中栏右侧的独立分栏，与对话并排同屏）——
               有工件页签时才出现；点＝收/放分栏（页签不丢，收起后再点即回），页签数与状态进 title */}
           {artExpanded && (
@@ -2527,7 +2641,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           {/* 会话要求（UI 优化条目8.1 方案 A：中型编辑弹层，规格对齐画像弹层；Ctrl+Enter 保存；阅读视图次级入口）。
               约束随会话存放（CONSTRAINTS.md 在会话夹内）——工作区没有任何会话时整个入口不渲染
               （2026-09-08 用户拍板：删除全部会话后也不出现，不只首次进入） */}
-          {wsSessions.length > 0 && (
+          {!courseEnded && wsSessions.length > 0 && (
           <div className="relative shrink-0">
             <button
               onClick={() => { setInstrDraft(activeInstr); setInstrOpen(v => !v); if (activeId) void aiTeachReadConstraints(activeId).then(r => { const t = r?.ok && r.relPath ? (r.text ?? '').trim() : ''; setActiveInstr(t); setInstrDraft(t); if (r?.relPath) setInstrRel(r.relPath) }).catch(() => null) }}
@@ -2698,6 +2812,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   search={railSearch}
                   onSearch={setRailSearch}
                   hasOutline={!!courseState?.outline?.chapters.length}
+                  readOnly={courseEnded}
                 />
               </div>
             </div>
@@ -2770,7 +2885,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" data-tip={activeSegmentUnitNames.join('、')} aria-label={activeSegmentUnitNames.join('、')}>本段 {activeSegmentUnitNames.length} 个知识点 · 当前：{activeSegmentUnitName}</span>
                   {segmentStatus === 'ended' && <span className="shrink-0 rounded-full border border-[var(--border-color)] px-1.5 py-0.5 text-[9.5px] text-[var(--text-muted)]">已收尾</span>}
                   <div className="shrink-0 flex items-center gap-1">
-                    {segmentStatus === 'open' && (
+                    {segmentStatus === 'open' && !courseEnded && (
                       <button onClick={() => void courseEndSegment()} disabled={pending}
                         className="rounded-md border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40">收尾本段</button>
                     )}
@@ -2789,10 +2904,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     {courseState?.reviews[courseReviewChapter]?.rel ? (
                       <button onClick={() => { const rel = courseState?.reviews[courseReviewChapter]?.rel; if (rel) void openArtFile(rel) }}
                         className="rounded-md border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">查看讲义</button>
-                    ) : (
+                    ) : !courseEnded ? (
                       <button onClick={courseWriteReview} disabled={pending}
                         className="rounded-md bg-[var(--accent)] px-2 py-0.5 text-[10.5px] text-white disabled:opacity-40">生成复习讲义</button>
-                    )}
+                    ) : null}
                     <button onClick={() => openRequirements('workspace')} data-tip="本课程要求（CONSTRAINTS.md）" aria-label="本课程要求（CONSTRAINTS.md）"
                       className="rounded-md px-1.5 py-0.5 text-[10.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">要求</button>
                   </div>
@@ -3553,6 +3668,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   activeSegmentSid={activeSegmentSid}
                   onOpenSegment={(sid) => void openSegmentBySid(sid)}
                   onOpenReview={(chapterId) => void courseOpenChapterReview(chapterId)}
+                  readOnly={courseEnded}
                 />
               </div>
               <div className={`absolute inset-0 overflow-y-auto ${railTab === 'sources' ? '' : 'hidden'}`}>
@@ -3564,6 +3680,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     activeSegment={activeSegment}
                     onOpenFile={(rel) => void openArtFile(rel)}
                     onReloadCourse={() => void reloadCourse()}
+                    readOnly={courseEnded}
                   />
                 ) : (
                   <div className="px-3 py-3 text-[11px] text-[var(--text-muted)]">先进入工作区。</div>
@@ -3636,12 +3753,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               <span className="text-[11px] text-[var(--text-muted)]">{wsList.length} 个工作区</span>
               <p className="text-[11.5px] text-[var(--text-muted)]">一门课 / 一个主题一个工作区；对话、产物、画像与要求都跟着它走。</p>
             </div>
-            {lastWsId && wsList.find(w => w.id === lastWsId) && (
-              <button onClick={() => enterWs(lastWsId)}
+            {wsResume && (
+              <button onClick={() => enterWs(wsResume.id)}
                 className="mt-3 flex items-center gap-1.5 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-[12px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/20">
                 <ArrowLeft size={12} className="rotate-180" />
                 <span className="opacity-80">继续上次工作区</span>
-                <b className="font-medium">「{wsList.find(w => w.id === lastWsId)?.name}」</b>
+                <b className="font-medium">「{wsResume.name}」</b>
               </button>
             )}
             <div className="mt-3 flex items-center gap-2">
@@ -3689,22 +3806,20 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         : <>没有匹配「{wsSearch.trim()}」的工作区
                             <button onClick={() => setWsSearch('')} className="mt-1.5 block w-full rounded-md py-1 text-[10.5px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]">清空搜索</button></>}
                     </div>
-                  ) : wsFiltered.map(w => {
-                    const on = w.id === selWs?.id
-                    return (
-                      <button key={w.id} role="option" aria-selected={on} data-ws-row={w.id}
-                        onClick={() => setSelWsId(w.id)} onDoubleClick={() => enterWs(w.id)}
-                        className={`relative flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${on ? 'bg-[var(--accent)]/12' : 'hover:bg-[var(--bg-hover)]'} ${w.id === wsNewId ? 'kb-item-in' : ''}`}>
-                        {on && <span className="absolute bottom-1.5 left-0 top-1.5 w-[2px] rounded-full bg-[var(--accent)]" />}
-                        <Folder size={13} className={`mt-0.5 shrink-0 ${on ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[12.5px] font-medium text-[var(--text-primary)]">{w.name}</span>
-                          <span className="mt-0.5 block truncate text-[10.5px] text-[var(--text-muted)]">{w.sessionCount} 对话 · {w.docCount} 产物</span>
-                        </span>
-                        <span className="mt-0.5 shrink-0 text-[10px] text-[var(--text-muted)]">{wsAgo(w.lastActive)}</span>
-                      </button>
-                    )
-                  })}
+                  ) : (
+                    <>
+                      {wsActiveRows.map(wsRow)}
+                      {wsDoneRows.length > 0 && (
+                        <button onClick={() => setDoneOpen(v => !v)}
+                          className="mt-1 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]">
+                          <ChevronRight size={11} className={`kb-chevron ${doneOpen || wsSearch.trim() ? 'rotate-90' : ''}`} />
+                          <span>已结课</span>
+                          <span className="rounded-full bg-[var(--bg-hover)] px-1.5 text-[9.5px]">{wsDoneRows.length}</span>
+                        </button>
+                      )}
+                      {(doneOpen || !!wsSearch.trim()) && wsDoneRows.map(wsRow)}
+                    </>
+                  )}
                 </div>
                 <div className="shrink-0 border-t border-[var(--border-color)] p-1.5">
                   {wsCreating ? (
@@ -3738,7 +3853,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   <div className="kb-hide-scrollbar flex-1 min-h-0 overflow-y-auto p-3.5">
                     {/* 标题 + 目录路径 + 打开 */}
                     <div className="flex items-start gap-2.5">
-                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/12 text-[var(--accent)]"><Folder size={15} /></span>
+                      <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${selWs.endedAt ? 'bg-[var(--success)]/12 text-[var(--success)]' : 'bg-[var(--accent)]/12 text-[var(--accent)]'}`}>
+                        {selWs.endedAt ? <CircleCheck size={15} /> : <Folder size={15} />}
+                      </span>
                       <div className="min-w-0 flex-1">
                         {wsRenaming ? (
                           <form onSubmit={e => { e.preventDefault(); void submitWsRename() }} className="kb-item-in">
@@ -3756,8 +3873,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         ) : (
                           <>
                             <div className="flex min-w-0 items-center gap-2">
-                              <h2 className="min-w-0 truncate text-[15px] font-semibold text-[var(--text-primary)]">{selWs.name}</h2>
-                              {selWs.id === lastWsId && <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">上次活跃</span>}
+                              <h2 className={`min-w-0 truncate text-[15px] font-semibold ${selWs.endedAt ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'}`}>{selWs.name}</h2>
+                              {selWs.endedAt ? (
+                                <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">已结课 · {fmtWsDay(selWs.endedAt)}</span>
+                              ) : selWs.id === lastWsId ? (
+                                <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">上次活跃</span>
+                              ) : null}
                             </div>
                             <div className="mt-1 flex min-w-0 items-center gap-1.5">
                               <span className="truncate text-[10.5px] text-[var(--text-muted)]">{selWs.folderRel}</span>
@@ -3771,74 +3892,184 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       </div>
                     </div>
 
-                    {/* 统计 */}
-                    <div className="mt-3.5 grid grid-cols-3 gap-2">
-                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
-                        <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.sessionCount}</div>
-                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">对话</div>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
-                        <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.docCount}</div>
-                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">产物</div>
-                      </div>
-                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
-                        <div className="text-[13px] font-semibold text-[var(--text-primary)]">{wsAgo(selWs.lastActive)}</div>
-                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">最近活跃</div>
-                      </div>
-                    </div>
-
-                    {/* 课程进度（选中时懒加载一次） */}
-                    <div className="mt-3.5">
-                      <div className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="text-[var(--text-secondary)]">课程进度</span>
-                        <span className="truncate text-[var(--text-muted)]">
-                          {selWsProgress === null ? '加载中…'
-                            : selWsProgress === 'none' ? '—'
-                            : selWsProgress.total === 0 ? '还没有课程大纲'
-                            : `${selWsProgress.learned} / ${selWsProgress.total} · ${selWsProgress.pct}%`}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--bg-hover)]">
-                        <div className="h-full origin-left rounded-full bg-[var(--accent)] transition-transform duration-300"
-                          style={{ transform: `scaleX(${(selWsProgress && selWsProgress !== 'none' ? selWsProgress.pct : 0) / 100})` }} />
-                      </div>
-                    </div>
-
-                    {/* 最近对话（只读，不直接跳会话） */}
-                    <div className="mt-3.5">
-                      <div className="text-[11px] text-[var(--text-secondary)]">最近对话</div>
-                      <div className="mt-1.5 space-y-1">
-                        {selWs.recentSessions.length === 0 ? (
-                          <div className="text-[11px] text-[var(--text-muted)]">还没有对话，进入后直接开第一段。</div>
-                        ) : selWs.recentSessions.map(s => (
-                          <div key={s.id} className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5">
-                            <MessagesSquare size={11} className="shrink-0 text-[var(--text-muted)]" />
-                            <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{s.title || '未命名对话'}</span>
-                            <span className="shrink-0 text-[10px] text-[var(--text-muted)]">{wsRecentTime(s.updatedAt)}</span>
+                    {selWs.endedAt ? (
+                      <>
+                        <div className="mt-3.5 grid grid-cols-3 gap-2">
+                          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                            <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.course?.chapters ?? 0}<small className="ml-0.5 text-[10px] font-normal text-[var(--text-muted)]">章</small></div>
+                            <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">{selWs.course ? `${selWs.course.learned}/${selWs.course.total}` : '—'} 个知识点</div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                            <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selEndState?.deposit.count ?? 0}<small className="ml-0.5 text-[10px] font-normal text-[var(--text-muted)]">份</small></div>
+                            <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">已沉淀</div>
+                          </div>
+                          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                            <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.sessionCount}</div>
+                            <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">对话</div>
+                          </div>
+                        </div>
+
+                        {!!selEndState?.staging.length && (
+                          <div className="mt-3 flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <Inbox size={11} className="shrink-0 text-[var(--accent)]" />
+                            <span className="min-w-0 flex-1 truncate">待整理 {selEndState.staging.length} 份</span>
+                            <button onClick={() => startEndFlow(selWs.id, 3)} className="shrink-0 rounded-md px-2 py-0.5 text-[10.5px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]">继续整理</button>
+                          </div>
+                        )}
+
+                        <div className="mt-3.5">
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span className="text-[var(--text-secondary)]">结课报告</span>
+                            <span className="flex-1" />
+                            <button onClick={() => setEndReportWs(selWs.id)} className="text-[10.5px] text-[var(--accent)] transition-colors hover:underline">查看全文</button>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-[11.5px] leading-relaxed text-[var(--text-muted)]">{selEndState?.report?.summary || '结课报告已生成。'}</p>
+                        </div>
+
+                        <div className="mt-3.5">
+                          <div className="text-[11px] text-[var(--text-secondary)]">资料沉淀</div>
+                          <div className="mt-1.5 space-y-1 text-[11px] text-[var(--text-muted)]">
+                            <div className="flex items-center gap-1.5">
+                              <CircleCheck size={11} className="shrink-0 text-[var(--success)]" />
+                              <span className="min-w-0 flex-1 truncate">
+                                <b className="font-medium text-[var(--text-secondary)]">{selEndState?.deposit.count ?? 0} 份</b>
+                                {selEndState?.deposit.target ? ` → ${[selEndState.deposit.target.space, selEndState.deposit.target.notebook, selEndState.deposit.target.subfolder].filter(Boolean).join(' / ')}` : ' 未沉淀'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <FileText size={11} className="shrink-0 text-[var(--text-muted)]" />
+                              <span className="min-w-0 flex-1 truncate"><b className="font-medium text-[var(--text-secondary)]">{selEndState?.totals.kept ?? 0} 份</b> 留在课程内（题单与错题本）</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3.5">
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <Bot size={11} className="text-[var(--accent)]" />
+                            <span className="text-[var(--text-secondary)]">课程助手</span>
+                            <span className="flex-1" />
+                            <button onClick={() => enterWs(selWs.id)} className="text-[10.5px] text-[var(--accent)] transition-colors hover:underline">继续对话</button>
+                          </div>
+                          <p className="mt-1 truncate text-[11px] text-[var(--text-muted)]">{selWs.recentSessions[0]?.title || '课程内容、复盘与二轮计划都可以继续问。'}</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* 统计 */}
+                        <div className="mt-3.5 grid grid-cols-3 gap-2">
+                          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                            <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.sessionCount}</div>
+                            <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">对话</div>
+                          </div>
+                          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                            <div className="text-[13px] font-semibold text-[var(--text-primary)]">{selWs.docCount}</div>
+                            <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">产物</div>
+                          </div>
+                          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
+                            <div className="text-[13px] font-semibold text-[var(--text-primary)]">{wsAgo(selWs.lastActive)}</div>
+                            <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">最近活跃</div>
+                          </div>
+                        </div>
+
+                        {/* 课程进度 */}
+                        <div className="mt-3.5">
+                          <div className="flex items-center justify-between gap-2 text-[11px]">
+                            <span className="text-[var(--text-secondary)]">课程进度</span>
+                            <span className="truncate text-[var(--text-muted)]">
+                              {!selWsProg ? '还没有课程大纲'
+                                : selWsProg.total === 0 ? '还没有知识点'
+                                : `${selWsProg.learned} / ${selWsProg.total} · ${selWsPct}%`}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--bg-hover)]">
+                            <div className="h-full origin-left rounded-full bg-[var(--accent)] transition-transform duration-300"
+                              style={{ transform: `scaleX(${selWsPct / 100})` }} />
+                          </div>
+                          <div className="mt-1.5 flex items-center justify-between text-[10.5px] text-[var(--text-muted)]">
+                            <span>{selWsProg?.chapters ?? 0} 章</span>
+                            <span>复习讲义 <b className="text-[var(--text-secondary)]">{selWsProg?.reviewsDone ?? 0}/{selWsProg?.chapters ?? 0}</b></span>
+                          </div>
+                        </div>
+
+                        {selWsProg?.ready && (
+                          <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-[var(--accent)]/35 bg-[var(--accent)]/6 px-2.5 py-2">
+                            <Check size={12} className="shrink-0 text-[var(--accent)]" />
+                            <span className="min-w-0 flex-1 text-[11px] text-[var(--text-secondary)]">{selWsProg.learned}/{selWsProg.total} · {selWsProg.reviewsDone}/{selWsProg.chapters}</span>
+                            <button onClick={() => startEndFlow(selWs.id)}
+                              className="shrink-0 rounded-md bg-[var(--accent)] px-2.5 py-1 text-[11px] text-white transition-opacity hover:opacity-90">结课</button>
+                          </div>
+                        )}
+
+                        {!!selEndState?.staging.length && (
+                          <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
+                            <Inbox size={11} className="shrink-0 text-[var(--accent)]" />
+                            <span className="min-w-0 flex-1 truncate">已收集 {selEndState.staging.length} 份到待整理</span>
+                            <button onClick={() => startEndFlow(selWs.id, 3)} className="shrink-0 rounded-md px-2 py-0.5 text-[10.5px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]">继续整理</button>
+                          </div>
+                        )}
+
+                        {/* 最近对话（只读，不直接跳会话） */}
+                        <div className="mt-3.5">
+                          <div className="text-[11px] text-[var(--text-secondary)]">最近对话</div>
+                          <div className="mt-1.5 space-y-1">
+                            {selWs.recentSessions.length === 0 ? (
+                              <div className="text-[11px] text-[var(--text-muted)]">还没有对话，进入后直接开第一段。</div>
+                            ) : selWs.recentSessions.map(s => (
+                              <div key={s.id} className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5">
+                                <MessagesSquare size={11} className="shrink-0 text-[var(--text-muted)]" />
+                                <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{s.title || '未命名对话'}</span>
+                                <span className="shrink-0 text-[10px] text-[var(--text-muted)]">{wsRecentTime(s.updatedAt)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {/* 操作条：永远贴面板底 */}
                   <div className="flex shrink-0 items-center gap-1 border-t border-[var(--border-color)] px-2.5 py-2">
                     <button onClick={() => enterWs(selWs.id)}
                       className="flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12px] text-white transition-opacity hover:opacity-90">
-                      <ArrowRight size={12} />进入工作区
+                      <ArrowRight size={12} />{selWs.endedAt ? '进入课程' : '进入工作区'}
                     </button>
-                    <button onClick={() => openWsRename(selWs)} data-tip="重命名工作区（产物文件夹同步改名）" aria-label="重命名工作区"
-                      className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                      <PenLine size={11} /><span className="kb-l1">改名</span>
-                    </button>
-                    <button onClick={() => { void openProfile('workspace', selWs.id) }} data-tip={`工作区画像 · ${selWs.folderRel}/PROFILE.md（本课程目标/进度，覆盖全局画像）`} aria-label="编辑工作区画像"
-                      className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                      <User size={11} /><span className="kb-l1">画像</span>
-                    </button>
-                    <button onClick={() => { void openWorkspaceConstraints(selWs.id) }} data-tip={`工作区要求 · ${selWs.folderRel}/CONSTRAINTS.md（优先级：本会话要求 > 工作区要求 > 全局要求）`} aria-label="编辑工作区要求"
-                      className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-                      <ScrollText size={11} /><span className="kb-l1">要求</span>
-                    </button>
+                    {selWs.endedAt ? (
+                      <>
+                        <button onClick={() => setEndReportWs(selWs.id)} data-tip="查看结课报告" aria-label="查看结课报告"
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                          <ScrollText size={11} /><span className="kb-l1">结课报告</span>
+                        </button>
+                        <button onClick={() => startEndFlow(selWs.id, 3)} data-tip="整理待整理资料并沉淀到笔记区" aria-label="资料沉淀"
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                          <Inbox size={11} /><span className="kb-l1">资料沉淀</span>
+                        </button>
+                        <button onClick={() => void reopenCourse(selWs.id)} data-tip="重新开课（保留结课报告与进度）" aria-label="重新开课"
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                          <RotateCcw size={11} /><span className="kb-l1">重新开课</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => openWsRename(selWs)} data-tip="重命名工作区（产物文件夹同步改名）" aria-label="重命名工作区"
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                          <PenLine size={11} /><span className="kb-l1">改名</span>
+                        </button>
+                        <button onClick={() => { void openProfile('workspace', selWs.id) }} data-tip={`工作区画像 · ${selWs.folderRel}/PROFILE.md（本课程目标/进度，覆盖全局画像）`} aria-label="编辑工作区画像"
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                          <User size={11} /><span className="kb-l1">画像</span>
+                        </button>
+                        <button onClick={() => { void openWorkspaceConstraints(selWs.id) }} data-tip={`工作区要求 · ${selWs.folderRel}/CONSTRAINTS.md（优先级：本会话要求 > 工作区要求 > 全局要求）`} aria-label="编辑工作区要求"
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                          <ScrollText size={11} /><span className="kb-l1">要求</span>
+                        </button>
+                        {selWs.course && (
+                          <button onClick={() => startEndFlow(selWs.id)} data-tip={selWsProg?.ready ? '结课' : '未全部完成也可以手动结课'} aria-label="结课"
+                            className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+                            <CircleCheck size={11} /><span className="kb-l1">{selWsProg?.ready ? '结课…' : '提前结课…'}</span>
+                          </button>
+                        )}
+                      </>
+                    )}
                     <div className="flex-1" />
                     <button onClick={() => setWsConfirmDel(true)} data-tip="删除工作区（只解除归属，文件夹与对话保留）" aria-label="删除工作区"
                       className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-red-400">
@@ -3949,6 +4180,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           />
         </div>
       )}
+      {endReportWs && <CourseEndReportDrawer wsId={endReportWs} onClose={() => setEndReportWs(null)} />}
       {reqOpen && activeWs && activeWs !== '__none__' && (
         <RequirementsDrawer
           wsId={activeWs}

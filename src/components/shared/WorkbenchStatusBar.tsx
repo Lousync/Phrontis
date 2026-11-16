@@ -49,7 +49,7 @@ export function WorkbenchStatusBar() {
       {pomActive && (
         <button
           onClick={() => window.dispatchEvent(new CustomEvent('pomodoro:activate'))}
-          data-tip="打开番茄钟面板" aria-label="打开番茄钟面板"
+          data-tip="打开番茄钟标签页" aria-label="打开番茄钟标签页"
           className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
           <Timer size={11} className={pom.mode === 'rating' ? 'text-[var(--warning)]' : pom.state.running ? 'text-[var(--accent)]' : ''} />

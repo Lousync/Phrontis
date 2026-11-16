@@ -20,6 +20,7 @@ import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 import { workspaceFolderRel } from './aiTeachingWorkspaces'
+import { assertWorkspaceEditable } from './aiTeachingCourseEndGuard'
 import { parseSourceMd, type SourceEntry as LegacySourceEntry } from './aiTeachingSources'
 import { parseCourseMd, type CourseOutline } from './aiTeachingCoursePure'
 import { rewriteRelPrefix } from './aiTeachingLayoutPure'
@@ -532,6 +533,7 @@ export interface RegisterSourcesResult {
 }
 
 export function registerSources(wsId: string, items: RegisterSourceItem[], getSetting: GetSetting): RegisterSourcesResult {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, sources: [], errors: [], error: (e as Error).message } }
   const w = workspaceAbs(wsId, getSetting)
   if (!w) return { ok: false, sources: [], errors: [], error: '工作区不存在' }
   const f = readFile()
@@ -595,6 +597,7 @@ export interface AssignSourceItem {
 }
 
 export function assignSources(wsId: string, chapterId: string, items: AssignSourceItem[], getSetting: GetSetting): { ok: boolean; assigned: number; errors: string[]; error?: string } {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, assigned: 0, errors: [], error: (e as Error).message } }
   const cid = String(chapterId ?? '').trim()
   if (!cid) return { ok: false, assigned: 0, errors: [], error: '缺少章 id' }
   const w = workspaceAbs(wsId, getSetting)
@@ -629,6 +632,7 @@ export function assignSources(wsId: string, chapterId: string, items: AssignSour
 }
 
 export function removeAssignment(wsId: string, chapterId: string, sourceId: string, getSetting: GetSetting): { ok: boolean; error?: string } {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const f = readFile()
   const s = f.workspaces[wsId]
   if (!s) return { ok: false, error: '没有素材注册表' }
@@ -642,6 +646,7 @@ export function removeAssignment(wsId: string, chapterId: string, sourceId: stri
 }
 
 export function removeSource(wsId: string, sourceId: string, getSetting: GetSetting): { ok: boolean; error?: string } {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const f = readFile()
   const s = f.workspaces[wsId]
   if (!s) return { ok: false, error: '没有素材注册表' }
@@ -708,6 +713,7 @@ function sourceDirRel(source: SourceEntry): string | null {
 }
 
 export async function extractSource(wsId: string, sourceId: string, anchor: SourceAnchor, getSetting: GetSetting): Promise<ExtractResult> {
+  try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
   const f = readFile()

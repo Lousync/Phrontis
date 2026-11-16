@@ -2,6 +2,51 @@
 
 # 更新日志
 
+## v3.41.0（2026-11-16）
+
+> **本版一句话**：课程可以在任何进度结课并把产物沉淀进笔记区；AI 助手也能看图了 —— 粘贴 / 拖入图片提问，图片随消息存进仓库；番茄钟改成普通工具标签页。
+
+### AI 助手 · 多模态输入
+
+- **三种添加方式**：Ctrl+V 粘贴、拖入输入区、点「图片」按钮选文件；每条消息最多 4 张。
+- **自动压缩**：支持 PNG / JPEG / WebP，最长边压到 2048px、单张不超过 2MB。
+- **只认当前模型**：当前模型必须是视觉模型（名称含 vision / vl / 4o / glm-4v 等）且协议受支持；否则输入区提示、发送不可用，需先切模型。不会偷偷换模型。
+- **历史可追问**：图片随消息存进 `.knowbase/agent/images/<会话>/`，后续轮次仍能看到（每次请求最多回带最近 8 张）。
+- **随删随清**：删除单条消息或整个会话时，对应图片文件一并清理。
+- **协议覆盖**：OpenAI 兼容 chat / Anthropic messages / OpenAI responses 三种图片块格式都已适配。
+- **生效面**：统一助手（工作台 / 右栏 / AI 对话页）。
+
+### AI 教学 · 结课
+
+- **随时结课**：选择页预览新增「提前结课…」；知识点与章末复习全部完成时改为「结课…」，课程条目尾部显示安静的「可结课」。结课不要求进度满格。
+- **已结课分组**：结课后课程移到列表末尾的「已结课」分组（可折叠，按结课时间倒序），条目改为对勾 + 灰名 + 结课日期，不再参与「继续上次」。
+- **三步流程**：确认结课 → 挑选资料 → 整理沉淀；中途退出会保留 `待整理` 暂存区，下次可从这里继续。也可以在第 1/2 步「直接结课」。
+- **结课报告**：写入 `{工作区}/结课报告.md`，汇总学习跨度、覆盖范围、未收尾段、测验得分与错题标签、资料处置；重复结课时旧报告改名归档。预览与课程顶栏均可打开报告抽屉。
+- **只读课程**：结课后大纲 / 段 / 复习 / 素材 / 产物写入关闭，打开已学知识点或旧段为只读查看；课程助手仍可对话，并注入「已结课」口径。需要继续学习时点「重新开课」，清结课状态、保留报告与进度。
+
+### AI 教学 · 资料沉淀
+
+- **只收五类真正有用的产物**：章末复习讲义、段讲义、阶段总结、思维导图、示意图。素材原件 / 提取稿、题单、错题本不出现在候选里（题单与错题留在课程内，答题记录不断链）。
+- **先收集再整理**：勾选后复制到 `{工作区}/待整理/`（`.manifest.json` 记工作区相对路径，原件不动），第 3 步再选目标区域 / 笔记本 / 子文件夹 / 是否保留章目录，沉淀到笔记区。
+- **幂等**：沉淀清单写在 `.knowbase/modules/aiTeaching/deposits.json`，同一份课程产物重复沉淀直接跳过；需要第二份时换子文件夹。
+- **溯源**：沉淀出的 md 由知识库建页生成新 id，并写入 `aiTeachCourse` / `aiTeachSource` / `aiTeachEndedAt` 三个 frontmatter 字段；导图与示意图按文件复制，索引自动识别导图。
+- **产物计数修正**：选择页「产物」不再把 `课程.md` / `交接.md` / 素材等结构文件算进去，按上述五类 + 题单统计。
+
+### 工作台 · 番茄钟
+
+- **番茄钟改成工具标签页**：从右栏工具箱点击「番茄钟」后，和其他工具一样在中间页面条打开「番茄钟」标签，可切走再切回、可拖拽重排、可 ✕ 关闭；不再以覆盖面板出现。状态栏胶囊、右栏小控件「去评分」、今日小窗「在主窗口控制」都会直接激活这个标签。
+- 头部不再保留「← 返回」按钮（关闭走页面条 ✕）；切走或关闭标签都不影响计时，运行态仍由状态栏 / 右栏小控件回看。
+
+### 内部
+
+- 多模态：新增 `assistantChatImagesPure.ts` / `assistantChatImages.ts`（data URL 校验、落盘、历史回带、清理）与 `useComposerImages` / `ComposerImageStrip` / `ChatImageThumbs`；`ChatMessage.content` 支持多模态数组，Anthropic / Responses 适配器转换图片块，新增 `llm:visionChatCapable`。
+- 多模态契约脚本：`.AGENT/scripts/ai-harness/verify-multimodal-input.mjs`（56 项）；方案见 `docs/multimodal-input-plan.md`。
+- `workspaces.json` 增 `endedAt`（唯一结课状态位）；`CourseState.endedAt` 同步给渲染层。
+- 新增 `aiTeachingCourseSummary.ts` / `aiTeachingCourseEndPure.ts` / `aiTeachingCourseEnd.ts` / `aiTeachingCourseEndGuard.ts`；`workspaceManager.copyWorkspacePath` 负责课程内复制。
+- `phrontis-core` 的 `vaultCreatePage` 支持 `extraFrontmatter`（保留键不可覆盖）。
+- 结课守卫覆盖大纲 / 段 / 复习 / 素材 / 画像 / 要求 / 整理归档写接口，以及 `vault.write` / `vault.edit` / `vault.rename` / `vault.write-batch` 工具。
+- 契约脚本：新增 `.AGENT/scripts/ai-teaching/verify-course-end.mjs`（68 项）；`verify-picker.mjs` / `verify-course-mode.mjs` 同步新口径。
+
 ## v3.39.0（2026-11-16）
 
 > **本版一句话**：把常用提示词做成 `/` 指令，把「每次都要提醒 AI」的规矩做成提示型钩子 —— 都存仓库 `.assistant/`，跟着仓库走。

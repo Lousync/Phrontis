@@ -2892,3 +2892,29 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：新增 `.AGENT/scripts/knowledge-index/verify-ai-teach-exclude.mjs`（31 项：整棵排除 / `!` 不可取反 / 改名跟随 / 缓存对账 / 源码接线）。
 
 **验收**：双端 `tsc --noEmit` 0 错；`verify-ai-teach-exclude` 31 项、`verify-md-entry-fields`、`verify-vault-ignore` 19 项全绿；`verify-topic-ai-tools` 运行时 34 项（2 项存量为 AI 手册工具数脱节）。
+
+## 2026-11-16 · AI 教学 · 结课与资料沉淀
+
+**需求**：课程要能「结课」——任何进度都能手动结课；结课后沉到选择页末尾、条目样式变化、章节与大纲只读，但课程助手仍可对话；结课时把有用产物先收集到 `待整理`，再沉淀进笔记区指定目标。
+
+**改动点**：
+- 选择页：进行中按最近活跃倒序在前，已结课整体沉底（可折叠、按结课时间倒序、搜索时强制展开）；已结课条目改为对勾 + 灰名 + `已结课 MM-DD`；进行中课程在知识点与复习都完成时尾部显示安静的 `可结课`；`继续上次` 只认进行中课程。
+- 预览：进行中保留统计 / 进度 / 最近对话，ready 时进度块下出现 `结课` 行；已结课改为章数 / 已沉淀 / 对话数三格 + 结课报告摘要 + 资料沉淀位置 + 课程助手入口；操作条按状态切换（`提前结课…` / `结课报告` / `资料沉淀` / `重新开课`）。
+- 结课流程：模块内整页三步（确认 → 挑选资料 → 整理沉淀），底部固定操作条；只用步骤、计数、体积、路径预览、禁用态引导，不写解释性段落。完成页只保留数据与下一步动作。
+- 课程界面：已结课默认打开课程助手；左栏未学知识点禁用、复习只放行已有讲义、旧段只读打开；顶栏只留结课报告 / 重新开课，画像与会话要求入口不再渲染。
+- 报告抽屉：右侧 520px，MarkdownPreview 渲染结课报告，复用全局抽屉动效令牌。
+
+**验收**：双端 `tsc --noEmit` 0 错；`verify-course-end.mjs` 68 项、`verify-picker.mjs` 39 项、`verify-course-mode.mjs` 83 项全绿；`npm run build` 通过。
+
+## 2026-11-16 · 番茄钟改为工具标签页
+
+**现状 / 用户反馈**：升级版番茄钟（v3.24.0）从右栏工具箱或工具箱画廊点开时是一个 `absolute inset-0` 覆盖面板，不出现在页面条 —— 和其他 8 个工具「点击 = 开工具标签页、可切走 / 拖拽 / ✕ 关闭」的语义不一致，也不参与标签保活。
+
+**改动点**：
+- `src/components/workbench/toolRegistry.tsx`：`ToolHost` 增加 `pomodoro` 分支；面板根节点从覆盖层改为 `kb-theme-surface flex h-full`，头部去掉「← 返回」，移除 `tab-switched` 收起逻辑，`expanded` 不再控制显隐。
+- `src/App.tsx`：新增 `openPomodoroTab`；右栏入口不再特判，`pomodoro:activate` 事件统一监听并激活 `tool:pomodoro`；小窗 `switch-tab` 的 `tool=pomodoro` 走同一入口。
+- `src/modules/toolbox/index.tsx`、`src/components/workbench/widgets/PomoWidget.tsx`、`src/daypanel/DayPanel.tsx`：画廊 / 状态栏 / 右栏控件「去评分」/ 今日小窗「在主窗口控制」全部改为打开番茄钟标签页。
+- 帮助文档 `resources/help/番茄钟.md` 同步入口与后台运行口径；`docs/pomodoro-upgrade-plan.md` 更新入口说明。
+- 契约：`verify-workbench-shell.mjs` D2b / D2b2 / D2b3 改为「ToolHost 有 pomodoro 分支 + App 无覆盖层挂载 + 入口统一事件」。
+
+**验收**：双端 `tsc --noEmit` 0 错；`verify-workbench-shell` 275 项全绿；`verify-release-notes` 通过。

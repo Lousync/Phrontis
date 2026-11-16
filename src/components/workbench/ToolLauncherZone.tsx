@@ -24,7 +24,7 @@ import { useSettings } from '../../lib/SettingsContext'
  */
 
 interface Props {
-  /** 入口点击（App 层：pomodoro 特判派发全屏面板，其余开中间工具标签页） */
+  /** 入口点击（App 层：开对应工具标签页；番茄钟同样走 `tool:pomodoro` 标签） */
   onOpenTool: (toolId: string) => void
   /** 插件工具点击（App 层开插件工具标签页） */
   onOpenPluginTool: (tool: PluginTool) => void

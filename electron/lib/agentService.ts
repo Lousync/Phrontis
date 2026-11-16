@@ -10,13 +10,17 @@ import { buildAttachedRefsInjection } from './aiAssistant/refSkeleton'
 import { readVaultRefText } from './aiAssistant/refText'
 import { runPerception } from './aiAssistant/perception'
 import { buildPerceptionInjection } from './aiAssistant/perceptionBudget'
-import { invokeLlmStreamInternal } from './llmService'
+import { invokeLlmStreamInternal, visionChatCapable } from './llmService'
 import {
   classifyFailure, friendlyReason, buildInterruptNotice, buildDiagnostics, suggestedActionText,
   interruptionDetailOf, rawFailure, configInterruptionOf,
   type RawFailure, type Interruption, type InterruptionDetail,
 } from './llmFailurePure'
-import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
+import { estimateTokens, estimateContentTokens, trimHistoryByBudget } from './agentContextBudget'
+import {
+  buildHistoryWithImages, capHistoryImages, deleteChatImages, deleteSessionChatImages, saveChatImages,
+} from './assistantChatImages'
+import { textOfContent, type ChatImageInput, type ChatImageRef } from './assistantChatImagesPure'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
 import type { SessionDigest, AgentMessageRow, AgentSessionRow } from './agentSessionRepo'
@@ -133,7 +137,8 @@ function toFnName(registryName: string): string {
 
 interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string
+  /** 纯文本，或多模态 content 数组（用户图片） */
+  content?: string | unknown[]
   tool_calls?: unknown[]
   tool_call_id?: string
 }
@@ -393,6 +398,8 @@ export interface AgentChatRequest {
   sessionId: string
   /** 本轮用户消息（历史由服务端从会话库加载） */
   message: string
+  /** P2 多模态：本轮携带的图片（data URL；主进程落盘后转成消息行里的引用） */
+  images?: ChatImageInput[]
   /** 渲染层附带的当前上下文（如正在查看的知识库页面） */
   context?: AgentContextInfo
   /** 渲染层生成的调用标识——配合 agent:abort 实现停止生成 */
@@ -890,16 +897,36 @@ function buildIntelInjection(): string {
 async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: string): Promise<AgentChatResult> {
   const trace: AgentTraceStep[] = []
   const message = String(req?.message ?? '').trim()
-  if (!message) return { ok: false, error: '消息不能为空', trace }
+  const incomingImages = Array.isArray(req?.images) ? req.images : []
+  if (!message && incomingImages.length === 0) return { ok: false, error: '消息不能为空', trace }
 
   // ---- 会话保障 ----
   let sessionId = String(req.sessionId ?? '')
   if (sessionId && !sessionExists(sessionId)) sessionId = ''
   if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : req.source === 'schedule' ? 'schedule' : req.source === 'aiAssistant' ? 'aiAssistant' : req.source === 'intel' ? 'intel' : 'assistant').id
 
+  // ---- P2 多模态：图片必须先过模型能力校验，再落盘 ----
+  let savedImages: ChatImageRef[] = []
+  if (incomingImages.length > 0) {
+    const spec = String(req.modelId || getAgentSession(sessionId)?.modelId || '')
+    if (!visionChatCapable(spec)) {
+      return {
+        ok: false,
+        sessionId,
+        error: '当前模型不支持图片输入。请先在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）',
+        trace,
+      }
+    }
+    try {
+      savedImages = saveChatImages(sessionId, incomingImages)
+    } catch (e) {
+      return { ok: false, sessionId, error: `图片保存失败：${(e as Error).message}`, trace }
+    }
+  }
+
   // ---- 落库用户消息 + 自动标题 ----
-  appendAgentMessage(sessionId, 'user', message)
-  ensureSessionTitle(sessionId, message)
+  appendAgentMessage(sessionId, 'user', message, undefined, savedImages)
+  ensureSessionTitle(sessionId, message || '图片消息')
 
   // ---- N-1 手册通道：首条消息一次性分类；手册通道内出现操作意图即升格（只升不降） ----
   // 日程助手不走手册通道（req.source==='schedule' 恒走通用通道，见 runAgentLoop 的 manual 判定）
@@ -907,7 +934,10 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   // 情报助手（intel）同型：专属领域助手，恒走通用通道（v3.12.0）。
   if (req.source !== 'aiTeaching' && req.source !== 'schedule' && req.source !== 'aiAssistant' && req.source !== 'intel') {
     const row = getAgentSession(sessionId)
-    if (row && row.mode === undefined) {
+    if (incomingImages.length > 0) {
+      // 图片消息一律走通用助手：手册通道没有看图能力
+      if (row?.mode !== 'agent') setSessionMode(sessionId, 'agent')
+    } else if (row && row.mode === undefined) {
       // 三分类：manual 走手册通道；agent 与 tech（第三方/通用技术问答）都走通用助手
       const intent = await classifyManualIntent(message, req.modelId)
       setSessionMode(sessionId, intent === 'manual' ? 'manual' : 'agent')
@@ -935,7 +965,7 @@ function notifyAssistant(sessionId: string, message: string): void {
  */
 function assembleAgentHistory(sessionId: string, budgetOverride?: number): {
   digest: SessionDigest | null
-  history: { role: 'user' | 'assistant'; content: string }[]
+  history: { role: 'user' | 'assistant'; content: string; images?: ChatImageRef[] }[]
   budget: { totalTurns: number; keptTurns: number; estimatedHistoryTokens: number }
 } {
   const rowsAll = getAgentMessages(sessionId).filter(m => m.role === 'user' || m.role === 'assistant')
@@ -943,7 +973,7 @@ function assembleAgentHistory(sessionId: string, budgetOverride?: number): {
   const baseRows = digest ? (rowsAfterDigest(rowsAll, digest.upto_id) ?? rowsAll) : rowsAll
   const historyAll = baseRows
     .slice(-40)
-    .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content, images: m.images }))
   const budgetTokens = Math.floor(Number(budgetOverride ?? getSettingReader()('agentContextBudgetTokens')) || 24000)
   const budget = trimHistoryByBudget(historyAll, budgetTokens)
   return {
@@ -1580,7 +1610,7 @@ async function runAgentLoopInner(
   let perceptionInjection = ''
   if (perceptionOn && !virtualKickoff) {
     const lastUser = [...history].reverse().find((m) => m.role === 'user')
-    const pr = await runPerception(String(lastUser?.content ?? ''), {
+    const pr = await runPerception(textOfContent(lastUser?.content), {
       excludePageIds: contextRefs.map((r) => String(r?.pageId ?? '')).filter(Boolean),
     })
     if (pr && pr.items.length > 0) perceptionInjection = buildPerceptionInjection({ items: pr.items, dropped: pr.dropped })
@@ -1591,7 +1621,7 @@ async function runAgentLoopInner(
   // 统一助手：缩窄作用域时把元数据清单进首条 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）。
   // 整仓不列清单（成本高且无边界意义），只由 system 的作用域提示说明。
   const aiManifestHint = unifiedAssistant && !scopeAll
-    ? buildScopeManifest(aiScope, [...history].reverse().find((m) => m.role === 'user')?.content ?? '', false)
+    ? buildScopeManifest(aiScope, textOfContent([...history].reverse().find((m) => m.role === 'user')?.content), false)
     : ''
   // 首条 user 消息层注入（每轮变化的数据快照）：日程 / 情报各自的数据快照 + 引用骨架 / 感知素材 ——
   // 逐字会变的内容都只进这一层，不进 system（防打散 prompt cache 前缀）
@@ -1601,7 +1631,7 @@ async function runAgentLoopInner(
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
   let convo: AgentMessage[] = [
     { role: 'system', content: systemFull },
-    ...composeContextWithDigest(asm.digest?.text, history, requestInjection),
+    ...composeContextWithDigest(asm.digest?.text, buildHistoryWithImages(capHistoryImages(history)), requestInjection),
   ]
 
   // ---- 自动压缩预检（会话压缩 §6.1）：逼近触发线时先把旧轮折叠为纪要再发送 ----
@@ -1612,14 +1642,14 @@ async function runAgentLoopInner(
   const budgetSetting = budgetOf('agentContextBudgetTokens', loopBudget.contextBudgetTokens)
   // v3.1.2 条目11：支线不参与压缩——上下文 = 自己的历史 + 固化快照，压成纪要会打乱快照语义
   if (!virtualKickoff && !isSideLane && !manual && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
-    const est = estimateTokens(convo.map(m => m.content ?? '').join('\n')) + estimateTokens(JSON.stringify(toolPayload))
+    const est = convo.reduce((n, m) => n + estimateContentTokens(m.content), 0) + estimateTokens(JSON.stringify(toolPayload))
     if (est > compressAtTokens(budgetSetting, Number(getSettingReader()('agentCompressAtPercent')))) {
       const cr = await compressSession({ sessionId, modelId: llmOpts?.modelId, effort: llmOpts?.effort })
       if (cr.ok && typeof cr.covered === 'number' && cr.covered > 0) {
         compressed = { covered: cr.covered, digestChars: cr.digestChars ?? 0 }
         asm = assembleAgentHistory(sessionId)
         history = asm.history
-        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, history, requestInjection)]
+        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, buildHistoryWithImages(capHistoryImages(history)), requestInjection)]
       }
     }
   }
@@ -2333,7 +2363,11 @@ export function registerAgentHandlers(): void {
   ipcMain.handle('agent:deleteMessage', (_e, payload: { sessionId?: unknown; messageId?: unknown }) => {
     // v2 存储按会话分文件：删除需定位会话文件，渲染层随消息一并传 sessionId
     const p = (payload ?? {}) as { sessionId?: unknown; messageId?: unknown }
-    deleteMessage(String(p.sessionId ?? ''), String(p.messageId ?? ''))
+    const sid = String(p.sessionId ?? '')
+    const mid = String(p.messageId ?? '')
+    // P2：先清消息携带的图片，再删消息行
+    try { deleteChatImages(getMessageById(sid, mid)?.images) } catch { /* 图片清理失败不阻断删消息 */ }
+    deleteMessage(sid, mid)
     return true
   })
   ipcMain.handle('agent:abort', (_e, chatId: string) => {
@@ -2477,7 +2511,8 @@ export function registerAgentHandlers(): void {
     // v3.1.2 条目11：级联删除挂在该会话下的**未升格**支线（连同各自 .jsonl 消息文件）。
     // 已升格（lane='main'）的支线是用户明确要留下来的正式会话，不该跟着主线陪葬。
     // 渲染层在删除前用 agent:listSideLanes 取支线数做确认文案，确认后才调到这里。
-    for (const lane of listSideLanes(sid)) if (lane.lane === 'side') deleteAgentSession(lane.id)
+    for (const lane of listSideLanes(sid)) if (lane.lane === 'side') { deleteSessionChatImages(lane.id); deleteAgentSession(lane.id) }
+    deleteSessionChatImages(sid)
     deleteAgentSession(sid)
     return true
   })

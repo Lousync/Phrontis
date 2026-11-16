@@ -816,6 +816,20 @@ export function renameWorkspacePath(rootId: string, oldRel: string, newRel: stri
   invalidateIndexIfCurrentVault(rootId)
 }
 
+/** 复制文件（跨目录；目标已存在则拒绝，由调用方保证唯一名）。语义与 renameWorkspacePath 对齐：
+ *  登记自写 + 目标父链补建 + .md 落盘后失效索引。 */
+export function copyWorkspacePath(rootId: string, fromRel: string, toRel: string): void {
+  const from = requireInside(rootId, fromRel)
+  const to = requireInside(rootId, toRel)
+  if (!existsSync(from)) throw new Error('源文件不存在')
+  if (!statSync(from).isFile()) throw new Error('只支持复制文件')
+  if (existsSync(to)) throw new Error('目标已存在')
+  mkdirSync(dirname(to), { recursive: true })
+  markSelfWrite(to)
+  copyFileSync(from, to)
+  invalidateIndexIfCurrentVault(rootId)
+}
+
 /** 移入系统回收站（绝不 rm；ws:trash 与 AI vault.trash 共用同一语义） */
 export async function trashWorkspacePath(rootId: string, relPath: string): Promise<void> {
   const abs = requireInside(rootId, relPath)

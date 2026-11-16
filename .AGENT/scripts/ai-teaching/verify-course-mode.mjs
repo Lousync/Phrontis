@@ -121,7 +121,7 @@ console.log('\n=== 6. 工具 / 数据 ===')
 for (const name of ['course.sources.register', 'course.sources.assign', 'course.sources.extract']) {
   check(`工具已注册：${name}`, tools.includes(`name: '${name}'`))
 }
-check('builtin.tool.request 清单含三个新工具', tools.includes('course.sources.register / course.sources.assign / course.sources.extract'))
+check('builtin.tool.request 走 builtin.tool.list 查注册名', tools.includes("name: 'builtin.tool.request'") && /先调 builtin\.tool\.list/.test(tools))
 check('course.outline.write 描述改为全量', tools.includes('一次给全量章→知识点'))
 check('progress 归一化 v1→v2 导出', pure.includes('export function normalizeProgressFile'))
 check('课程.md 章 ID 可选解析 + 重写', pure.includes('[A-Za-z0-9_-]') && pure.includes('## [${cid}]'))

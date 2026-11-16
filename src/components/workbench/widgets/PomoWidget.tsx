@@ -13,6 +13,10 @@ const RING_STROKE = 8
 const RING_R = (RING_SIZE - RING_STROKE) / 2
 const RING_CIRC = 2 * Math.PI * RING_R
 
+/** 打开番茄钟工具标签页：与状态栏 / 工具箱画廊同一事件，由 App 监听后激活 `tool:pomodoro`。
+ *  （2026-11-16 起番茄钟是普通工具标签页，不再是覆盖面板，控件侧不能直接改 local expanded。） */
+const openPomodoroTab = () => window.dispatchEvent(new CustomEvent('pomodoro:activate'))
+
 /**
  * 番茄钟控件（v3.4.0 批次4：DayPanel「番茄」Tab 迁入 widgets，方案 §3.7）。
  * **右栏简略视图与脱离小窗共用**（不复制渲染）。
@@ -92,14 +96,14 @@ export function PomoWidget({ frameless = false }: PomoWidgetProps) {
     if (mode === 'idle') {
       const topic = draftTopic.trim()
       if (!topic) {
-        pom.expand()
+        openPomodoroTab()
         showToast({ type: 'warning', message: '先在面板里填写这次专注的主题' })
         return
       }
       pom.startTimer(topic)
       return
     }
-    if (mode === 'rating') { pom.expand(); return }
+    if (mode === 'rating') { openPomodoroTab(); return }
     if (mode === 'breakReady') { pom.startBreak(); return }
     if (mode === 'breakRunning') { pom.skipBreak(); return }
     if (mode === 'breakDone') {

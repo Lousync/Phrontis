@@ -22,6 +22,8 @@ interface Props {
   activeSegment: AiTeachLessonInfo | null
   onOpenFile: (rel: string) => void
   onReloadCourse: () => void
+  /** 已结课：素材登记 / 分配 / 提取 / 删除入口不渲染 */
+  readOnly?: boolean
 }
 
 const MODE_LABEL: Record<string, string> = { exact: '精确', narrow: '缩窄', fallback: '整章' }
@@ -31,7 +33,7 @@ function statusText(s: AiTeachSource['status']): string {
 }
 
 export function CourseSources(props: Props) {
-  const { wsId, outline, activeChapterId, activeSegment, onOpenFile, onReloadCourse } = props
+  const { wsId, outline, activeChapterId, activeSegment, onOpenFile, onReloadCourse, readOnly = false } = props
   const [payload, setPayload] = useState<AiTeachSourcesPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [regOpen, setRegOpen] = useState(false)
@@ -221,6 +223,8 @@ export function CourseSources(props: Props) {
         <div className="mt-1 pl-4 flex items-center gap-1.5 text-[10px]">
           {opts.seg ? (
             <span className="text-[var(--text-muted)]">本段确认</span>
+          ) : readOnly ? (
+            <span className="text-[var(--text-muted)]">{opts.assigned ? '已分配本章' : '未分配'}</span>
           ) : opts.assigned ? (
             <button onClick={() => void unassign(src.id)} disabled={busy} className="text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors">取消分配</button>
           ) : chapterId ? (
@@ -228,17 +232,17 @@ export function CourseSources(props: Props) {
           ) : (
             <span className="text-[var(--text-muted)]">大纲生成后分配</span>
           )}
-          {(src.type === 'pdf' || src.type === 'pptx' || src.type === 'docx' || src.type === 'code') && (
+          {!readOnly && (src.type === 'pdf' || src.type === 'pptx' || src.type === 'docx' || src.type === 'code') && (
             <button onClick={() => beginExtract(src)} disabled={busy} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">提取</button>
           )}
-          {!opts.seg && (
+          {!readOnly && !opts.seg && (
             <button onClick={() => void removeSource(src.id)} disabled={busy} data-tip={confirmRemove === src.id ? '再点一次确认删除登记（原文件不删）' : '删除素材登记'} aria-label={confirmRemove === src.id ? '再点一次确认删除登记（原文件不删）' : '删除素材登记'}
               className={`ml-auto transition-colors ${confirmRemove === src.id ? 'text-[var(--danger)]' : 'text-[var(--text-muted)] hover:text-[var(--danger)]'}`}>
               {busy ? <Loader2 size={10} className="animate-spin" /> : confirmRemove === src.id ? <span className="text-[9px]">确认删除</span> : <Trash2 size={10} />}
             </button>
           )}
         </div>
-        {extractFor?.sourceId === src.id && (
+        {!readOnly && extractFor?.sourceId === src.id && (
           <div className="mt-1.5 pl-4 flex items-center gap-1 text-[10px]">
             <span className="text-[var(--text-muted)]">{src.type === 'code' ? '行' : '页'}</span>
             <input value={extractFor.from} onChange={(e) => setExtractFor({ ...extractFor, from: e.target.value.replace(/\D/g, '') })}
@@ -269,12 +273,14 @@ export function CourseSources(props: Props) {
         <button onClick={() => void reload()} data-tip="刷新素材" aria-label="刷新素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
         </button>
-        <button onClick={() => setRegOpen((v) => !v)} data-tip="登记素材" aria-label="登记素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors">
-          <Plus size={12} />
-        </button>
+        {!readOnly && (
+          <button onClick={() => setRegOpen((v) => !v)} data-tip="登记素材" aria-label="登记素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors">
+            <Plus size={12} />
+          </button>
+        )}
       </div>
 
-      {regOpen && (
+      {!readOnly && regOpen && (
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 flex flex-col gap-1.5">
           <div className="flex items-center gap-1">
             <input value={regPath} onChange={(e) => setRegPath(e.target.value)} placeholder="文件 / 目录 / https://…"

@@ -6,6 +6,7 @@ import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, root
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel, getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import { getSessionUnitFolderRel, unitFolderRel } from './aiTeachingCourse'
+import { assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import { sourceKeyFromUnitRel } from './aiTeachingLayoutPure'
 import { normalizeSourceTarget, registerAiTeachingScopeHandlers, type AiTeachSourceTarget } from './aiTeachingScope'
 import { uniqueFileName, uniqueVersionedName } from './workspaceManager'
@@ -698,6 +699,7 @@ export function writeVisual(
   sessionId: string, slug: string, html: string,
   getSetting: (key: string) => unknown,
 ): { ok: boolean; relPath?: string; lines?: number; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   try {
     const s = String(slug ?? '').trim()
     if (!/^[a-z0-9](?:[a-z0-9._-]{0,60}[a-z0-9])?$/.test(s) || s.includes('..')) {
@@ -735,6 +737,7 @@ export function writeMindmap(
   sessionId: string, slug: string, jsonText: string,
   getSetting: (key: string) => unknown,
 ): { ok: boolean; relPath?: string; nodes?: number; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   try {
     const s = String(slug ?? '').trim()
     if (!/^[a-z0-9](?:[a-z0-9._-]{0,60}[a-z0-9])?$/.test(s) || s.includes('..')) {
@@ -781,6 +784,7 @@ export function writeImage(
   sessionId: string, slug: string, bytes: Buffer,
   getSetting: (key: string) => unknown,
 ): { ok: boolean; relPath?: string; bytes?: number; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   try {
     const s = String(slug ?? '').trim() || 'image'
     if (!/^[a-z0-9](?:[a-z0-9._-]{0,60}[a-z0-9])?$/.test(s) || s.includes('..')) {

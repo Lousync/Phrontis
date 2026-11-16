@@ -3,18 +3,19 @@ import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
-  RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2, ListChecks,
+  RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2, ListChecks, ImagePlus,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
 import { AiMascotAnchor } from '../AiMascot/AiMascotAnchor'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { useInputShell } from './inputShells'
-import { getKnowledgePages, llmListProviders, getSemanticStatus, workspaceGetCurrent } from '../../../lib/ipc'
+import { getKnowledgePages, llmListProviders, getSemanticStatus, workspaceGetCurrent, llmVisionChatCapable } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
 import { AssistantEntryButton } from './AssistantEntry'
+import { ComposerImageStrip } from './ComposerImageStrip'
 import { AiChatSidebar } from './AiChatSidebar'
 import { SessionRunMark } from './SessionRunMark'
 import { SessionPinButton } from './SessionPinButton'
@@ -121,6 +122,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     sessions, providersOk, activeId, messages, windowStart, loadEarlier, reveal, input, setInput, inputRef, pending,
     liveSteps, draft, lastChanges, lastRun, undoRun, compressing, pickedSkill, setPickedSkill,
     slashSkills, slashCommands, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
+    composerImages,
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
     send, newSession, loadSession, removeSession, togglePin, regenerate, resume, resumeInfo, editSubmit, deleteMessage,
     abort, dismissChanges, runStateOf,
@@ -165,6 +167,23 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   const inputCardRef = useRef<HTMLDivElement | null>(null)
   const [scopeRootId, setScopeRootId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  /** P2 多模态：当前模型是否可用于图片（null = 检测中；false = 已确认不支持） */
+  const [visionOk, setVisionOk] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    llmVisionChatCapable(modelId || '')
+      .then((v) => { if (alive) setVisionOk(v === true) })
+      .catch(() => { if (alive) setVisionOk(false) })
+    return () => { alive = false }
+  }, [modelId])
+  const imageBlocked = composerImages.hasImages && visionOk === false
+  const trySend = () => {
+    if (imageBlocked) {
+      showToast({ type: 'info', message: '当前模型不支持图片输入', detail: '请先在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）' })
+      return
+    }
+    void send()
+  }
   useEffect(() => {
     if (pop !== 'scope' || scopeRootId) return
     workspaceGetCurrent().then(v => setScopeRootId(v?.rootId ?? null)).catch(() => setScopeRootId(null))
@@ -562,8 +581,20 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
             {/* 输入区（宿主插槽 + 上下文徽章 + 附件 chips + 工具行 📎/模型/消耗 + 发送）。
                 输入卡 = 无边框浅底大圆角（参考主流 AI 输入框：底色分层替代描边，聚焦时加深） */}
             <div className={`shrink-0 mx-auto ${INPUT_WRAP[variant]} pb-2.5 pt-2`}>
-              <div ref={inputCardRef} className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}`}>
+              <div
+                ref={inputCardRef}
+                className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}`}
+                onDragOver={composerImages.onDragOver}
+                onDragLeave={composerImages.onDragLeave}
+                onDrop={composerImages.onDrop}
+              >
                 <AiMascotAnchor />
+                {composerImages.dragging && (
+                  <div data-wb="composerDropHint"
+                    className="absolute inset-0 z-20 grid place-items-center rounded-[inherit] border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,rgba(10,14,20,.86))] text-[12px] text-[var(--text-primary)]">
+                    松手添加图片
+                  </div>
+                )}
                 {/* 弱提示升格（B-12 四次拍板 2026-09-22，方案 A）：暖色提示条，与悬浮侧栏同款
                     —— 琥珀底 + 警告图标 + 「去配置」直达；只描述当前状态，不阻断、无「知道了」记忆（H5）。
                     色板走主题 token `--warning` / `--warning-bg`，勿写死色值 */}
@@ -620,6 +651,15 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </div>
                 )}
 
+                {!scheduleMode && <ComposerImageStrip images={composerImages.images} onRemove={composerImages.removeImage} disabled={pending} />}
+                {imageBlocked && (
+                  <div data-wb="imageModelWarn" className="mb-1.5 flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px]"
+                    style={{ borderColor: 'color-mix(in srgb, var(--warning) 35%, transparent)', background: 'var(--warning-bg)', color: 'var(--warning)' }}>
+                    <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                    <span className="min-w-0">当前模型不支持图片输入。请在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）。</span>
+                  </div>
+                )}
+
                 {compressing && (
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
                     <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
@@ -668,8 +708,9 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       if (onAtKeys(e)) return
                       onSlashKeys(e)
                       // 中文输入法选词回车同样会派发 Enter：组合态必须放行给 IME（v3.16.1 F-2）
-                      if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
+                      if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); trySend() }
                     }}
+                    onPaste={composerImages.onPaste}
                     onKeyUp={e => {
                       // 方向键移动光标后重算 @ 检索词（↑↓ 被浮层拦下时不会走到这里）
                       if (atPosRef.current !== null) syncAtQuery(e.currentTarget.value, e.currentTarget.selectionStart)
@@ -693,7 +734,26 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     工作台侧栏可拖窄，variant 驱动的 isNarrow 感知不到，2026-10-25 反馈按钮被截。
                     套路与 WorkbenchLeftPanel 顶栏 @max-[170px] 一致 */}
                 <div className="relative flex items-center gap-0.5 mt-1 @container">
+                  <input
+                    ref={composerImages.fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    multiple
+                    className="hidden"
+                    onChange={composerImages.onFileInputChange}
+                  />
                   {inputBarLeft}
+                  {surface === 'assistant' && (
+                    <button
+                      onClick={composerImages.openPicker}
+                      disabled={pending || composerImages.images.length >= 4}
+                      data-tip="添加图片（也可直接粘贴 / 拖入）" aria-label="添加图片"
+                      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                    >
+                      <ImagePlus size={12} />
+                      {!isNarrow && <span className="leading-none">图片</span>}
+                    </button>
+                  )}
                   {variant !== 'sidebar' && !scheduleMode && (
                     <PerceptionToggle on={perceptionOn} onToggle={togglePerception} />
                   )}
@@ -767,7 +827,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
                     </button>
                   ) : (
-                    <button onClick={() => { void send() }} disabled={compressing || !input.trim()} data-tip="发送" aria-label="发送"
+                    <button onClick={trySend} disabled={compressing || imageBlocked || (!input.trim() && !composerImages.hasImages)} data-tip={imageBlocked ? '当前模型不支持图片' : '发送'} aria-label={imageBlocked ? '当前模型不支持图片' : '发送'}
                       className="h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity">
                       <ArrowUp size={14} />
                     </button>
@@ -791,7 +851,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                         data-tip="收起" aria-label="收起"
                       ><X size={12} /></button>
                     </div>
-                    <div className="min-h-0 flex-1">
+                    {/* 必须是 flex 列容器：ScopePane 根节点用 `flex-1` 撑高内部滚动区，
+                        淡淡一层块级 div 会让 `flex-1` 变死属性 → 树按内容撑开、被浮层
+                        `overflow-hidden` 从底部裁掉，表象是「列表滚不动」（铁律 11）。 */}
+                    <div className="flex min-h-0 flex-1 flex-col">
                       <ScopePane
                         rootId={scopeRootId}
                         scope={scope}

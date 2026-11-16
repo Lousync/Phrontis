@@ -95,6 +95,8 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
 
   const handleActivateTool = (toolId: string) => {
     if (toolId === 'pomodoro') {
+      // 番茄钟与其余工具一样开工具标签页：本模块拿不到 App 的 activeToolTab，
+      // 派发全局事件由 App 监听后激活 `tool:pomodoro`（2026-11-16 起不再是覆盖面板）。
       window.dispatchEvent(new CustomEvent('pomodoro:activate'))
       return
     }
@@ -102,7 +104,7 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
   }
 
   // 回主页信号（2026-09-10）：值变化即退出当前工具/插件工具回到画廊。
-  // 退出前若有工具在运行（如番茄钟面板由全局状态管理）不受影响，仅收起全屏工具视图
+  // 退出前若有工具在运行（计时状态由全局 PomodoroProvider 管理）不受影响，仅收起全屏工具视图
   useEffect(() => {
     if (!homeSignal) return
     setActiveTool(null)

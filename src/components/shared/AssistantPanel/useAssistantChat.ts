@@ -16,13 +16,14 @@ import {
 } from '../../../lib/ipc'
 // 新建会话走包装层：会话随仓库走，无仓库时要给提示而不是静默失败
 import { newAgentSession } from '../../../lib/agentSession'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource, ResumeInfo, AiChangePlan, RunJournalSummary } from '../../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource, ResumeInfo, AiChangePlan, RunJournalSummary, AgentImageRef } from '../../../types'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import {
   MAX_PARALLEL, subscribeAssistantRunState, getRunBucket, isSessionRunning, runningSessionCount,
   runMarkOf, beginRun, endRun, markSessionViewed, unmarkSessionViewed, takeEndedFor,
 } from '../../../lib/assistantRunStore'
 import { initialWindowStart, earlierWindowStart, revealWindowStart } from './messageWindow'
+import { useComposerImages, type ComposerImage } from '../../../lib/useComposerImages'
 import type { UiMessage } from './MessageList'
 
 /**
@@ -100,6 +101,8 @@ export interface AssistantChatController {
   slashSkills: SkillInfo[]
   /** P2：仓库自定义指令（.assistant/commands），供 `/` 弹层使用 */
   slashCommands: AssistantCommandInfo[]
+  /** P2 多模态：输入区图片（粘贴 / 拖入 / 选文件） */
+  composerImages: ReturnType<typeof useComposerImages>
   editing: { id: string; draft: string } | null
   setEditing: Dispatch<SetStateAction<{ id: string; draft: string } | null>>
   copiedIdx: number | null
@@ -212,6 +215,7 @@ function toUi(m: AgentStoredMessage): UiMessage {
     id: m.id,
     role: m.role,
     content: m.content,
+    ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
     createdAt: m.createdAt,
     trace: m.traceJson ? (() => { try { return JSON.parse(m.traceJson) as AgentTraceStep[] } catch { return undefined } })() : undefined,
   }
@@ -301,6 +305,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   // / 弹层（指令 + 已装 Skill）与 Skill 显式调用 chip、压缩进行时占位
   const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
   const [slashCommands, setSlashCommands] = useState<AssistantCommandInfo[]>([])
+  /** P2 多模态：输入区图片状态（与 AI 教学共用同一套 hook） */
+  const composerImages = useComposerImages()
   const [pickedSkill, setPickedSkill] = useState<SkillInfo | null>(null)
   const [compressing, setCompressing] = useState(false)
   /** 同值的 ref：Enter 连按两下时第二次可能拿到旧闭包（state 尚未重渲染），闸门必须同步生效 */
@@ -845,12 +851,14 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
 
   const send = useCallback(async (override?: string) => {
     const raw = (override ?? input).trim()
+    /** P2 多模态：本次随消息发送的图片（发送后清空；失败也不留着误发下一轮） */
+    const outgoingImages: ComposerImage[] = composerImages.images.slice()
     /** 本次发送属于哪个会话：斜杠指令 / await 期间切会话时按它清草稿，不误清当前视图 */
     const draftSid = activeIdRef.current
     // 宿主预处理（悬浮版：划词引用块并入正文并清空——body 为空但仍有引用时返回纯引用正文；
     // 其他宿主原样返回 raw）。返回空串 = 无可发送内容，取消本次发送
     const body = options.prepareBody ? options.prepareBody(raw) : raw
-    if (!body) return
+    if (!body && outgoingImages.length === 0) return
     // 压缩期间禁止发送（v3.16.1 F-2）：闸门下沉到这里，按钮禁用只是第一道；
     // 三宿主（右栏 / 工作台 / AI 教学）的 Enter 都必须被同一处挡住，否则普通文字会真的并发发出。
     if (compressingRef.current) {
@@ -869,7 +877,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       return
     }
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（置于 pending 检查后，避免生成中并发压缩）
-    if (body.startsWith('/')) {
+    // 带图片时不走指令通道（图片只能是普通对话消息）
+    if (!outgoingImages.length && body.startsWith('/')) {
       if (await handleChatCommand(body, {
         sessionId: draftSid ?? '',
         surface: options.surfaceOf ? options.surfaceOf() : 'assistant',
@@ -910,7 +919,17 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       }
     }
     const outgoingCtx = unifiedContextOf(finalCtx)
-    setMessages(prev => [...prev, { role: 'user', content: body, createdAt: nowLocal() }])
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: body,
+      createdAt: nowLocal(),
+      ...(outgoingImages.length > 0 ? {
+        images: outgoingImages.map((im): AgentImageRef => ({
+          relPath: '', mime: im.mime, name: im.name, w: im.w, h: im.h, bytes: im.bytes, dataUrl: im.dataUrl,
+        })),
+      } : {}),
+    }])
+    composerImages.clearImages()
     clearInputFor(sid)
     beginRun(sid)
     setLastChanges(null)
@@ -920,7 +939,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       // Skill chip 随消息一次性消费，发出即清
       const sk = pickedSkill
       setPickedSkill(null)
-      const r = await agentChat(sid, body, outgoingCtx, cid, sessionSource, modelId || undefined, effort, sk?.registryName)
+      const r = await agentChat(sid, body, outgoingCtx, cid, sessionSource, modelId || undefined, effort, sk?.registryName,
+        outgoingImages.length > 0 ? outgoingImages.map(im => ({ name: im.name, mime: im.mime, dataUrl: im.dataUrl, w: im.w, h: im.h, bytes: im.bytes })) : undefined)
       // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
       if (r.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要` })
       // 用户在等待期间切换了会话：回复已落库，但不注入当前视图
@@ -952,7 +972,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       void refreshPlan()
       void refreshUsage()
     }
-  }, [input, clearInputFor, pickedSkill, flushScope, refreshMessages, refreshSessions, refreshPlan, refreshUsage, options, attachedFiles, modelId, effort, contextRemoved, resolveCtx, sessionSource, unified, scopeAll, scope, writeMode, unifiedContextOf, newSession, pathInScope])
+  }, [input, clearInputFor, pickedSkill, flushScope, refreshMessages, refreshSessions, refreshPlan, refreshUsage, options, attachedFiles, modelId, effort, contextRemoved, resolveCtx, sessionSource, unified, scopeAll, scope, writeMode, unifiedContextOf, newSession, pathInScope, composerImages.images, composerImages.clearImages])
   sendRef.current = send
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
@@ -1204,6 +1224,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setPickedSkill,
     slashSkills,
     slashCommands,
+    composerImages,
     editing,
     setEditing,
     copiedIdx,

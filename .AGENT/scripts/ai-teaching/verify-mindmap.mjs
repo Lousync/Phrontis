@@ -125,7 +125,10 @@ check('writeMindmap 复用 parseMindmap（单一判据）', srcSources.includes(
 const srcTools = read('electron/lib/builtinTools.ts')
 check("注册了 mindmap 工具", /name: 'mindmap'/.test(srcTools))
 check('mindmap 工具 tier=ondemand', /name: 'mindmap'[\s\S]{0,2000}tier: 'ondemand'/.test(srcTools))
-check('tool.request 清单含 mindmap', /terminal\.exec \/ mindmap/.test(srcTools))
+// 2026-11-16：`builtin.tool.request` 的 description 不再罗列工具清单（铁律 16：schema 就是每轮成本），
+// 改为「先用 builtin.tool.list 查注册名」——断言守住这条口径，而不是守某个工具名出现。
+check('tool.request 指向 builtin.tool.list 查注册名（不再罗列工具清单）',
+  /name: 'builtin\.tool\.request'[\s\S]{0,400}builtin\.tool\.list/.test(srcTools))
 const srcLoop = read('electron/lib/agentLoopPolicy.ts')
 check('agentLoopPolicy 串行名单含 mindmap', srcLoop.includes("!== 'mindmap'"))
 const srcCC = read('src/lib/chatCommands.ts')
@@ -194,7 +197,10 @@ const fresh = () => { const d = clone(SAMPLE); assignIds(d.root); return d }
 console.log('\n=== 7. 双链接入（导图可被关联跳转） ===')
 const srcIdx = read('../phrontis-core/src/kbStore/knowledgeIndex.ts')
 check('索引读导图 JSON title + 标 isMindmap', srcIdx.includes('parseMindmap') && srcIdx.includes('isMindmap'))
-check('索引 schema 已 bump 到 7', /KNOWLEDGE_INDEX_SCHEMA_VERSION = 7/.test(srcIdx))
+// 2026-11-16：schema 版本会随其他索引字段继续抬（当时已到 9）；断言守「≥7 且含导图」，
+// 避免每次无关索引升级都要改这条。
+const idxVer = Number((/KNOWLEDGE_INDEX_SCHEMA_VERSION = (\d+)/.exec(srcIdx) ?? [])[1] ?? 0)
+check('索引 schema ≥ 7（导图字段引入版本）', idxVer >= 7, `实际 ${idxVer}`)
 const srcGraph = read('../phrontis-core/src/kbStore/graphIndex.ts')
 check('图谱 graphPages 含 isMindmap（导图进图）', /entryKind !== 'file' \|\| e\.isMindmap/.test(srcGraph))
 check('mindmap 工具 ref 说明允许导图 .json', srcTools.includes('另一张思维导图'))

@@ -13,9 +13,11 @@ interface Props {
   activeSegmentSid: string | null
   onOpenSegment: (sessionId: string) => void
   onOpenReview: (chapterId: string) => void
+  /** 已结课：只放行已有讲义的复习行 */
+  readOnly?: boolean
 }
 
-export function CourseProgress({ outline, progress, lessons, reviews, activeSegmentSid, onOpenSegment, onOpenReview }: Props) {
+export function CourseProgress({ outline, progress, lessons, reviews, activeSegmentSid, onOpenSegment, onOpenReview, readOnly = false }: Props) {
   const chapters = outline?.chapters ?? []
   if (!chapters.length) {
     return <div className="px-3 py-3 text-[11px] text-[var(--text-muted)]">还没有课程大纲。</div>
@@ -57,8 +59,9 @@ export function CourseProgress({ outline, progress, lessons, reviews, activeSegm
                 )
               })}
               <button
-                onClick={() => onOpenReview(ch.id)}
-                className={`w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] ${st.state === 'locked' ? 'opacity-70' : ''}`}
+                onClick={() => { if (!(readOnly && st.state !== 'done')) onOpenReview(ch.id) }}
+                disabled={readOnly && st.state !== 'done'}
+                className={`w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-left transition-colors hover:bg-[var(--bg-hover)] disabled:hover:bg-transparent disabled:cursor-not-allowed ${st.state === 'locked' ? 'opacity-70' : ''}`}
               >
                 {st.state === 'done' ? <Check size={10} className="shrink-0 text-[var(--success)]" /> : st.state === 'unlocked' ? <Sparkles size={10} className="shrink-0 text-[var(--accent)]" /> : <Lock size={10} className="shrink-0 text-[var(--text-muted)]" />}
                 <span className={`min-w-0 flex-1 truncate text-[11px] ${st.state === 'unlocked' ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>章末复习</span>

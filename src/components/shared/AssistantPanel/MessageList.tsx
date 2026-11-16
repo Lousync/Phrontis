@@ -9,6 +9,8 @@ import { ImageCard, imageGroupsOf } from './ImageCard'
 import { PlanTodoCard, latestTodoOf } from './PlanTodoCard'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import type { AgentTraceStep, ResumeInfo } from '../../../types'
+import type { AgentImageRef } from '../../../types'
+import { ChatImageThumbs } from './ChatImageThumbs'
 import { toolActionLabel } from '../../../lib/toolLabels'
 
 /**
@@ -22,6 +24,8 @@ export interface UiMessage {
   id?: string
   role: 'user' | 'assistant'
   content: string
+  /** P2 多模态：用户消息图片（乐观消息带 dataUrl；落库消息带 relPath） */
+  images?: AgentImageRef[]
   trace?: AgentTraceStep[]
   createdAt?: string
 }
@@ -347,8 +351,13 @@ export function MessageList({
                两面完全一致。**字号不跟 AI 教学抬到 13px** —— 这一面整条排版尺度低一档
                （正文 12px / 消息间距 8px），单独把用户气泡抬成最大字反而更不协调。 */
             <div className="flex justify-end">
-              <div className="max-w-[86%] min-w-0 select-text bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3 py-2 text-[12px] leading-relaxed break-words whitespace-pre-wrap">
-                {m.content}
+              <div className="max-w-[86%] min-w-0 select-text">
+                <ChatImageThumbs images={m.images} />
+                {m.content && (
+                  <div className="bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3 py-2 text-[12px] leading-relaxed break-words whitespace-pre-wrap">
+                    {m.content}
+                  </div>
+                )}
               </div>
             </div>
           )}

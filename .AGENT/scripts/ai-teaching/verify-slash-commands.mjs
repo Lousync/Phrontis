@@ -41,7 +41,8 @@ check('AgentChatRequest 含 skillName（main 层入参）', svc.includes('skillN
 check('agentChat → runAgentLoop 透传 skillName', svc.includes('skillName: req.skillName'))
 check('runAgentLoop llmOpts 含 skillName', /llmOpts\?: \{[^}]*skillName\?: string/.test(svc))
 check('preload agentChat 类型含 skillName', pre.includes("skillName?: string }) => ipcRenderer.invoke('agent:chat'"))
-check('ElectronAPI.agentChat 类型含 skillName', types.includes("effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string }) => Promise<AgentChatResult>"))
+// 2026-11-16（P2 多模态）：agentChat 末尾追加 images 参数，断言改为「skillName 之后允许追加可选参数」
+check('ElectronAPI.agentChat 类型含 skillName', /skillName\?: string;( images\?: AgentImageInput\[\])? \}\) => Promise<AgentChatResult>/.test(types))
 check('渲染层 ipc agentChat 追加 skillName 参数', ipc.includes('effort?: \'off\' | \'low\' | \'medium\' | \'high\', skillName?: string'))
 
 console.log('\n[agentService 显式注入]')
@@ -73,8 +74,9 @@ console.log('\n[AssistantPanel 接线（assistant + aiLearn 两 surface 共用�
 check('slashQuery 派生：/ 开头且无空白才弹', /slashQuery = input\.startsWith\('\/'\) && !\/\[\\s\\n\]\//.test(chatBody))
 check('Esc 局部拦截 stopPropagation', /onSlashKeys[\s\S]*?e\.key === 'Escape'[\s\S]*?e\.stopPropagation\(\)/.test(chatBody))
 check('Skill chip 一次性消费：send 内发出即清', /const sk = pickedSkill[\s\S]*?setPickedSkill\(null\)[\s\S]*?sk\?\.registryName/.test(chatHook))
-check('handleChatCommand 接线 onProgress → setCompressing', chatHook.includes('onProgress: p => setCompressing(p.active)'))
-check('发送键禁用条件含 compressing（pending 改由「停止键」分支接管，见 ai-reply-loading-plan §3.3）', chatBody.includes('disabled={compressing || !input.trim()}'))
+check('handleChatCommand 接线 onProgress → setCompressing', /onProgress: p => \{ compressingRef\.current = p\.active; setCompressing\(p\.active\) \}/.test(chatHook))
+// 2026-11-16（P2 多模态）：只发图片不带文字也要能发；`imageBlocked` = 当前模型不支持图片时禁用
+check('发送键禁用条件含 compressing / 空内容 / 模型不支持图片（pending 改由「停止键」分支接管，见 ai-reply-loading-plan §3.3）', chatBody.includes('disabled={compressing || imageBlocked || (!input.trim() && !composerImages.hasImages)}'))
 check('send 依赖数组补 pickedSkill', /\}, \[[^\]]*pickedSkill[^\]]*\]\)/.test(chatHook))
 check('面板打开时刷新 Skill 列表', chatHook.includes('aiToolsListSkills().then(r => setSlashSkills(r.skills))'))
 check('compressing 占位条渲染', chatBody.includes('正在压缩对话历史'))
@@ -89,9 +91,12 @@ check('放行判定查表（passthroughCommandsForSurface）', t.includes('passt
 check('未知指令提示同时列放行指令（敲错名字时找得到）', /passthroughCommandsForSurface\(surface\)\.map/.test(t))
 check('弹层候选由 PASSTHROUGH_COMMANDS 生成（不再各面手抄）', menu.includes('passthroughCommandsForSurface(surface)'))
 check('教学模块不再另写一份指令清单（MINDMAP_SLASH_ITEM 已删）', !teach.includes('MINDMAP_SLASH_ITEM'))
-check('两个面的 buildSlashItems 均不传私有 extra（全部走表）',
-  /buildSlashItems\(slashSkills, \[MINDMAP_SLASH_ITEM\]/.test(teach) === false
-  && /buildSlashItems\(scheduleMode \? \[\] : slashSkills, \[\], surface\)/.test(chatBody))
+// 2026-11-16（P2 自定义 / 指令）：assistant 面多传一个 slashCommands 数组（仓库 .assistant/commands），
+// aiTeaching 面仍不传 —— 「不传私有 extra」的含义是「不手抄指令清单」，不是「参数个数固定」。
+check('两个面都不手抄指令清单（全部走表 + 仓库自定义指令）',
+  /buildSlashItems\(slashSkills, \[\], 'aiTeaching'\)/.test(teach)
+  && !/MINDMAP_SLASH_ITEM/.test(teach)
+  && /buildSlashItems\(\s*scheduleMode \? \[\] : slashSkills,\s*\[\],\s*surface,\s*surface === 'assistant' \? slashCommands : \[\],?\s*\)/.test(chatBody))
 
 console.log('\n[红线]')
 check('ai-teaching 全局 Esc 浮层链未改动（TDZ 敏感区）', teach.includes("if (askVisible && askPending) { setAskDismissed(askPending.id); return }") || teach.includes('askCollapsed'))

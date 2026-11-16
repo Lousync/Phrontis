@@ -78,7 +78,8 @@ export interface ProviderConfig {
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content?: string
+  /** 纯文本，或 OpenAI 多模态 content 数组（text / image_url） */
+  content?: string | unknown[]
   tool_calls?: unknown[]
   tool_call_id?: string
 }
@@ -881,8 +882,24 @@ function buildAnthropicBody(req: ChatRequest, stream: boolean): Record<string, u
     else turns.push({ role, content: [block] })
   }
   for (const m of req.messages) {
-    if (m.role === 'system') { systemParts.push(m.content ?? ''); continue }
-    if (m.role === 'user') { pushTurn('user', { type: 'text', text: m.content ?? '' }); continue }
+    if (m.role === 'system') { systemParts.push(String(m.content ?? '')); continue }
+    if (m.role === 'user') {
+      if (Array.isArray(m.content)) {
+        for (const raw of m.content) {
+          const part = raw as Record<string, unknown>
+          if (part?.type === 'text') {
+            pushTurn('user', { type: 'text', text: String(part.text ?? '') })
+          } else if (part?.type === 'image_url') {
+            const url = String((part.image_url as Record<string, unknown> | undefined)?.url ?? '')
+            const m2 = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(url)
+            if (m2) pushTurn('user', { type: 'image', source: { type: 'base64', media_type: m2[1], data: m2[2] } })
+          }
+        }
+      } else {
+        pushTurn('user', { type: 'text', text: m.content ?? '' })
+      }
+      continue
+    }
     if (m.role === 'tool') {
       pushTurn('user', { type: 'tool_result', tool_use_id: m.tool_call_id ?? '', content: m.content ?? '' })
       continue
@@ -1888,6 +1905,9 @@ export function registerLlmHandlers(deps: {
 
   ipcMain.handle('llm:visionCapable', (_e, model: string) => VISION_MODEL_RE.test(String(model ?? '')))
 
+  // P2 多模态：当前模型是否可用于对话图片（不做自动挑选；支持 chat/messages/responses）
+  ipcMain.handle('llm:visionChatCapable', (_e, spec?: string) => visionChatCapable(spec))
+
   // 视觉模型清单（2026-09-08）：按 VISION_MODEL_RE 过滤出能胜任图片输入的模型——
   // 视觉转写模型选择列表只显示这些，非视觉模型不再出现
   ipcMain.handle('llm:visionModels', () => {
@@ -2020,6 +2040,25 @@ export function findVisionModel(preferredSpec?: string): { provider: ProviderCon
     if (m) return { provider: p, model: m }
   }
   return null
+}
+
+/**
+ * 对话图片输入用：当前模型是否具备视觉能力。
+ * 与 `findVisionModel` 不同 —— **不做自动挑选**：spec 为空时只用全局默认模型；
+ * 支持 chat / messages / responses 三种协议族（Ollama 无协议族，暂不支持）。
+ */
+export function visionChatCapable(modelSpec?: string): boolean {
+  let spec = String(modelSpec ?? '').trim()
+  if (!spec) spec = String(depsRef?.getSettingValue('defaultChatModel') ?? '').trim()
+  if (!spec) return false
+  const ci = spec.indexOf(':')
+  const pid = ci > 0 ? spec.slice(0, ci) : spec
+  const mid = ci > 0 ? spec.slice(ci + 1) : ''
+  const p = getProviders().find((x) => x.id === pid)
+  if (!p || !providerUsable(p)) return false
+  const model = mid || p.models[0] || ''
+  if (!model || !VISION_MODEL_RE.test(model)) return false
+  return familyOf(p.type, p.modelFamilies, model) !== null
 }
 
 /** 视觉转写主进程入口（AI教学素材库）：OpenAI 多模态 content 数组直通 adapter */export async function visionChat(req: VisionChatRequest): Promise<VisionChatResponse> {

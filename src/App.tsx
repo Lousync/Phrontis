@@ -85,7 +85,6 @@ import { VaultPicker } from './components/shared/VaultPicker'
 import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC, KB_PDF_ZOOM_FIT, hasVisiblePdfReader } from './components/shared/pdf/pdfEvents'
 import { bookDisplayName, bookEngineOf, bookKindOf } from 'phrontis-core/kbStore/bookFormats'
 import { PomodoroProvider } from './modules/toolbox/hooks/PomodoroContext'
-import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
 import { Onboarding } from './components/shared/Onboarding'
 import { ImportModal } from './modules/shared/components/ImportModal'
 import { useCheckinReminder } from './lib/useCheckinReminder'
@@ -538,6 +537,15 @@ export default function App() {
   /** 文章页签标题映射（itemId → 标题）：页面条 tabLabel 用；条目标题在打开时随事件带来，无需反查 */
   const intelTitlesRef = useRef<Map<string, string>>(new Map())
   const mountedIntelTabs = useRef<Set<string>>(new Set())
+
+  /** 打开番茄钟工具标签页（2026-11-16 反馈：与其余工具一致，不再走 absolute 覆盖面板）。
+      「pomodoro:activate」事件、右栏入口、工具箱画廊、状态栏、右栏小控件、小窗跳转全部收口到这里；
+      计时状态仍在 PomodoroProvider（面板本身只是标签页宿主里的一份渲染）。 */
+  const openPomodoroTab = useCallback(() => {
+    setActiveTab(null)
+    setActiveIntelTab(null)
+    setActiveToolTab(toolTabId('pomodoro'))
+  }, [])
 
   // ---- 页面级分屏（Fork A）状态 ----
   // 只承载「页面」（文档）；模块标签一律不进这里（模块整体不分栏）。null = 单栏。
@@ -1135,6 +1143,11 @@ export default function App() {
   useEffect(() => {
     const off = window.api?.onMainCommand?.((p) => {
       if (p?.type === 'switch-tab' && typeof p.tab === 'string') {
+        // 番茄钟小窗「在主窗口控制」：直接激活番茄钟工具标签页（tool 参数专指，不走 toolbox 画廊中转）
+        if (p.tool === 'pomodoro') {
+          openPomodoroTab()
+          return
+        }
         // 白名单走唯一真相源：旧版把清单抄在这里，缺 editor / aiTeaching / desktop
         // —— 小窗喊「切到编辑器」会被静默拒绝，症状是「点了没反应」。
         if (isTabName(p.tab)) {
@@ -1146,7 +1159,15 @@ export default function App() {
       }
     })
     return () => { off?.() }
-  }, [])
+  }, [openPomodoroTab])
+
+  // 番茄钟外部入口（工具箱画廊 / 状态栏胶囊 / 右栏小控件「去评分」）统一激活工具标签页。
+  // Provider 侧仍监听同一事件维护计时状态（预设 / 恢复），两边互不替代。
+  useEffect(() => {
+    const handler = () => openPomodoroTab()
+    window.addEventListener('pomodoro:activate', handler)
+    return () => window.removeEventListener('pomodoro:activate', handler)
+  }, [openPomodoroTab])
 
   // 日程截止提醒：系统通知被点击 → 主进程已唤起窗口，这里切到日程模块
   useEffect(() => {
@@ -1415,14 +1436,10 @@ export default function App() {
 
   // ---- 工具标签页（v3.4.0 批次4，方案 §10.2）----
   // 右栏工具入口点击 → 中间开对应工具标签页；重复点击同入口 = 激活已有标签（openTabs includes
-  // 判定 + openTabs 登记处去重），关闭走文档标签通用 ✕。番茄钟特例 = 既有 pomodoro:activate
-  // 全屏面板语义，不开标签。
+  // 判定 + openTabs 登记处去重），关闭走文档标签通用 ✕。
+  // 2026-11-16：番茄钟不再特判覆盖面板，与其余工具一样按 tool:<toolId> 开标签（见 openPomodoroTab）。
   // 插件工具标签：App 层持插件工具清单（pluginTools），tool:<pluginId:toolId> 按清单匹配宿主。
   const handleOpenTool = useCallback((toolId: string) => {
-    if (toolId === 'pomodoro') {
-      window.dispatchEvent(new CustomEvent('pomodoro:activate'))
-      return
-    }
     setActiveTab(null)
     setActiveIntelTab(null)
     setActiveToolTab(toolTabId(toolId))
@@ -2220,9 +2237,6 @@ export default function App() {
                   </div>
                   {/* AI 助手右下浮钮已移除（2026-09-16）：AI 对话入口迁移（批次5 中间栏 aiChat 标签），
                       Ctrl+J 链路保留不受影响（ai-assistant:toggle 事件链路随浮钮一并废除，2026-09-22 清理） */}
-                  {/* 番茄钟全屏面板：挂在内容卡片内（而非 main），只覆盖主内容区 ——
-                      否则会盖住右侧的任务栏（DayPanel），表现为「进入番茄钟任务栏被关闭/唤不出」 */}
-                  <PomodoroPanel />
                 </div>
                 {/* 分隔条与副栏必须与「主栏 div」平级（同为 pageSplitContainerRef 的直接子节点）。
                     ⚠️ 不能写进主栏 div 内：主栏是 flex-col，flexGrow 会作用在纵轴上，
