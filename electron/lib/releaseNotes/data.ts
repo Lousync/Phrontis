@@ -4,11 +4,70 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：86
+ * 版本数：87
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.37.0",
+    "date": "2026-11-16",
+    "summary": "本版一句话：AI 现在会读仓库里的 `AGENTS.md` / `CLAUDE.md` —— 你在别的 AI 工具里写的项目约定，Phrontis 助手也照着做。",
+    "groups": [
+      {
+        "title": "AI 助手 · 仓库规则文件",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "自动读取",
+            "rest": "仓库根的 `AGENTS.md` / `CLAUDE.md` 每轮注入给 AI；作用域缩窄到某个文件或目录时，连同它所在目录及祖先目录的规则一起读（最多 8 层）。",
+            "sub": []
+          },
+          {
+            "lead": "与助手要求并存",
+            "rest": "软件内维护的 `.assistant/CONSTRAINTS.md`（全局 / 本会话）继续生效；优先级从高到低：你当前的消息 > 助手要求 > 更细目录规则 > 根目录规则。",
+            "sub": []
+          },
+          {
+            "lead": "有上限",
+            "rest": "单文件最多 4000 字、合计最多 12000 字，超出截断；`AGENTS.md` 与 `CLAUDE.md` 内容完全相同时只注入一次。",
+            "sub": []
+          },
+          {
+            "lead": "可关",
+            "rest": "设置 → AI → Agent 循环 → 「注入仓库规则文件」（默认开启）。关掉只影响规则文件，`.assistant` 要求不受影响。",
+            "sub": []
+          },
+          {
+            "lead": "各面覆盖",
+            "rest": "统一助手读根 + 作用域目录规则；AI 教学与日程 / 情报助手只读根目录，避免和教学四层要求混淆。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "新增 `electron/lib/repoRulesPure.ts`（目录归一 / 去重 / 截断 / 文案）与 `electron/lib/repoRules.ts`（磁盘读取，拒绝绝对路径、`..`、点目录，>512KB 跳过）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增设置项 `agentInjectRepoRules`；注入段位于助手要求之前，保证 `.assistant` 要求优先。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本 `.AGENT/scripts/ai-harness/verify-repo-rules.mjs`（37 项断言）；方案与取舍见 `docs/agent-harness-alignment-plan.md` §20。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.36.0",
     "date": "2026-11-16",

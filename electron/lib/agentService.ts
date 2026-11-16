@@ -69,6 +69,7 @@ import { suggestScope } from './aiAssistantScopeSuggestPure'
 import { toolActionLabel } from '../../src/lib/toolLabels'
 import type { AgentTodoItem } from './agentTodoPure'
 import { LONG_TASK_HINT, resolveResumeProfile } from './agentLongTaskPure'
+import { readRepoRulesFrom, ruleDirsForScopePaths } from './repoRules'
 
 /**
  * 单轮估算费用（USD）：把 provider 的 prompt/completion/cached 拆成 `modelPricing` 的四桶
@@ -1294,6 +1295,18 @@ async function runAgentLoopInner(
       }
     : { global: '', workspace: '', unit: '', lesson: '' }
   const scopeInstHint = source === 'aiTeaching' ? buildScopePrompt(scopeLayers) : ''
+  // P1-6：仓库规则文件（AGENTS.md / CLAUDE.md）—— 根目录恒读；统一助手缩窄作用域时，
+  // 再补上作用域文件 / 目录所在路径上的子目录规则。AI 教学与专属助手只注入根目录（避免与教学要求混淆）。
+  const repoRulesHint = (() => {
+    if (manual) return ''
+    if (getSettingReader()('agentInjectRepoRules') === false) return ''
+    const root = getCurrentVault()?.rootPath ?? null
+    if (!root) return ''
+    const dirs = unifiedAssistant && !scopeAll && aiScope && aiScope.length > 0
+      ? ruleDirsForScopePaths(root, aiScope)
+      : ['']
+    return readRepoRulesFrom(root, dirs)
+  })()
   // N-5：助手**独立**要求注入（.assistant/，2026-09-24 三轮拍板）——与教学三层完全分开，措辞不复用教学口径。
   // 默认单层（全局），用户从助手面板入口按需升格出会话层；每轮重读，保存后下一轮生效。
   // 优先级链（拍板 G）：用户当下消息 > 本会话要求 > 全局要求。
@@ -1528,7 +1541,7 @@ async function runAgentLoopInner(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
