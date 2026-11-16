@@ -1,7 +1,7 @@
 # 多模态输入（对话图片）实现方案
 
-> **状态**：统一助手已落码（v3.41.0）；AI 教学面待接（见 §7）
-> **目标版本**：`v3.41.0`（新功能，已落码）
+> **状态**：统一助手（v3.41.0）与 AI 教学（v3.42.0）均已落码
+> **版本**：`v3.41.0`（统一助手）/ `v3.42.0`（AI 教学）
 > **关联**：`docs/agent-harness-alignment-plan.md` §9 P2；`resources/help/AI助手.md`；原型 `tmp/assistant-multimodal-proto/index.html`
 
 ---
@@ -11,7 +11,7 @@
 - 图片来源：粘贴（Ctrl+V）、拖入、附件按钮选文件。
 - 当前模型策略：**只认当前模型**，只有视觉模型且协议受支持时才允许发图；不自动切换、不偷偷换模型。
 - 历史：图片随消息保留，后续轮次仍可追问；每次请求最多回带最近 8 张。
-- 生效面：统一助手 + AI 教学（AI 教学因并行冲突延后接入）。
+- 生效面：统一助手 + AI 教学（同一套 hook / 组件 / 提示口径）。
 
 ---
 
@@ -70,7 +70,8 @@ Ollama 暂不支持（无协议族）。视觉能力判定：模型名命中 `VI
 
 ---
 
-## 7. 未完成与并行冲突
+## 7. 接入记录（AI 教学面，v3.42.0）
 
-- AI 教学面（`src/modules/ai-teaching/index.tsx`）在本次实现期间被**另一条对话实时修改**（工作区选择页重构），无法安全地同文件落码；按用户决定先完成统一助手，教学面等那条提交后再接。
-- 接入方式已确定：复用 `useComposerImages` + `ComposerImageStrip` + `ChatImageThumbs`，在 `sendText` / 乐观消息 / `agentChat` 三个点补 `images`，并复用 `llmVisionChatCapable(convoModel || '')` 做提示。
+- 统一助手先落码（v3.41.0）；AI 教学面因同文件被并行工作占用，顺延到 v3.42.0，接入方式与既定方案一致：复用 `useComposerImages` + `ComposerImageStrip` + `ChatImageThumbs`，在 `sendText` / 乐观消息 / `agentChat` 三个点补 `images`，模型能力用 `llmVisionChatCapable(convoModel || '')` 判定。
+- 差异点：教学面带图时不走斜杠指令通道（图片只能是普通对话消息）；只读段（`courseReadonly`）仍可发图，因为课程助手对话本身不关闭。
+- 契约脚本 `verify-multimodal-input.mjs` 补 9 项教学面接线断言（合计 65 项）。

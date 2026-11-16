@@ -170,7 +170,7 @@ for (const k of ['teach', 'side', 'assistant', 'learn']) {
 }
 
 // ── ⑨ 文案保全（只收不删）────────────────────────────────────────────────────────
-ok('teach 发送/停止提示保留', has('teach', 'data-tip="发送"') && has('teach', '停止生成（已完成的轮次保留）'))
+ok('teach 发送/停止提示保留', has('teach', "imageBlocked ? '当前模型不支持图片' : '发送'") && has('teach', '停止生成（已完成的轮次保留）'))
 ok('side 追问 placeholder 保留', has('side', '就这一点追问…'))
 ok('teach 合规提示上方旧占位注释语义保留（合规提示行仍在 footer 内）',
   has('teach', COMPLIANCE) && has('teach', 'composerFooter'))

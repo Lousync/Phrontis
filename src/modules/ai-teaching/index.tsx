@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
-  agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentListSideLanes, agentResume,
+  agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault, workspaceOpenInSystem,
   agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
@@ -37,6 +37,9 @@ import { showToast } from '../../lib/toast'
 import { handleChatCommand } from '../../lib/chatCommands'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../../components/shared/SlashCommandMenu'
 import { ImageCard, imageGroupsOf } from '../../components/shared/AssistantPanel/ImageCard'
+import { ComposerImageStrip } from '../../components/shared/AssistantPanel/ComposerImageStrip'
+import { ChatImageThumbs } from '../../components/shared/AssistantPanel/ChatImageThumbs'
+import { useComposerImages, type ComposerImage } from '../../lib/useComposerImages'
 import { looksLikeMindMap } from '../../lib/mindmap'
 import { isRenderableImagePath } from '../../lib/imageFormats'
 import { toolActionLabel } from '../../lib/toolLabels'
@@ -62,7 +65,7 @@ import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
  * `agent:listSideLanes` 带回的每条支线都带 `branchFromMessageId`，据此在回答下方显示
  * 「支线追问 · 已开」（点击进右栏支线中心重开）；不再落 localStorage（修掉清缓存/换机即失联）。
  */
-import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
+import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AgentImageRef, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -215,6 +218,8 @@ interface UiMsg {
   id?: string
   role: 'user' | 'assistant'
   content: string
+  /** P2 多模态：用户消息图片（乐观消息带 dataUrl；落库消息带 relPath） */
+  images?: AgentImageRef[]
   createdAt: string
   trace?: AgentTraceStep[]
 }
@@ -341,6 +346,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [activeTitle, setActiveTitle] = useState('')
   const [messages, setMessages] = useState<UiMsg[]>([])
   const [input, setInput] = useState('')
+  /** P2 多模态：教学面图片输入（与统一助手共用压缩 / 上限 / 粘贴 / 拖入逻辑） */
+  const composerImages = useComposerImages()
   /**
    * input 的实时镜像（v3.1.2 性能修复）。根因：`doSend` 若直接闭包 `input`，则**每次击键**它都换新引用
    * → `retryQuiz`（deps=[doSend]）跟着换 → 每条 AI 消息的 `MarkdownPreview`（`React.memo`）**浅比较失败
@@ -372,6 +379,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [convoModel, setConvoModel] = useState('')
   const [convoEffort, setConvoEffort] = useState<Effort>('off')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  /** P2 多模态：当前回答模型是否支持图片（null = 检测中；false = 已确认不支持） */
+  const [visionChatOk, setVisionChatOk] = useState<boolean | null>(null)
+  useEffect(() => {
+    let alive = true
+    llmVisionChatCapable(convoModel || '')
+      .then(v => { if (alive) setVisionChatOk(v === true) })
+      .catch(() => { if (alive) setVisionChatOk(false) })
+    return () => { alive = false }
+  }, [convoModel])
+  const imageBlocked = composerImages.hasImages && visionChatOk === false
   /**
    * 视觉转写模型（素材转写用，与回答模型分开）：'' = 自动按模型名识别；格式 providerId:model。
    *
@@ -966,6 +983,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     messagesSidRef.current = sid
     setMessages(rows.map(m => ({
       id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
+      ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
       trace: m.traceJson ? (() => { try { return JSON.parse(m.traceJson) as AgentTraceStep[] } catch { return undefined } })() : undefined,
     })))
     return rows.length
@@ -1132,7 +1150,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return r
   }, [refreshMessages, reloadCourse, openArtFile, refreshSessions])
 
-  const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string): Promise<AgentChatResult | null> => {
+  const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string, images: ComposerImage[] = []): Promise<AgentChatResult | null> => {
     const sid = activeIdRef.current
     if (!sid) return null
     // 同一会话只允许一个 run（与 useAssistantChat 同口径）；不同会话可并行（N-3）
@@ -1149,13 +1167,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const text = qs.length > 0
       ? qs.map((q, i) => `> 【引用 ${i + 1}】${q.replace(/\s+/g, ' ').trim().slice(0, 600)}${q.replace(/\s+/g, ' ').trim().length > 600 ? '…' : ''}`).join('\n') + `\n\n${raw}`
       : raw
-    setMessages(prev => [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }]) // 条目4：乐观时间存 ISO（原纯时刻串必 Invalid Date）
+    setMessages(prev => [...prev, {
+      role: 'user', content: text, createdAt: new Date().toISOString(),
+      ...(images.length > 0 ? {
+        images: images.map((im): AgentImageRef => ({
+          relPath: '', mime: im.mime, name: im.name, w: im.w, h: im.h, bytes: im.bytes, dataUrl: im.dataUrl,
+        })),
+      } : {}),
+    }]) // 条目4：乐观时间存 ISO（原纯时刻串必 Invalid Date）
     // v3.2.0 条目6 规则1：**发送 = 无条件滚到底**（与规则3「上滚不打断」刻意不对称，对标 ChatGPT：
     // 刚发出消息本就该看到它，哪怕之前正在上方阅读）。共用 jumpToBottom 一份实现，见其定义处注释。
     jumpToBottom()
     const ov = convoLlm.current.get(sid)
     try {
-      const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName)
+      const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName,
+        images.length > 0 ? images.map(im => ({ name: im.name, mime: im.mime, dataUrl: im.dataUrl, w: im.w, h: im.h, bytes: im.bytes })) : undefined)
       return await finishRun(r, sid)
     } catch (err) {
       // 主进程异常逃逸：finishRun 仍要清 bucket / 拉消息，否则会话会永久停在「生成中」
@@ -1195,9 +1221,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
 
   const doSend = useCallback(async (override?: string) => {
     const text = (override ?? inputValueRef.current).trim()
-    if (!text || pending || compressing) return
+    /** P2 多模态：本次随消息发送的图片（发出即清；失败也不留着误发下一轮） */
+    const images = composerImages.images.slice()
+    if ((!text && images.length === 0) || pending || compressing) return
+    if (images.length > 0 && visionChatOk === false) {
+      showToast({ type: 'info', message: '当前模型不支持图片输入', detail: '请先在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）' })
+      return
+    }
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（无会话时也拦截并提示）
-    if (text.startsWith('/')) {
+    // 带图片时不走指令通道（图片只能是普通对话消息）
+    if (images.length === 0 && text.startsWith('/')) {
       const sid0 = activeIdRef.current
       const ov0 = sid0 ? convoLlm.current.get(sid0) : undefined
       if (await handleChatCommand(text, {
@@ -1212,12 +1245,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       }
     }
     setInput('')
+    composerImages.clearImages()
     // Skill chip 一次性消费：随本条消息显式注入，发出即清（v3.1.1 条目10）
     const sk = pickedSkill
     setPickedSkill(null)
     const cid = crypto.randomUUID()
-    await sendText(text, cid, true, sk?.registryName) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
-  }, [pending, compressing, sendText, pickedSkill])
+    await sendText(text, cid, true, sk?.registryName, images) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
+  }, [pending, compressing, sendText, pickedSkill, composerImages.images, composerImages.clearImages, visionChatOk])
 
   // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
@@ -2339,6 +2373,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   {/* 条目7：AI 生成内容合规提示——常驻左端空白处（原 flex-1 空占位），弱化小字不新增行高；
                       静态渲染与流式/停止两种右端状态正交，布局零跳动（AGENTS.md#12 帮助披露：禁醒目标签轰炸） */}
                   <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" data-tip="AI 生成内容可能存在错误，请自行核实" aria-label="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+                  {/* P2 多模态：选文件入口（粘贴 / 拖入同效，见输入卡上的拖放层） */}
+                  <input
+                    ref={composerImages.fileInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    multiple
+                    className="hidden"
+                    onChange={composerImages.onFileInputChange}
+                  />
+                  <button type="button" onClick={composerImages.openPicker}
+                    disabled={pending || composerImages.images.length >= 4}
+                    data-tip="添加图片（也可直接粘贴 / 拖入）" aria-label="添加图片"
+                    className="flex h-7 items-center gap-1 px-2 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40">
+                    <ImagePlus size={11} />
+                    图片
+                  </button>
                   {/* 模型 + 思考强度合一菜单（P3b R12/R14）：仅本对话生效 */}
                   <div className="relative">
                     <button onClick={openModelMenu}
@@ -2547,7 +2597,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
                     </button>
                   ) : (
-                    <button onClick={() => { void doSend() }} disabled={!input.trim()} data-tip="发送" aria-label="发送"
+                    <button onClick={() => { void doSend() }} disabled={imageBlocked || (!input.trim() && !composerImages.hasImages)} data-tip={imageBlocked ? '当前模型不支持图片' : '发送'} aria-label={imageBlocked ? '当前模型不支持图片' : '发送'}
                       className="w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
                       <ArrowUp size={15} />
                     </button>
@@ -2953,7 +3003,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                          select-text = 全局 body user-select:none（防误选 UI）下对气泡的局部白名单恢复，
                          悬停时气泡左侧空白区浮出「复制」chip（绝对定位不挤布局，复制原始 m.content） */
                       <>
-                        <div className="max-w-[86%] min-w-0 select-text bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{m.content}</div>
+                        <div className="max-w-[86%] min-w-0 select-text">
+                          <ChatImageThumbs images={m.images} />
+                          {m.content && (
+                            <div className="bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{m.content}</div>
+                          )}
+                        </div>
                         <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制本条消息' })).catch(() => null) }}
                           data-tip="复制本条消息" aria-label="复制本条消息"
                           className="absolute right-full top-1/2 -translate-y-1/2 mr-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md whitespace-nowrap text-[11.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-opacity">
@@ -3505,8 +3560,27 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 {composerFooter}
                 </>
                 ) : (
-                  <div className={`relative px-3 pt-2.5 pb-2 ${shell.wrap}`}>
+                  <div className={`relative px-3 pt-2.5 pb-2 ${shell.wrap}`}
+                    onDragOver={composerImages.onDragOver}
+                    onDragLeave={composerImages.onDragLeave}
+                    onDrop={composerImages.onDrop}
+                  >
                     <AiMascotAnchor />
+                    {composerImages.dragging && (
+                      <div data-wb="aiTeachComposerDropHint"
+                        className="absolute inset-0 z-20 grid place-items-center rounded-[inherit] border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,rgba(10,14,20,.86))] text-[12px] text-[var(--text-primary)]">
+                        松手添加图片
+                      </div>
+                    )}
+                    <ComposerImageStrip images={composerImages.images} onRemove={composerImages.removeImage} disabled={pending} />
+                    {imageBlocked && (
+                      <div data-wb="aiTeachImageModelWarn"
+                        className="mb-1.5 flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px]"
+                        style={{ borderColor: 'color-mix(in srgb, var(--warning) 35%, transparent)', background: 'var(--warning-bg)', color: 'var(--warning)' }}>
+                        <Info size={12} className="mt-0.5 shrink-0" />
+                        <span className="min-w-0">当前模型不支持图片输入。请在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）。</span>
+                      </div>
+                    )}
                     {quotes.length > 0 && (
                       <div className="mb-1.5">
                         {/* 引用胶囊（会话引用形式）：不展示全文只报条数，点开管理；× 一键全清 */}
@@ -3577,6 +3651,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         <SlashCommandMenu items={slashItems} activeIndex={slashActive} onHover={setSlashActive} onPick={pickSlash} />
                       )}
                       <textarea ref={inputRef} spellCheck={false} value={input} onChange={e => { setInput(e.target.value); setSlashActive(0) }}
+                        onPaste={composerImages.onPaste}
                         onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void doSend() } }}
                         disabled={courseReadonly}
                         rows={2} placeholder={courseReadonly ? '本段已收尾（只读）· 要补充请开新段' : quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}

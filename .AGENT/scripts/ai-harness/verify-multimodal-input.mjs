@@ -112,4 +112,16 @@ ok('缩略图按路径加载', /loadVaultImage\(image\.relPath\)/.test(thumbs))
 const strip = readFileSync(join(ROOT, 'src/components/shared/AssistantPanel/ComposerImageStrip.tsx'), 'utf8')
 ok('输入区胶囊可移除', /onRemove\(im\.id\)/.test(strip))
 
+// ── ⑤ AI 教学面（v3.42.0：与统一助手共用同一套图片输入）──────────────────────────
+const teach = readFileSync(join(ROOT, 'src/modules/ai-teaching/index.tsx'), 'utf8')
+ok('教学面复用 useComposerImages', /useComposerImages\(\)/.test(teach))
+ok('教学面共用图片胶囊与缩略图', /<ComposerImageStrip images=\{composerImages\.images\}/.test(teach) && /<ChatImageThumbs images=\{m\.images\}/.test(teach))
+ok('教学面粘贴 / 拖入 / 选文件三入口', /onPaste=\{composerImages\.onPaste\}/.test(teach) && /onDrop=\{composerImages\.onDrop\}/.test(teach) && /composerImages\.openPicker/.test(teach))
+ok('教学面模型能力检测用当前会话模型', /llmVisionChatCapable\(convoModel \|\| ''\)/.test(teach))
+ok('教学面不支持时提示 + 发送禁用', /aiTeachImageModelWarn/.test(teach) && /disabled=\{imageBlocked \|\| \(!input\.trim\(\) && !composerImages\.hasImages\)\}/.test(teach))
+ok('教学面发送带图片', /sendText\(text, cid, true, sk\?\.registryName, images\)/.test(teach) && /images\.length > 0 \? images\.map\(im => \(\{ name: im\.name, mime: im\.mime, dataUrl: im\.dataUrl/.test(teach))
+ok('教学面乐观消息回显图片', /images\.map\(\(im\): AgentImageRef => \(\{/.test(teach))
+ok('教学面刷新映射保留图片', /m\.images && m\.images\.length > 0 \? \{ images: m\.images \}/.test(teach))
+ok('教学面带图不走斜杠指令通道', /images\.length === 0 && text\.startsWith\('\/'\)/.test(teach))
+
 report('多模态输入（P2）')

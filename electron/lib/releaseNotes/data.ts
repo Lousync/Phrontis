@@ -4,11 +4,60 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：90
+ * 版本数：91
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.42.0",
+    "date": "2026-11-16",
+    "summary": "本版一句话：AI 教学对话也能发图了 —— 拍教材页、截课件图直接问，和统一助手同一套用法。",
+    "groups": [
+      {
+        "title": "AI 教学 · 图片提问",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "入口一致",
+            "rest": "粘贴（Ctrl+V）、拖入输入区、点底部「图片」按钮；每条最多 4 张，自动压到最长边 2048px、单张 ≤2MB。",
+            "sub": []
+          },
+          {
+            "lead": "只认当前回答模型",
+            "rest": "模型不支持图片时输入区出现提示、发送键不可用；不会偷偷换模型。",
+            "sub": []
+          },
+          {
+            "lead": "可追问",
+            "rest": "图片随消息存进 `.knowbase/agent/images/<会话>/`，后续轮次仍能看到（每次请求最多回带最近 8 张）。",
+            "sub": []
+          },
+          {
+            "lead": "边界",
+            "rest": "素材整本转写仍走素材库的视觉转写通道；对话发图只影响当轮提问。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "AI 教学面复用 `useComposerImages` / `ComposerImageStrip` / `ChatImageThumbs` 与 `llmVisionChatCapable`；带图消息不走斜杠指令通道。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "契约脚本 `.AGENT/scripts/ai-harness/verify-multimodal-input.mjs` 扩到 65 项（新增 9 项教学面接线断言）。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.41.0",
     "date": "2026-11-16",
