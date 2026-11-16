@@ -29,6 +29,7 @@ import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, t
 import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
 import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
 import { aiExec } from './terminalService'
+import { aiInspect } from './terminalInspect'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
 import { getKnowledgeIndex, getKnowledgeTextIndex } from 'phrontis-core/kbStore/knowledgeIndex'
@@ -2367,8 +2368,9 @@ export function registerBuiltinTools(): void {
           continue
         }
       }
-      // 终端：信任未授予时不允许「申请成功」（下一轮它仍不在视野里）
-      if (t.module === 'terminal') {
+      // 终端**写**通道：信任未授予时不允许「申请成功」（下一轮它仍不在视野里）。
+      // 只读通道（terminal.inspect）不看执行信任，只看模块 read / 文件域 read 权限。
+      if (t.module === 'terminal' && (t.requires ?? 'read') === 'write') {
         const trust = readWorkspaceTrust()
         const allowed = trust.shellExec === 'allow' || (trust.shellExec === null && reader('terminal.aiExec') === true)
         if (!allowed) {
@@ -4360,4 +4362,27 @@ export function registerBuiltinTools(): void {
     const pref = reader('terminal.shell')
     return aiExec({ command: cmd, timeoutMs: num(args.timeoutMs, 30000), shellPref: typeof pref === 'string' ? pref : undefined })
   })
+
+  // 24b. builtin.terminal.inspect —— 终端只读通道（P1-2）：白名单命令、argv 直呼、不走 shell、不逐条确认
+  registerTool({
+    name: 'builtin.terminal.inspect',
+    title: '只读查看仓库',
+    description: '只读白名单命令，无需逐条确认：git status/diff/log/show、ls、cat、head、tail、wc、rg、find、file、which、pwd。传 program + args（argv 形式，不经过 shell）；文件路径必须是仓库内相对路径且受 AI 文件策略与本次作用域限制。git 只允许只读子命令，写文件 / 执行外部程序的参数（--output、--ext-diff、--no-index、rg --pre、find -exec/-delete 等）一律拒绝。写操作请用 terminal.exec',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        program: { type: 'string', description: '命令名：git / ls / cat / head / tail / wc / rg / find / file / which / pwd' },
+        args: { type: 'array', items: { type: 'string' }, description: '参数数组，如 ["status","--short"]；不经过 shell，不需要引号' },
+        timeoutMs: { type: 'number', description: '超时毫秒（默认 15000，上限 60000），仅 git / rg 生效' },
+      },
+      required: ['program'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    module: 'terminal',
+    requires: 'read',
+    tier: 'ondemand',
+    vaultFile: 'read',
+  }, async (args, ctx) => aiInspect(args, ctx))
 }

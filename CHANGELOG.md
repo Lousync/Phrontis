@@ -2,6 +2,24 @@
 
 # 更新日志
 
+## v3.33.0（2026-11-16）
+
+> **本版一句话**：AI 想看清仓库现状时，不必再逐条申请确认 —— 打开一条只读通道，`git status`、`ls`、`cat` 等直接看。
+
+### AI 助手 · 终端只读通道
+
+- **新增 `builtin.terminal.inspect`**：支持 `git status/diff/log/show`、`ls / cat / head / tail / wc / rg / find / file / which / pwd`，按 `program + args` 传参，**不经过 shell**，没有管道 / 重定向 / 通配符展开。
+- **无需逐条确认**：只读通道不弹终端确认，也不要求打开「终端执行」开关；仍受 terminal 模块 read 权限、「仓库文件」读权限、AI 文件策略与本次文件作用域约束。
+- **写操作仍走确认通道**：`terminal.exec` 不变，每条命令继续在终端「AI 执行记录」里逐条确认。
+- **危险参数硬拒**：git 的 `--output / --no-index / --ext-diff / --textconv`，rg 的 `--pre / -z / --hidden / -u / --no-ignore / -g / -t / --follow`，find 的 `-exec / -delete / -fprint` 等一律拒绝；rg 固定只搜索 AI 可读文本扩展名。
+- **跨平台**：`ls/cat/head/tail/wc/find/file/which/pwd` 由 Node 原生实现，Windows 上也能用；`git` / `rg` 直呼 argv，`rg` 未安装时提示改用 `vault.search`。
+
+### 内部
+
+- 新增 `electron/lib/terminalInspectPure.ts` / `terminalInspect.ts`；终端写闸只拦 `requires=write`，只读通道在「先预览 / 规划」类任务里仍可见。
+- 新增契约脚本 `.AGENT/scripts/ai-harness/verify-terminal-inspect.mjs`（61 项断言）。
+- 方案与取舍：`docs/agent-harness-alignment-plan.md` §16。
+
 ## v3.32.0（2026-11-16）
 
 > **本版一句话**：AI 改完文件可以一键退回 —— 每次运行都留一份可撤销记录，删掉的文件也有快照。

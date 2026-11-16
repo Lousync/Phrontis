@@ -635,15 +635,14 @@ function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
       }
     }
     if (denied) return false
-    // 终端：模块总闸（terminal.aiExec）+ 工作区信任。信任只决定「能不能用」，
+    // 终端**写**通道：模块总闸（terminal.aiExec）+ 工作区信任。信任只决定「能不能用」，
     // 每条命令仍逐条确认（terminalService 的确认卡）——这是拍板过的两层分工。
-    if (t.module === 'terminal') {
+    // 只读通道（builtin.terminal.inspect，requires=read）不走这道闸：它由模块 read 权限 +
+    // 文件域 read 权限单独控制，规划模式（后续 P1-4）也要能看见。
+    if (t.module === 'terminal' && (t.requires ?? 'read') === 'write') {
       const trust = readWorkspaceTrust()
       const allowed = trust.shellExec === 'allow' || (trust.shellExec === null && reader('terminal.aiExec') === true)
-      if (!allowed) {
-        deniedModules.add('terminal')
-        return false
-      }
+      if (!allowed) return false // 只隐藏写通道；不把 terminal 记成「模块未授权」（只读通道仍可用）
     }
     // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野。
     // 例外：显式白名单（`only`，如手册通道 / 日程助手）内的工具视为「已启用」——
@@ -1233,7 +1232,7 @@ async function runAgentLoopInner(
     + '未分类知识页在 .knowbase/_inbox（可直接读写）；若写操作返回「当前工作区尚未授权」，请让用户在 AI 助手面板顶部点「一次性开启」。'
   // P3：存在被折叠的 ondemand 工具时，告知申请机制（写类工具默认不在视野）
   const toolsHint = toolsState.hasOnDemandHidden
-    ? '\n\n【扩展工具提示】写类 / 终端 / MCP / Skill 等工具默认不在上方工具列表中（按需装载）。需要时先调 builtin.tool.list（可按 query/module 过滤）查注册名，再调 builtin.tool.request 申请（tools 传逗号分隔的注册名），确认后本会话内持续可用；申请通过后按工具描述使用。不要申请当前任务用不到的工具。'
+    ? '\n\n【扩展工具提示】写类 / 终端 / MCP / Skill 等工具默认不在上方工具列表中（按需装载）。只读查看仓库可用 builtin.terminal.inspect（git status / ls / cat / find / rg 等，不走 shell、无需逐条确认）。需要时先调 builtin.tool.list（可按 query/module 过滤）查注册名，再调 builtin.tool.request 申请（tools 传逗号分隔的注册名），确认后本会话内持续可用；申请通过后按工具描述使用。不要申请当前任务用不到的工具。'
     : ''
   // 执行纪律（2026-09-10 修）：写操作以"真实调用 + 拿到成功结果"为唯一完成判据。
   // 起因：日程模块权限为只读时，创建工具被预过滤出模型视野，模型无从调用却回复"创建成功"——

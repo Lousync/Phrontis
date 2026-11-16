@@ -1,5 +1,5 @@
 源文件: /home/lousync/Projects/Phrontis/electron/lib/builtinTools.ts
-工具总数: 74
+工具总数: 75
 
 【core —— 每轮常驻注入】18 个
   builtin.vault.read                  7431 字符  ~2147 tok  schema  719  [read/-]
@@ -22,7 +22,7 @@
   builtin.schedule.list-recurring      570 字符  ~ 167 tok  schema   34  [read/schedule]
   小计: 42221 字符  ~12834 tok
 
-【ondemand —— 默认折叠，tool.request 后才注入】56 个
+【ondemand —— 默认折叠，tool.request 后才注入】57 个
   builtin.quiz.gen-paper              4961 字符  ~1631 tok  schema  713  [write/quiz]
   image                               4422 字符  ~1632 tok  schema  362  [write/-]
   builtin.knowledge.graph-topology    4346 字符  ~1345 tok  schema  264  [read/knowledge]
@@ -64,6 +64,7 @@
   course.sources.register             1098 字符  ~ 332 tok  schema  325  [write/-]
   builtin.vault.mkdir                 1083 字符  ~ 333 tok  schema  102  [write/-]
   builtin.terminal.exec               1049 字符  ~ 354 tok  schema  240  [write/terminal]
+  builtin.terminal.inspect            1009 字符  ~ 335 tok  schema  364  [read/terminal]
   course.organize.archive              988 字符  ~ 360 tok  schema  236  [write/-]
   builtin.schedule.delete-todo         964 字符  ~ 323 tok  schema  109  [write/schedule]
   builtin.schedule.reorder-stages      944 字符  ~ 279 tok  schema  212  [write/schedule]
@@ -79,9 +80,9 @@
   course.outline.remove-unit           619 字符  ~ 211 tok  schema  106  [write/-]
   builtin.schedule.delete-workflow     601 字符  ~ 174 tok  schema   96  [write/schedule]
   builtin.schedule.get-workflow        594 字符  ~ 173 tok  schema   96  [read/schedule]
-  小计: 101754 字符  ~32711 tok
+  小计: 102763 字符  ~33046 tok
 
-合计若全部装载: ~45545 tok
+合计若全部装载: ~45880 tok
 实际常驻(默认权限 read 态): ~12834 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】

@@ -1,7 +1,7 @@
 # AI 助手 Harness 对齐实现方案
 
-> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 第 1 项「AI 操作 journal + 撤销本次运行」已落码（2026-11-16，v3.32.0），其余待排期。
-> **目标版本**：`v3.31.0`（P0，新功能）；P1-1 随 `v3.32.0`（新功能）。
+> **状态**：P0-A/B/C/D 已落码（2026-11-15，v3.31.0）；P1 第 1 项「AI 操作 journal + 撤销本次运行」已落码（2026-11-16，v3.32.0）；第 2 项「终端只读通道 `terminal.inspect`」已落码（2026-11-16，v3.33.0），其余待排期。
+> **目标版本**：`v3.31.0`（P0，新功能）；P1 逐项随 `v3.32.0` / `v3.33.0`（均为新功能）。
 > **范围**：P0 四批 —— A 文件策略与通用文件原语 / B 工作区信任 / C 索引与默认忽略 / D MCP、Skill 与工具发现；P1 只给提纲。
 > **关联**：`AGENTS.md` 铁律 1 / 2 / 16 / 17 / 18 / 25；`docs/ui-animation-plan.md`；`docs/pending-fixes.md`。
 
@@ -311,7 +311,7 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 | 顺序 | 内容 | 关键点 |
 |---|---|---|
 | 1 ✅ | AI 操作 journal + 撤销本次运行 | 每次运行记 write / edit / rename / move / trash；删除先快照到 `.knowbase/agent/undo/<runId>/`；面板加「撤销本次运行」；容量与保留期上限。落码见 §15 |
-| 2 | 终端只读通道 `terminal.inspect` | 白名单命令（git status/diff/log/show、ls、cat、head/tail、wc、rg、find、file、which）；`spawn` 直呼 argv、不走 shell；规划模式可用 |
+| 2 ✅ | 终端只读通道 `terminal.inspect` | 白名单命令（git status/diff/log/show、ls、cat、head/tail、wc、rg、find、file、which）；`spawn` 直呼 argv、不走 shell；规划模式可用。落码见 §16 |
 | 3 | 终端 `exec` 增强 | `tailLines` / `filter` / 输出续读；后台任务 + 事后读取 |
 | 4 | 只读规划模式 + 通用 todo | `writeMode` 增加 `plan`；todo 工具落到对话框清单 |
 | 5 | 长任务档 | `long/deep` 循环档（60 轮 / 150 写 / 64k 历史）；触顶后支持「继续」 |
@@ -406,3 +406,20 @@ P0-A 结尾修掉：只对 `.knowbase/_inbox` 这一个子树放行 `.md` 读写
 - 撤销成功才写 `undoneAt`；有跳过/失败时保留记录，已还原的项不重放，可处理后重试。
 
 **契约**：`.AGENT/scripts/ai-harness/verify-run-journal.mjs`（44 项断言：撤销顺序、冲突矩阵、保留期、快照命名、工具/UI/IPC 接线）。
+
+---
+
+## 16. P1-2 落码结果（2026-11-16，v3.33.0）
+
+| 落点 | 内容 |
+|---|---|
+| `electron/lib/terminalInspectPure.ts`（新） | 纯校验：命令白名单、参数上限、路径归一（禁绝对路径 / `..`）、git 只读子命令与危险参数黑名单、rg / find / tail 危险参数黑名单、超时与输出上限 |
+| `electron/lib/terminalInspect.ts`（新） | 主进程实现：`ls/cat/head/tail/wc/find/file/which/pwd` 用 Node 原生实现（跨平台，不依赖 Unix 命令）；`git` / `rg` 直呼 argv spawn，**永不走 shell**；所有文件路径再过 `assertCanRead` + `evaluateAiFile` |
+| `builtinTools.builtin.terminal.inspect`（新） | `readOnly: true` / `requires: 'read'` / `module: 'terminal'` / `vaultFile: 'read'` / `tier: 'ondemand'`；入参 `program + args[] + timeoutMs`，无需逐条确认 |
+| `agentService` | 终端写闸（`terminal.aiExec` + 工作区 shellExec 信任）改为只拦 `requires === 'write'`；只读通道据此在「规划 / 先预览」类只读任务里仍可见 |
+| 安全细节 | git：`--no-pager`、`core.pager=cat`、`core.fsmonitor=false`、`--no-textconv`、`GIT_TERMINAL_PROMPT=0`、`GIT_OPTIONAL_LOCKS=0`；拒绝 `--output / --no-index / --ext-diff / --textconv`。rg：只允许只读 flag，拒绝 `--pre / -z / --hidden / -u / --no-ignore / -g / -t / --follow`，并固定追加 `TEXT_VIEWABLE_EXTS` 的 `-g` 白名单、清空 `RIPGREP_CONFIG_PATH`。find：拒绝 `-exec / -delete / -fprint / -fls` 等写文件/执行程序的动作。 |
+| 作用域 | `scopeAll=false` 时只允许原生文件命令；`git` / `rg` 这类整仓命令直接拒绝，避免绕过作用域 |
+
+**取舍**：`ls/cat/head/tail/wc/find/file/which` 在 Windows 没有对应可执行文件（`find` 还是另一个程序），故用 Node 原生实现而不是 spawn；「不走 shell」的硬约束对所有路径成立。
+
+**契约**：`.AGENT/scripts/ai-harness/verify-terminal-inspect.mjs`（61 项断言：白名单、路径、git/rg/find/tail 参数、超时/截断、接线）。

@@ -15,6 +15,7 @@ export const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.vault.rename': '重命名',
   'builtin.vault.move': '批量移动',
   'builtin.vault.trash': '移入回收站',
+  'builtin.terminal.inspect': '只读查看',
   'builtin.knowledge.search': '检索知识库',
   'builtin.knowledge.create-page': '新建知识页',
   'builtin.knowledge.topics': '查笔记主题',
