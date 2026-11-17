@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ArrowLeft, Bookmark, BookmarkPlus, ChevronLeft, ChevronRight, Contrast, Loader2, Maximize2, Minimize2, MousePointerClick, Trash2, Type, X } from 'lucide-react'
 import { View, makeBook } from '../../../vendor/foliate/view.js'
-import { Overlayer } from '../../../vendor/foliate/overlayer.js'
 import type { FoliateBook, FoliateRelocateDetail } from '../../../vendor/foliate/view.js'
+import { visibleRects, type OverlapRect } from '../excerptOverlap'
 import { excerptCreate, excerptDelete, excerptList, readerStateGet, readerStatePatch, workspaceReadRangeBytes } from '../../../lib/ipc'
 import { showGlobalConfirm } from '../../../lib/globalConfirm'
 import { useDataChanged } from '../../../lib/dataChanged'
@@ -67,8 +67,30 @@ const HL_FILL: Record<ExcerptColor, string> = {
   y: '#efb84c', g: '#7fb844', b: '#5d9bdc', p: '#e0709a', v: '#9188e8',
 }
 
-/** foliate 的 `Overlayer.highlight` 用 `--overlayer-highlight-opacity`（默认 .3）控透明度 */
+/** 组透明度：与上游 `Overlayer.highlight` 用的是同一个 CSS 变量（默认 .3，本仓按纸色调到 .42） */
 const HL_OPACITY = '0.42'
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/**
+ * 把一条摘录的**可见碎片**画进它自己的 `<g>`（foliate overlayer 里注册的那个元素）。
+ * 组内多个 rect 属于同一条摘录 —— 先合成再整体透明，不会自己跟自己叠加。
+ */
+function paintExcerptFragments(g: SVGGElement, rects: OverlapRect[], fill: string): void {
+  while (g.firstChild) g.removeChild(g.firstChild)
+  g.setAttribute('fill', fill)
+  g.style.opacity = 'var(--overlayer-highlight-opacity, .3)'
+  for (const r of rects) {
+    const el = g.ownerDocument.createElementNS(SVG_NS, 'rect')
+    el.setAttribute('x', String(r.left))
+    el.setAttribute('y', String(r.top))
+    el.setAttribute('width', String(r.right - r.left))
+    el.setAttribute('height', String(r.bottom - r.top))
+    // 逐块写 fill：组上那份是给上游/探测脚本看的兜底，rect 自己有值才能直接断言「哪块是什么色」
+    el.setAttribute('fill', fill)
+    g.appendChild(el)
+  }
+}
 
 /**
  * 侧边点击翻页热区（2026-09-21）：左右各一条，宽 = `min(EDGE_MAX, max(EDGE_MIN, 宿主阅读宽 × EDGE_RATIO))`。
@@ -318,8 +340,56 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
    *   要靠这张表做差集、对已消失的 cfi 调 `deleteAnnotation`（2026-11-17 修复，B-61）。
    */
   const paintedCfiRef = useRef(new Set<string>())
+  /** 已画进 overlayer 的每一条摘录：cfi → 元素 / rects / 颜色（重画重叠碎片用） */
+  const overlayPaintRef = useRef(new Map<string, {
+    cfi: string
+    doc: Document
+    g: SVGGElement
+    rects: OverlapRect[]
+    color: ExcerptColor
+  }>())
+  /** rAF 合并句柄（一次摘录增删只重画一帧） */
+  const overlayRafRef = useRef(0)
   /** 已挂过监听的内容文档（同 section 重渲染会复用 doc，避免重复挂） */
   const boundDocsRef = useRef(new WeakSet<Document>())
+
+  /**
+   * 重叠重新上色：**后建的盖住先建的**（口径见 `excerptOverlap.ts`）。
+   *
+   * 每条例仍是 foliate overlayer 里自己的 `<g>`（所以「点高亮出回看卡」的 hitTest 不受影响），
+   * 只是 children 由我们按可见碎片重建：从新到旧，旧条目扣掉所有更新的矩形。
+   * 不这么做的话，两条半透明高亮叠在一起会合成第三种颜色（黄 + 蓝 = 脏绿，B-61）。
+   */
+  const repaintExcerptOverlays = useCallback(() => {
+    const order = new Map<string, number>()
+    let n = 0
+    for (const cfi of annColorRef.current.keys()) order.set(cfi, n++)
+    const byDoc = new Map<Document, Array<{ cfi: string; g: SVGGElement; rects: OverlapRect[]; color: ExcerptColor }>>()
+    for (const rec of overlayPaintRef.current.values()) {
+      if (!rec.g.isConnected) continue
+      const arr = byDoc.get(rec.doc)
+      if (arr) arr.push(rec)
+      else byDoc.set(rec.doc, [rec])
+    }
+    for (const list of byDoc.values()) {
+      list.sort((a, b) => (order.get(a.cfi) ?? 0) - (order.get(b.cfi) ?? 0))
+      const covers: OverlapRect[] = []
+      for (let k = list.length - 1; k >= 0; k--) {
+        const rec = list[k]
+        // px 单位：0.5px 以下的碎片肉眼不可见
+        paintExcerptFragments(rec.g, visibleRects(rec.rects, covers, 0.5), HL_FILL[rec.color])
+        covers.push(...rec.rects)
+      }
+    }
+  }, [])
+
+  const scheduleExcerptRepaint = useCallback(() => {
+    if (overlayRafRef.current) return
+    overlayRafRef.current = window.requestAnimationFrame(() => {
+      overlayRafRef.current = 0
+      repaintExcerptOverlays()
+    })
+  }, [repaintExcerptOverlays])
 
   // ===== 缩略图（仅固定版式 / cbz 的左栏网格用；机制见 .claude/plans/b-stage2b-cbz.md §四）=====
   /** index → data URL；`null` = 该页解码失败，**记下来不再重试**（否则滚一次重试一次） */
@@ -629,6 +699,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       const live = annColorRef.current
       for (const cfi of keys) {
         if (live.has(cfi)) continue
+        overlayPaintRef.current.delete(cfi)
         try { await v.deleteAnnotation({ value: cfi }) } catch { /* CFI 失效忽略 */ }
       }
     }
@@ -823,10 +894,23 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     }
 
     const onDraw = (e: Event) => {
-      const d = (e as CustomEvent).detail as { draw?: (f: unknown, o?: Record<string, unknown>) => void; annotation?: { value?: string } }
-      const color = d?.annotation?.value ? annColorRef.current.get(d.annotation.value) : undefined
-      if (!d?.draw || !color) return
-      d.draw(Overlayer.highlight, { color: HL_FILL[color] })
+      const d = (e as CustomEvent).detail as {
+        draw?: (f: (rects: OverlapRect[], opts?: Record<string, unknown>) => Node, o?: Record<string, unknown>) => void
+        annotation?: { value?: string }
+        doc?: Document
+      }
+      const cfi = d?.annotation?.value
+      const color = cfi ? annColorRef.current.get(cfi) : undefined
+      if (!d?.draw || !d.doc || !cfi || !color) return
+      const doc = d.doc
+      // 自绘（不再用 Overlayer.highlight）：先登记 rects，rAF 里按「新的盖住旧的」填碎片。
+      // 返回的 <g> 由 foliate 挂进该 section 的 overlayer，元素身份与移除流程都不变。
+      d.draw((rects) => {
+        const g = doc.createElementNS(SVG_NS, 'g') as unknown as SVGGElement
+        overlayPaintRef.current.set(cfi, { cfi, doc, g, rects, color })
+        scheduleExcerptRepaint()
+        return g
+      })
     }
 
     const onCreateOverlay = () => { void applyAnnotations() }
@@ -998,6 +1082,8 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       readyRef.current = false
       // overlayer 随书销毁：差集基线必须一起清，否则下一本书会拿着旧 cfi 去 deleteAnnotation
       paintedCfiRef.current.clear()
+      overlayPaintRef.current.clear()
+      if (overlayRafRef.current) { window.cancelAnimationFrame(overlayRafRef.current); overlayRafRef.current = 0 }
       // 缩略图队列随书作废：换书/关标签时正在跑的那一页要在产出后被丢弃（判 gen，不是判 alive ——
       // 队列可能跑在这个 effect 之外）。data URL 不需要 revoke，清掉 Map 即释放。
       thumbGenRef.current += 1
@@ -1045,6 +1131,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     // ① 先撤：上一轮画过、这一轮已不在表里的 cfi（删除摘录 / 改判 kind）⇒ 必须从正文里抹掉
     for (const cfi of painted) {
       if (m.has(cfi)) continue
+      overlayPaintRef.current.delete(cfi)
       void view.deleteAnnotation({ value: cfi }).catch(() => { /* CFI 失效（换书/换版本）忽略 */ })
     }
     // ② 再添：foliate 内部同 key 会自行替换，这里只需把表里的都画一遍
@@ -1105,6 +1192,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const unpaintCfi = useCallback((cfi: string) => {
     annColorRef.current.delete(cfi)
     paintedCfiRef.current.delete(cfi)
+    overlayPaintRef.current.delete(cfi)
     void viewRef.current?.deleteAnnotation({ value: cfi }).catch(() => { /* CFI 失效忽略 */ })
   }, [])
 

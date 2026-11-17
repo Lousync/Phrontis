@@ -8,6 +8,7 @@ import { showToast } from '../../../lib/toast'
 // 书签条数上限：**唯一真源在 schema**（写盘侧会按它整单拒绝），渲染层只读来提前拦并给出提示
 import { MAX_BOOKMARKS } from 'phrontis-core/kbStore/readerStateSchema'
 import { ExcerptCaptureBar } from './ExcerptCaptureBar'
+import { newestMarkAt } from '../excerptOverlap'
 import type { SelectionRect } from '../pdf/TextSelectionBar'
 import type { BookBookmark, ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../../types'
 
@@ -370,15 +371,17 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     }).catch(() => { /* 忽略 */ })
   })
 
-  /** 段落 → 高亮区间表（txt 摘录且有偏移才参与；重叠区间后来者截断） */
+  /** 段落 → 高亮区间表（txt 摘录且有偏移才参与；同段内按创建时间升序 = 新的在后） */
   const highlightMap = useMemo(() => {
-    const map = new Map<number, Array<{ start: number; end: number; id: string; note: string; color: ExcerptColor }>>()
+    const map = new Map<number, Array<{ start: number; end: number; id: string; note: string; color: ExcerptColor; at: string }>>()
     for (const e of excerpts) {
       if (e.kind !== 'txt' || typeof e.paraIndex !== 'number' || typeof e.start !== 'number' || typeof e.end !== 'number') continue
       const arr = map.get(e.paraIndex) ?? []
-      arr.push({ start: e.start, end: e.end, id: e.id, note: e.note, color: e.color })
+      arr.push({ start: e.start, end: e.end, id: e.id, note: e.note, color: e.color, at: e.at })
       map.set(e.paraIndex, arr)
     }
+    // 重叠口径「后建的盖住先建的」要求顺序稳定：不依赖 IPC 返回顺序，自己按 at 排
+    for (const arr of map.values()) arr.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
     return map
   }, [excerpts])
 
@@ -563,30 +566,39 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     for (const m of excMarks) { pts.add(Math.max(0, Math.min(text.length, m.start))); pts.add(Math.max(0, Math.min(text.length, m.end))) }
     for (const m of srchMarks) { pts.add(Math.max(0, Math.min(text.length, m.start))); pts.add(Math.max(0, Math.min(text.length, m.end))) }
     const bounds = [...pts].sort((a, b) => a - b)
-    const nodes: ReactNode[] = []
-    for (let k = 0; k < bounds.length - 1; k++) {
-      const s = bounds[k]
+    // 先按片段算好「归属哪条摘录」，再据此决定左右内边距 ——
+    // 只有同色连续段的首尾才加 px，段与段之间不叠（否则两种颜色的底色会在接缝处混成第三色）
+    const segs = bounds.slice(0, -1).map((s, k) => {
       const e = bounds[k + 1]
-      if (s >= e) continue
+      return {
+        s,
+        e,
+        exc: s < e ? newestMarkAt(excMarks, s, e) : undefined,
+        srch: s < e ? srchMarks.find((m) => m.start <= s && m.end >= e) : undefined,
+      }
+    })
+    const runId = (idx: number) => segs[idx]?.exc?.id ?? ''
+    const nodes: ReactNode[] = segs.map((seg, k) => {
+      const { s, e, exc, srch } = seg
+      if (s >= e) return null
       const segText = text.slice(s, e)
-      const exc = excMarks.find((m) => m.start <= s && m.end >= e)
-      const srch = srchMarks.find((m) => m.start <= s && m.end >= e)
       const isActive = !!srch && !!active && active.paraIndex === i && s >= active.start && e <= active.end
       if (exc) {
-        nodes.push(
+        const runStart = k === 0 || runId(k - 1) !== exc.id
+        const runEnd = k === segs.length - 1 || runId(k + 1) !== exc.id
+        return (
           <mark key={`${i}-${k}`} data-eid={exc.id} data-ehc={exc.color} data-tip={exc.note || undefined} aria-label={exc.note || undefined}
-            className={`kb-exc-${exc.color} rounded-sm px-0.5 text-[var(--text-primary)] ${srch ? 'kb-search-hl' : ''} ${isActive ? 'kb-search-active' : ''}`}>
+            className={`kb-exc-${exc.color} text-[var(--text-primary)] ${runStart ? 'rounded-l-sm pl-0.5' : ''} ${runEnd ? 'rounded-r-sm pr-0.5' : ''} ${srch ? 'kb-search-hl' : ''} ${isActive ? 'kb-search-active' : ''}`}>
             {segText}
-          </mark>,
+          </mark>
         )
       } else if (srch) {
-        nodes.push(
-          <mark key={`${i}-${k}`} className={`kb-search-hl rounded-sm px-0.5 ${isActive ? 'kb-search-active' : ''}`}>{segText}</mark>,
+        return (
+          <mark key={`${i}-${k}`} className={`kb-search-hl rounded-sm px-0.5 ${isActive ? 'kb-search-active' : ''}`}>{segText}</mark>
         )
-      } else {
-        nodes.push(<span key={`${i}-${k}`}>{segText}</span>)
       }
-    }
+      return <span key={`${i}-${k}`}>{segText}</span>
+    })
     return nodes
   }
 

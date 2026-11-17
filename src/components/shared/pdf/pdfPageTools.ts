@@ -8,7 +8,8 @@
  * 2. 搜索命中高亮；
  * 3. 摘录叠加框（百分比矩形，与缩放无关）。
  */
-import type { ExcerptItem, ExcerptRect } from '../../../types'
+import type { ExcerptItem } from '../../../types'
+import { visibleRects, type OverlapRect } from '../excerptOverlap'
 
 /** 官方页元素选择器（页面盒带 data-page-number 属性） */
 export const PAGE_SEL = '.page'
@@ -70,8 +71,14 @@ export function markSearchMatches(layer: HTMLElement | null | undefined, query: 
 
 /**
  * 摘录叠加：把摘录 rects（**文本层百分比**）画进该页文本层。
- * 幂等：以 data-ehl（`摘录id:序号`）标记去重 + 清陈旧 —— 文本层重建（缩放/翻页/换模式）后
- * 重跑即可补画；滚动不重建文本层，已画的框随层存在，无需每页重跑。
+ *
+ * 幂等：整页先算一个**签名**（条目 id / 颜色 / 几何），签名没变就整体跳过；
+ * 变了就清干净重画 —— 缩放 / 翻页 / 换模式后文本层重建（新层没有签名）会自然重画，
+ * 摘录增删或重叠关系变化也只会重画受影响的那一页。
+ *
+ * 重叠口径：**后建的盖住先建的**（见 `excerptOverlap.ts`）—— 同一段被两条摘录覆盖时，
+ * 旧条目扣掉新条目的矩形，屏幕上永远只有一种颜色，不会 alpha 叠加成脏色。
+ *
  * 百分比口径成立的前提是「文本层盒 == 画布盒」，见 pdfViewerTheme.css ②（页面边框归零）。
  */
 export function paintExcerptOverlays(
@@ -80,26 +87,39 @@ export function paintExcerptOverlays(
   excerpts: ExcerptItem[],
 ): void {
   if (!layer || !page) return
-  const hits = excerpts.filter((e) => e.kind === 'pdf' && e.page === page && e.rects?.length)
-  const wanted = new Set<string>()
-  for (const e of hits) for (let i = 0; i < (e.rects?.length ?? 0); i++) wanted.add(`${e.id}:${i}`)
-  layer.querySelectorAll<HTMLElement>('.kb-excerpt-hl').forEach((d) => {
-    if (!wanted.has(d.dataset.ehl ?? '')) d.remove()
-  })
-  for (const e of hits) {
-    (e.rects ?? []).forEach((r: ExcerptRect, idx: number) => {
-      const mark = `${e.id}:${idx}`
-      if (layer.querySelector(`.kb-excerpt-hl[data-ehl="${mark}"]`)) return
+  const hits = excerpts
+    .filter((e) => e.kind === 'pdf' && e.page === page && e.rects?.length)
+    .slice()
+    // 创建时间升序：数组后段 = 更新，画的时候从后往前（新 → 旧）扣覆盖
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+
+  const sig = hits
+    .map((e) => `${e.id}:${e.color}:${(e.rects ?? []).map((r) => `${r.l},${r.t},${r.w},${r.h}`).join(';')}`)
+    .join('|')
+  if (layer.dataset.ehsig === sig) return
+  layer.dataset.ehsig = sig
+  layer.querySelectorAll<HTMLElement>('.kb-excerpt-hl').forEach((d) => d.remove())
+
+  const covers: OverlapRect[] = []
+  for (let k = hits.length - 1; k >= 0; k--) {
+    const e = hits[k]
+    const own: OverlapRect[] = (e.rects ?? []).map((r) => ({
+      left: r.l, top: r.t, right: r.l + r.w, bottom: r.t + r.h,
+    }))
+    // 百分比单位：0.0005 = 半页宽度的千分之一，肉眼不可见
+    const vis = visibleRects(own, covers, 0.0005)
+    const ehc = e.color ?? 'y'
+    vis.forEach((r, idx) => {
       const d = document.createElement('div')
-      const ehc = e.color ?? 'y'
       d.className = `kb-excerpt-hl kb-exc-${ehc}`
-      d.dataset.ehl = mark
+      d.dataset.ehl = `${e.id}:${idx}`
       d.dataset.ehc = ehc
-      d.style.left = `${(r.l * 100).toFixed(3)}%`
-      d.style.top = `${(r.t * 100).toFixed(3)}%`
-      d.style.width = `${(r.w * 100).toFixed(3)}%`
-      d.style.height = `${(r.h * 100).toFixed(3)}%`
+      d.style.left = `${(r.left * 100).toFixed(3)}%`
+      d.style.top = `${(r.top * 100).toFixed(3)}%`
+      d.style.width = `${((r.right - r.left) * 100).toFixed(3)}%`
+      d.style.height = `${((r.bottom - r.top) * 100).toFixed(3)}%`
       layer.appendChild(d)
     })
+    covers.push(...own)
   }
 }

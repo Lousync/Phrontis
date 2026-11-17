@@ -15,6 +15,7 @@
  *   5) 划选 → 浮条 → 摘录：excerpts.json 落 kind='epub' + cfi + chapter；Overlayer 高亮真的画上
  *   5.5) 点已有高亮 → 回看卡（且不翻页）—— 这条路径曾因写成 `view.getContents()`（不存在）而失效
  *   5.6) ★ 删除摘录 → 正文高亮立即消失（B-61：foliate 的 addAnnotation 只管加、不管撤）
+ *   5.7) ★ 重叠不混色（B-61）：两条不同色的高亮压在同一段上 → 两种色块互不交叠
  *   6) 点目录「第三章」→ toolbar 章节标签变 + 内容帧真的换页（KB_EPUB_GOTO_CFI 的 href 目标可用）
  *   6.5) 侧边点击翻页：悬停边缘出**手型光标**；点左/右边缘真的翻页（跨章 + 进度双向变化）；
  *        ★ 两条负向 —— 点正中不翻页（中间留给划选）、从边缘起**拖**不翻页（拖动 = 划选）
@@ -232,6 +233,53 @@ async function main() {
     ok('★ 删除摘录 → 正文高亮立即消失（不留残色）', leftRects.length === 0, `rects=${JSON.stringify(leftRects)}`)
     ok('删除摘录 → excerpts.json 同步清空（kind=epub）',
       excerptsOf(BOOK).filter((e) => e.kind === 'epub').length === 0)
+  }
+
+  // ===== 5.7) 重叠不混色（B-61）：两条不同色的高亮压在同一段上 =====
+  {
+    const c = (await ctxWithText('这一段用于验证'))?.ctx ?? ctx0
+    const selectSpan = (a, b) => evalIn(c, `(() => {
+      const p = [...document.querySelectorAll('p')].find((x) => (x.textContent || '').trim().length >= 24)
+      if (!p || !p.firstChild) return 'no-p'
+      const tn = p.firstChild
+      const r = document.createRange()
+      r.setStart(tn, ${a})
+      r.setEnd(tn, Math.min(${b}, tn.data.length))
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r)
+      p.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+      return 'ok:' + s.toString().slice(0, 16)
+    })()`)
+    const pickColor = (name) => evalJs(`(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('data-tip') || '') === '以${name}色高亮')
+      if (!b) return false
+      b.click(); return true
+    })()`)
+
+    ok('选整段（老条目）', String(await selectSpan(0, 24)).startsWith('ok:'))
+    await sleep(500)
+    ok('点黄色色点 → 建第一条高亮', (await pickColor('黄')) === true)
+    await sleep(1000)
+    ok('选重叠子段（新条目）', String(await selectSpan(6, 18)).startsWith('ok:'))
+    await sleep(500)
+    ok('点蓝色色点 → 建第二条高亮（压在第一条上）', (await pickColor('蓝')) === true)
+    await sleep(1200)
+
+    const rects = await pierceRects()
+    const fills = [...new Set(rects.map((r) => r.fill))]
+    console.log('[重叠诊断]', JSON.stringify(rects))
+    ok('两种颜色的高亮都画在正文里', fills.length >= 2, `fills=${JSON.stringify(fills)}`)
+    let mixed = null
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i]
+        const b = rects[j]
+        if (a.fill === b.fill) continue
+        const ix = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+        const iy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+        if (ix > 1 && iy > 1) mixed = { a, b, ix: Math.round(ix), iy: Math.round(iy) }
+      }
+    }
+    ok('★★ 两种颜色的高亮块互不交叠（后建的盖住先建的，不混色）', !mixed, JSON.stringify(mixed))
   }
 
   // ===== 6) 目录跳转 =====

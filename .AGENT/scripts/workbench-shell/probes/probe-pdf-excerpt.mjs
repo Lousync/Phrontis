@@ -10,6 +10,7 @@
  *   2) span 的 computed user-select = text（白名单生效）
  *   3) 真实鼠标拖选一行 → TextSelectionBar 出现（复制 + 摘录按钮）
  *   4) 点「摘录」→ excerpts.json 落 pdf 条目 + 页面出现 .kb-excerpt-hl 高亮块
+ *   5) ★ 重叠不混色（B-61）：同一行再建一条别的颜色 → 两种色块互不交叠（后建的盖住先建的）
  */
 const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT ?? 9222)
 const { readFileSync } = await import('node:fs')
@@ -242,6 +243,47 @@ async function main() {
     return { all, withEhc, y }
   })()`)
   ok('PDF 高亮块带 data-ehc（多色落地）', ehc.withEhc > 0, JSON.stringify(ehc))
+
+  // ===== 5.2) 重叠不混色（B-61）：同一行再建一条别的颜色，两种色块不得交叠 =====
+  {
+    const usedColor = String(pdfEntries[0]?.color ?? 'y')
+    const NAME = { y: '黄', g: '绿', b: '蓝', p: '粉', v: '紫' }
+    const nextColor = usedColor === 'b' ? 'g' : 'b'
+    const xa = x0 + (x1 - x0) * 0.3
+    const xb = x1 - (x1 - x0) * 0.3
+    await drag('mousePressed', xa, y)
+    for (let i = 1; i <= 6; i++) {
+      await drag('mouseMoved', Math.round(xa + (xb - xa) * i / 6), y)
+      await sleep(30)
+    }
+    await drag('mouseReleased', xb, y)
+    await sleep(500)
+    const picked = await evalJs(`(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => (x.getAttribute('data-tip') || '') === '以${NAME[nextColor]}色高亮')
+      if (!b) return false
+      b.click(); return true
+    })()`)
+    ok(`重叠同段落：点「${NAME[nextColor]}」色点建第二条高亮`, picked === true)
+    await sleep(1000)
+    const mix = await evalJs(`(() => {
+      const boxes = [...document.querySelectorAll('.kb-excerpt-hl')].map((el) => {
+        const r = el.getBoundingClientRect()
+        return { c: el.dataset.ehc, l: r.left, t: r.top, r: r.right, b: r.bottom }
+      })
+      let hit = null
+      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j]
+        if (a.c === b.c) continue
+        const ix = Math.min(a.r, b.r) - Math.max(a.l, b.l)
+        const iy = Math.min(a.b, b.b) - Math.max(a.t, b.t)
+        if (ix > 1 && iy > 1) hit = { a, b, ix: Math.round(ix), iy: Math.round(iy) }
+      }
+      return { n: boxes.length, colors: [...new Set(boxes.map((x) => x.c))], hit }
+    })()`)
+    console.log('[PDF 重叠诊断]', JSON.stringify(mix))
+    ok('★★ 两种颜色的 PDF 高亮块互不交叠（后建的盖住先建的，不混色）',
+      Array.isArray(mix?.colors) && mix.colors.length >= 2 && !mix.hit, JSON.stringify(mix))
+  }
   const errs = await evalJs(`window.__errs ?? []`)
   if (errs.length) console.log('[window errors]', JSON.stringify(errs.slice(0, 5)))
 
