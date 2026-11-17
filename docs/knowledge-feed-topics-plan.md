@@ -215,14 +215,20 @@ patchKnowledgeTopicMembers(id, p: { add?: string[]; remove?: string[] }): Promis
   - 删除走行内确认卡；删除后关闭标签、回总览，笔记全部保留。
 - 主题改名后同步更新页签标题；主题被删/失效时，激活中的标签自动关闭并提示。
 
-### 4.4 大纲（阅读态自动切）
+### 4.4 大纲（阅读 / 编辑都自动切）
+
+> 2026-11-17 修订（v3.43.0）：编辑态不再退回列表，大纲成为阅读与编辑共用的左栏形态。
+> 实现与取舍见 `docs/knowledge-edit-outline-plan.md`。
 
 - `PageEditor` 新增可选回调 `onPreviewChange?: (preview: boolean) => void`（只在主栏实例传）；模块记 `activePreview`，切页复位。
-- 侧栏模式：`outlineMode = activeIsMd && activePreview && !manualFeed`。
+- 侧栏模式：`outlineMode = activeIsMd && !manualFeed && !homeActive && !activeTopicId`（阅读 / 编辑都成立）。
   - `manualFeed=true`：用户点了「返回列表」或三视图切换；切页复位。
   - 顶部 `大纲` 按钮 → `manualFeed=false`。
   - 非 md / 无页 → 自动回列表。
-- 大纲内容复用 `components/shared/OutlinePanel.tsx`（embedded），标题来自现有 `outlineHeadings`；点标题滚动走现有 `outline:go-to-heading` 通道。
+- 来源与节奏：主栏实时正文（`liveContent` + `livePageId` 校验归属）；编辑态解析做 150ms 防抖，
+  阅读态直接跟随；切页立即清空，装载完成前显示「正在加载正文…」。
+- 大纲内容复用 `components/shared/OutlinePanel.tsx`（embedded），点标题走现有 `outline:go-to-heading` 通道；
+  事件 detail 带 `pageId`，分屏时只驱动主栏那一页。
 - 沉浸阅读（`readingMode`）沿用现有 `immersiveTabOverride === 'outline'` 分支，不新造第二套。
 
 ### 4.5 头部动作
@@ -350,7 +356,7 @@ patchKnowledgeTopicMembers(id, p: { add?: string[]; remove?: string[] }): Promis
 | 风险 | 处理 |
 |---|---|
 | PageTabStrip 改 home/topic 影响工作台页面条 | 只加可选字段，默认行为不变；契约 + 真机检查 |
-| `preview` 默认 true ⇒ 打开笔记即大纲，用户可能找不到列表 | `manualFeed` 覆盖 + 「返回列表」按钮 + 三视图切换；切页复位 |
+| `preview` 默认 true ⇒ 打开笔记即大纲，用户可能找不到列表 | `manualFeed` 覆盖 + 「返回列表」按钮 + 三视图切换；切页复位（编辑态也保持大纲，v3.43.0） |
 | 摘要进索引要 bump schema，首次重建一次 | 可接受；重建在启动时一次完成 |
 | `auto:` 身份断链 | path 兜底 + 读取时内存修复 + 契约覆盖 |
 | 主题文件损坏 | 备份 + 空列表；不静默覆盖 |
@@ -387,7 +393,7 @@ patchKnowledgeTopicMembers(id, p: { add?: string[]; remove?: string[] }): Promis
 - [ ] `auto:` 页加入主题 → 首次保存补 id → 成员仍在。
 - [ ] 删除主题：行内确认 → 笔记全部保留。
 - [ ] 总览标签常驻、不可关；关闭所有页面后自动回总览。
-- [ ] 阅读态左栏自动大纲；点「返回列表」回笔记流；切到编辑回笔记流。
+- [ ] 阅读 / 编辑左栏都自动大纲；点「返回列表」回笔记流；编辑时增删标题大纲跟着刷新。
 - [ ] 未归类数 = 总数 − 去重成员数；0 主题时全为未归类。
 - [ ] 明/暗主题下 6 个主题色都可读。
 - [ ] 类型门禁 + 契约 + build 全绿。

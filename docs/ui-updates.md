@@ -2932,3 +2932,15 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约 `verify-daycycle.mjs` 增 C9l（语义类接线 + daycycle 去底色 / 去吸顶）。
 
 **验收**：`tsc --noEmit -p tsconfig.web.json` 0 错；`verify-daycycle.mjs` 全绿。
+
+## 2026-11-17 · 笔记编辑态左栏保持大纲并实时刷新
+
+**现状 / 用户反馈**：左栏自动大纲只在阅读态生效（`outlineMode` 含 `activePreview`）；一进编辑就退回最近 / 主题 / 结构列表，写长文时想按标题定位只能先切回阅读态或手动滚动。
+
+**改动点**：
+- `src/modules/knowledge/index.tsx`：`outlineMode` 去掉 `activePreview`（md + `manualFeed` 边界不变）；大纲正文新增 `livePageId` 归属校验、编辑态 150ms 防抖快照、切页清空与「正在加载正文…」占位；沉浸阅读改用阅读页正文。
+- `src/components/shared/OutlinePanel.tsx`：新增 `pageId` / `loading`；跳转事件 detail 带 `pageId`，行点击与回车定位都透传。
+- `src/modules/knowledge/components/PageEditor.tsx`、`src/modules/blog/components/MarkdownEditor.tsx`：按 `pageId` 过滤跳转，分屏只驱动主栏，博客忽略知识库事件。
+- 文档：`docs/knowledge-edit-outline-plan.md`；`docs/knowledge-feed-topics-plan.md` §4.4 / 验收同步；帮助手册《笔记 · 主题与总览》《模块一览》。
+
+**验收**：双端 `tsc --noEmit` 0 错；`verify-outline-edit.mjs`、`verify-topics.mjs`、`verify-workbench-shell.mjs` 全绿；原型 `tmp/knowledge-outline-edit-proto/index.html` 10/10 交互自检。

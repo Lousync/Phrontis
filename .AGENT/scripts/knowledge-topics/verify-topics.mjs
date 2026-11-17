@@ -9,7 +9,7 @@
 //   ② 纯函数真值：未归类 / 多主题 / 目录分组 / 分组时间边界 / 搜索过滤 / 身份 path 兜底
 //   ③ 身份修复：auto 成员按 path 回查 + 失效成员惰性剔除（源码断言）
 //   ④ IPC：5 个通道、写通道广播、读通道不广播
-//   ⑤ 渲染契约：三视图、总览常驻标签、阅读态自动大纲、拖到主题 ≠ 移动文件
+//   ⑤ 渲染契约：三视图、总览常驻标签、自动大纲（阅读 / 编辑）、拖到主题 ≠ 移动文件
 //
 // 运行（项目根目录）：
 //   node --experimental-strip-types --no-warnings .AGENT/scripts/knowledge-topics/verify-topics.mjs
@@ -133,7 +133,7 @@ check('⑤ 结构视图复用 VaultTree', /feedView === 'recent'[\s\S]*?feedView
 check('⑤ 总览是常驻固定标签（closable:false + HOME_TAB_ID）', /HOME_TAB_ID, title: '总览', kind: 'home' as const, closable: false/.test(mod))
 check('⑤ 点总览标签不清空已开页面（只改 homeActive）', /setHomeActive\(true\)/.test(mod) && /setActiveTopicId\(null\)/.test(mod))
 check('⑤ 风格页面条恒可见（onStripVisible 恒 true）', /onStripVisibleRef\.current\?\.\(true\)/.test(mod))
-check('⑤ 阅读态自动大纲（activePreview + manualFeed 覆盖）', /const outlineMode = .*activeIsMd.*activePreview.*manualFeed/.test(mod))
+check('⑤ 自动大纲（阅读 / 编辑都生效，manualFeed 可覆盖）', /const outlineMode = [^\n]*activeIsMd[^\n]*manualFeed/.test(mod) && !/const outlineMode = [^\n]*activePreview/.test(mod))
 check('⑤ PageEditor 上报阅读态', /onPreviewChange=/.test(mod))
 check('⑤ PageEditor 接线 onPreviewChange', /onPreviewChange\?: \(preview: boolean\)/.test(stripComments(read('src/modules/knowledge/components/PageEditor.tsx'))))
 check('⑤ ＋ 菜单含「新建主题」且只在主题视图给出（不点了先切视图）', /feedView === 'topics'[\s\S]{0,160}?label: '新建主题'/.test(mod))

@@ -13,6 +13,8 @@
     --csv    全量 ecdict.csv 路径（默认用缓存/下载）
     --lemma  lemma.en.txt 路径
     --out    输出路径（默认 resources/dict/ecdict-exam.json）
+    --lemma-only  只重算 lemma 反查表（复用 --out 里现有的 words/roots 等，
+                  不下载 100MB CSV）。修词形表规则后用它就地重刷即可。
 词根数据：ECDICT 的 wordroot.txt（JSON 格式，root→释义/词源/例词），
 经倒排后输出两个索引：
     roots     root → {m:词根含义, c:类别, o:词源, words:词典内例词}
@@ -146,15 +148,54 @@ def build_synonyms(words):
     return {w: s[:6] for w, s in synonyms.items() if len(s) >= 2}
 
 
+def build_lemma(lemma_path, words):
+    """词形还原反查表：inflected → base（仅保留 base 已入选的映射）。
+
+    lemma.en.txt 按 base 的词频降序排列，同一个变形可能挂在多个 base 下
+    （is 既在 be 下、也在 i 下；was 在 be 下，文件末尾还有一条 `wa -> was`）。
+    必须**先到先得**（setdefault）：保留高频 base；否则末尾那些低频同形词条
+    （wa / ha / doe）会覆盖正确映射，查 is 出「i」、查 was 查不到、查 does 出「母鹿」。"""
+    lemma = {}
+    with open(lemma_path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith(";") or "->" not in line:
+                continue
+            base_part, forms_part = line.split("->", 1)
+            base = base_part.split("/")[0].strip().lower()
+            if base not in words:
+                continue
+            for form in forms_part.split(","):
+                form = form.strip().lower()
+                if form and form.isalpha() and form != base and form not in words:
+                    lemma.setdefault(form, base)
+    return lemma
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv")
     ap.add_argument("--lemma")
     ap.add_argument("--out", default=os.path.join("resources", "dict", "ecdict-exam.json"))
+    ap.add_argument("--lemma-only", action="store_true",
+                    help="只重算 lemma 反查表，复用 --out 现有词条与词根/同义词索引")
     args = ap.parse_args()
 
-    csv_path = fetch("ecdict.csv", CSV_URLS, args.csv)
     lemma_path = fetch("lemma.en.txt", LEMMA_URLS, args.lemma)
+
+    if args.lemma_only:
+        with open(args.out, encoding="utf-8") as f:
+            data = json.load(f)
+        words = data.get("words") or {}
+        if not words:
+            sys.exit(f"[dict] {args.out} 没有 words，无法只重算词形表")
+        data["lemma"] = build_lemma(lemma_path, words)
+        with open(args.out, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        size_mb = os.path.getsize(args.out) / 1024 / 1024
+        print(f"[dict] 词形表已重算: {len(data['lemma'])} 条映射, {size_mb:.1f} MB -> {args.out}")
+        return
+
+    csv_path = fetch("ecdict.csv", CSV_URLS, args.csv)
     print(f"[dict] 词库: {csv_path}\n[dict] 词形表: {lemma_path}")
 
     words = {}
@@ -190,19 +231,7 @@ def main():
             ]
 
     # 词形还原反查表：inflected → base（仅保留 base 已入选的映射）
-    lemma = {}
-    with open(lemma_path, encoding="utf-8") as f:
-        for line in f:
-            if line.startswith(";") or "->" not in line:
-                continue
-            base_part, forms_part = line.split("->", 1)
-            base = base_part.split("/")[0].strip().lower()
-            if base not in words:
-                continue
-            for form in forms_part.split(","):
-                form = form.strip().lower()
-                if form and form.isalpha() and form != base and form not in words:
-                    lemma[form] = base
+    lemma = build_lemma(lemma_path, words)
 
     roots, word_roots = build_roots(words, None)
     synonyms = build_synonyms(words)

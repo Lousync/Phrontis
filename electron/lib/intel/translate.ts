@@ -1,4 +1,4 @@
-import { invokeLlmInternal, resolveInlineSuggestFallback, firstEnabledModelSpec } from '../llmService'
+import { invokeLlmInternal, resolveNonThinkingFallback, firstEnabledModelSpec } from '../llmService'
 import { allTranslationCache, upsertTranslationCache } from '../../database/repositories/translationRepo'
 import { intelTextHash, isEnglishText, parseTranslateArray } from '../../../src/lib/intelPure'
 import type { IntelGetSetting } from './intelSettings'
@@ -103,9 +103,9 @@ type BatchOutcome = { ok: true; out: string[]; model: string } | { ok: false; co
 
 /** 单批：texts 已去重去缓存；configFail = 供应商/模型配置类失败（→ 会话熔断 noModel） */
 export async function translateBatch(texts: string[], kind: 'title' | 'summary'): Promise<BatchOutcome> {
-  // 模型解析（TD6）：默认链命中思考型自动降级（resolveInlineSuggestFallback 内置该判据），
+  // 模型解析（TD6）：默认链命中思考型自动降级（resolveNonThinkingFallback 内置该判据），
   // 无 defaultChatModel 时兜底第一个启用供应商 —— 翻译不需要思考链
-  const spec = resolveInlineSuggestFallback() ?? firstEnabledModelSpec()
+  const spec = resolveNonThinkingFallback() ?? firstEnabledModelSpec()
   if (!spec) return { ok: false, configFail: true }
   const system = kind === 'title' ? TITLE_SYSTEM : SUMMARY_SYSTEM
   const attempt = async (extraNote?: string): Promise<BatchOutcome> => {

@@ -9,7 +9,11 @@
  *   · 视图里写死的 aiTab 值不在 AiTab 联合里 ⇒ 跳转落到不存在的页签。
  * 三种都不报错、编译也过。所以把它钉成契约。
  *
- * 跑法：node .AGENT/scripts/settings/verify-ai-tab-anchors.mjs
+ * 跑法（Node 22+ 直接 `node` 跑会被 settings.ts 的无扩展名 import 卡住，
+ * 故先 esbuild 打包到**同目录**临时文件 —— 脚本用 import.meta.url 定位仓库根，位置不能换）：
+ *   npx esbuild .AGENT/scripts/settings/verify-ai-tab-anchors.mjs --bundle --platform=node \
+ *     --format=esm --outfile=.AGENT/scripts/settings/.tmp-verify-ai-anchors.mjs
+ *   node .AGENT/scripts/settings/.tmp-verify-ai-anchors.mjs
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, extname } from 'node:path'
@@ -151,7 +155,10 @@ console.log('\n[去向] 原型 28 项去向表')
 const MAP_TO_TAB = {
   // 模型
   modelProviders: 'models', defaultChatModel: 'models', assistantModelId: 'models',
-  aiAssistantInlineSuggestModelId: 'models', agentCompressModelId: 'models',
+  aiAssistantInlineSuggestModelId: 'models',
+  // 场景分配表的「划词翻译」槽位（句子/段落翻译 + 单词 AI 精讲；PDF 划词同用）
+  aiTranslateModelId: 'models',
+  agentCompressModelId: 'models',
   aiFreeModelIds: 'models',
   // 权限
   aiModulePermissions: 'perms', aiVaultFilePerm: 'perms', terminalAiExec: 'perms',
@@ -187,6 +194,23 @@ for (const [key, want] of Object.entries(MAP_TO_TAB)) {
 for (const key of ['assistantWidth', 'learnProgress']) {
   check(`${key}（原型标「不动」）不应有 aiTab`, !meta[key]?.aiTab, `实际 ${meta[key]?.aiTab}`)
 }
+
+// ===== 6.1 场景分配表 ↔ 设置项 =====
+//
+// 场景表是 `SCENES` 手写数组，加槽必须同时加 SETTINGS 条目 —— 少一边就静默失效
+// （设置项存在但表里没落点 = 用户改不到；表里有行但设置项不存在 = update 写一个没人读的键）。
+console.log('\n[场景分配] 槽位 ↔ 设置项')
+const modelsTabSrc = read('src/modules/settings/views/AiModelsTab.tsx')
+const scenesStart = modelsTabSrc.indexOf('const SCENES')
+const scenesEnd = scenesStart >= 0 ? modelsTabSrc.indexOf('\n]', scenesStart) : -1
+const scenesBlock = scenesStart >= 0 && scenesEnd > scenesStart ? modelsTabSrc.slice(scenesStart, scenesEnd) : ''
+const sceneKeys = [...scenesBlock.matchAll(/key: '([A-Za-z]+)'/g)].map(m => m[1])
+check('SCENES 可解析（至少 7 个槽位）', sceneKeys.length >= 7, `实际 ${sceneKeys.length}`)
+for (const key of sceneKeys) {
+  check(`场景槽位 ${key} 在 SETTINGS 中存在且属模型页`, Boolean(meta[key]) && meta[key].aiTab === 'models',
+    meta[key] ? `aiTab=${meta[key].aiTab ?? '（未声明）'}` : 'SETTINGS 无此键')
+}
+check('划词翻译槽位已登记', sceneKeys.includes('aiTranslateModelId'))
 
 // ===== 7. 「复位」的范围（只动本页签；安全开关不参与） =====
 

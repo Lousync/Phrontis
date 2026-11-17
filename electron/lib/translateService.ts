@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { ipcMain } from 'electron'
-import { invokeLlmInternal } from './llmService'
+import { invokeLlmInternal, resolveNonThinkingFallback } from './llmService'
+import { getSettingReader } from './aiTools'
 import { getTranslationCache, upsertTranslationCache } from '../database/repositories/translationRepo'
 import { getDictionaryStatus, lookupWord } from './dictionaryService'
 import type { DictLookupResult, TranslateInvokeRequest, TranslateInvokeResult, TranslateMode } from '../../src/lib/translateTypes'
@@ -8,7 +9,8 @@ import type { DictLookupResult, TranslateInvokeRequest, TranslateInvokeResult, T
 /**
  * 划词翻译：单词走离线词典（dictionaryService），句子/段落与 AI 精讲走
  * invokeLlmInternal（单次补全、不经 agent 工具循环），结果按 cache_key 落
- * translation_cache 表，重复划词零 token。
+ * translation_cache 表，重复划词零 token。模型取设置 aiTranslateModelId
+ * （场景分配「划词翻译」）；留空跟随默认链并做思考型降级（见 llmService.resolveNonThinkingFallback）。
  */
 
 const MAX_TRANSLATE_CHARS = 5000
@@ -49,7 +51,8 @@ const WORD_AI_SYSTEM_PROMPT = `你是一位面向中国大学生的英语词汇�
 总字数控制在 350 字以内,不要寒暄。`
 
 function detectMode(text: string): TranslateMode {
-  return /^[A-Za-z][A-Za-z''-]*$/.test(text.trim()) ? 'word' : 'sentence'
+  // 与渲染层 isSingleWord 保持同一口径（含排版弯撇号 ’）
+  return /^[A-Za-z][A-Za-z'’-]*$/.test(text.trim()) ? 'word' : 'sentence'
 }
 
 function cacheKeyFor(mode: TranslateMode, ai: boolean, text: string): string {
@@ -57,11 +60,13 @@ function cacheKeyFor(mode: TranslateMode, ai: boolean, text: string): string {
   return `sent:${createHash('sha1').update(text).digest('hex')}`
 }
 
-function buildWordAiUserPrompt(word: string, dict: DictLookupResult): string {
+function buildWordAiUserPrompt(word: string, dict: DictLookupResult, dictAvailable: boolean): string {
   const e = dict.entry
   const known = e
     ? `词典释义:${e.translationLines.slice(0, 4).join('; ') || '(无)'}${e.definition ? `\n英文释义:${e.definition}` : ''}`
-    : '词典未收录该词(可能是生僻词或人名等),请谨慎判断它是否为规范英文词。'
+    : dictAvailable
+      ? '词典未收录该词(可能是生僻词或人名等),请谨慎判断它是否为规范英文词。'
+      : '离线词典数据当前不可用,请直接按你的知识讲解该词。'
   return `单词:${word}\n${known}`
 }
 
@@ -88,9 +93,29 @@ async function translateInvoke(req: TranslateInvokeRequest): Promise<TranslateIn
   }
 
   const system = mode === 'word' ? WORD_AI_SYSTEM_PROMPT : SENTENCE_SYSTEM_PROMPT
-  const user = mode === 'word' ? buildWordAiUserPrompt(text, dict) : text
+  const user = mode === 'word' ? buildWordAiUserPrompt(text, dict, getDictionaryStatus().available) : text
+
+  // 模型解析（场景分配「划词翻译」）：显式钉死优先，钉死即严格使用、不再替换；
+  // 留空跟随对话默认链，但默认命中思考型时改用同供应商的非思考模型（翻译不需要思考链）。
+  // 未发生降级时不传 pid/mid，保留默认链的故障转移。
+  let providerId: string | undefined
+  let modelId: string | undefined
+  const configured = String(getSettingReader()('aiTranslateModelId') ?? '').trim()
+  if (configured) {
+    const ci = configured.indexOf(':')
+    providerId = ci > 0 ? configured.slice(0, ci) : undefined
+    modelId = ci > 0 ? configured.slice(ci + 1) : configured
+  } else {
+    const fb = resolveNonThinkingFallback()
+    if (fb?.degraded) {
+      providerId = fb.providerId
+      modelId = fb.modelId
+    }
+  }
 
   const r = await invokeLlmInternal({
+    providerId,
+    modelId,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },

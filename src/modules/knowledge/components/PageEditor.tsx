@@ -1250,7 +1250,10 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
   // Outline panel navigation — scroll editor or preview DOM to target heading
   useEffect(() => {
     const handler = (e: Event) => {
-      const { line, id } = (e as CustomEvent).detail as { line: number; id: string }
+      const { line, id, pageId: targetPageId } = (e as CustomEvent).detail as { line: number; id: string; pageId?: string }
+      // 分屏：主栏 / 副栏各挂一个本组件，都在听同一事件。带 pageId 的请求只认自己那一页，
+      // 否则点主栏大纲会把副栏也一起滚走（不带 pageId 的旧事件保持全窗口处理）。
+      if (targetPageId && targetPageId !== pageIdRef.current) return
       if (preview) {
         // Reading mode: **必须在本实例的 previewRef 内查**，不能用 document.getElementById。
         // 工作台把非激活模块 display:none 保活（App 的模块容器序列），隐藏的博客 / 其他

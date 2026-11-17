@@ -176,6 +176,8 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   /** 最近点中的目录（落点兜底）：toggleDir / openFile / 右键都更新它，Ctrl+V 与菜单「粘贴」共用 */
   const lastTreeDirRef = useRef<string>('')
   const [liveContent, setLiveContent] = useState('')
+  /** liveContent 属于哪一页：切页后新编辑器装载前不拿上一篇大纲冒充新页 */
+  const [livePageId, setLivePageId] = useState('')
   const [locatePageId, setLocatePageId] = useState<string | null>(null)
   const [locateCategoryId, setLocateCategoryId] = useState<string | null>(null)
   const [allKnowledgeTags, setAllKnowledgeTags] = useState<KnowledgeTag[]>([])
@@ -224,11 +226,11 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   /** 笔记流聚焦：按活动页顶层目录过滤（null = 不聚焦） */
   const [feedFocusDir, setFeedFocusDir] = useState<string | null>(null)
   /**
-   * 用户在阅读态手动要求「看列表」：true = 暂停自动大纲，显示三视图。
-   * 切页会复位（换一篇又进入阅读态，自动大纲重新接管）。
+   * 用户手动要求「看列表」：true = 暂停自动大纲，显示三视图。
+   * 切页会复位（换一篇重新按自动大纲判定）。
    */
   const [manualFeed, setManualFeed] = useState(false)
-  /** 主栏 PageEditor 当前是否阅读态（onPreviewChange 上报；阅读态左栏自动大纲） */
+  /** 主栏 PageEditor 当前是否阅读态（onPreviewChange 上报；决定大纲解析的实时 / 防抖节奏） */
   const [activePreview, setActivePreview] = useState(true)
   /** 总览是否激活。与 activePageId 并行存在：点总览标签不清空已开页面 */
   const [homeActive, setHomeActive] = useState(true)
@@ -1064,7 +1066,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     // activePageId，视图盖着什么都看不见 = 「点了没反应」。任何页面打开/切换先收错题本视图
     // （QUIZ_VIEW_TOGGLED {open:false} 回流 → App 收页面条错题本条目 + 左栏回笔记态）。
     if (showQuizCollectionRef.current) toggleQuizCollection(false)
-    // 打开页面 = 离开总览 / 主题详情；并复位「手动看列表」覆盖（阅读态自动大纲重新接管）
+    // 打开页面 = 离开总览 / 主题详情；并复位「手动看列表」覆盖（自动大纲重新接管）
     setHomeActive(false)
     setActiveTopicId(null)
     setManualFeed(false)
@@ -1778,7 +1780,10 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
   /** liveContent（大纲/搜索的实时正文）只吃**主栏激活编辑器**的正文：副栏编辑器的正文
    *  不喂这里（否则分屏时大纲跟着副栏页走，而大纲面板挂的是主栏）。 */
   const handleLiveContent = useCallback((body: string, editorPageId?: string) => {
-    if (!editorPageId || editorPageId === activePageIdRef.current) setLiveContent(body)
+    if (!editorPageId || editorPageId === activePageIdRef.current) {
+      setLiveContent(body)
+      setLivePageId(editorPageId ?? activePageIdRef.current ?? '')
+    }
   }, [])
 
   const handleToggleStar = async (pageId: string) => {
@@ -2256,16 +2261,44 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
     if (!activePageId) return null
     return [...allLoosePages, ...chapterPages, ...starredPages].find(p => p.id === activePageId) ?? null
   }, [activePageId, allLoosePages, chapterPages, starredPages])
-  const outlineHeadings = useMemo(() => {
-    // 性能 2026-09-10：列表骨架不再携带正文，改为从阅读页取（编辑器态由 liveContent 兜底）
-    const md = liveContent || (readingPage && readingPage.id === activePageId ? readingPage.contentMd : '') || ''
-    return parseHeadings(md)
-  }, [liveContent, readingPage, activePageId])
+  /** 大纲头的标题：draft: 伪页（快速草稿 / 教学产物）不在页面骨架里，用页签元数据兜底 */
+  const outlineTitle = activePageForOutline?.title
+    || (activePageId ? openPageInfos[activePageId]?.title : '')
+    || '无标题'
+  /** 主栏正文是否已上报（空笔记也会上报一次空串，故用「哪一页」而不是「有没有字」判） */
+  const liveContentReady = !!activePageId && livePageId === activePageId
+  /** 大纲正文源：沉浸阅读 = 阅读页正文（双链换页后大纲也要跟着换）；
+   *  普通态 = 主栏实时正文，尚未装载时回落阅读页快照。 */
+  const outlineSource = readingMode
+    ? (readingPage?.contentMd ?? '')
+    : (liveContentReady
+        ? liveContent
+        : (readingPage && readingPage.id === activePageId ? readingPage.contentMd : ''))
+  /** 大纲解析结果（快照）：编辑时 150ms 防抖，避免每个键都全量重解析；
+   *  阅读态 / 沉浸态直接跟随（正文此时本来就不变）。 */
+  const [outlineMd, setOutlineMd] = useState('')
+  useEffect(() => {
+    if (readingMode || activePreview) { setOutlineMd(outlineSource); return }
+    const t = window.setTimeout(() => setOutlineMd(outlineSource), 150)
+    return () => window.clearTimeout(t)
+  }, [outlineSource, readingMode, activePreview])
+  /** 切页立即清空：新编辑器装载前不拿上一篇的标题冒充新页 */
+  useEffect(() => { setOutlineMd('') }, [activePageId])
+  /** 装载占位的超时兜底：正文一直没上报（读取失败等）时不能永远停在「正在加载正文…」 */
+  const [outlineLoadTimedOut, setOutlineLoadTimedOut] = useState(false)
+  useEffect(() => {
+    setOutlineLoadTimedOut(false)
+    const t = window.setTimeout(() => setOutlineLoadTimedOut(true), 1200)
+    return () => window.clearTimeout(t)
+  }, [activePageId])
+  const outlineHeadings = useMemo(() => parseHeadings(outlineMd), [outlineMd])
   /** 当前主栏页是否 md（大纲可用性的唯一判据；openPageInfos 首载即知类型） */
   const activeIsMd = !!activePageId && (openPageInfos[activePageId]?.fileType ?? '').toLowerCase() === 'md'
-  /** 阅读态左栏自动大纲：md + 阅读态 + 用户没有手动要列表 + 没有停在总览/主题页 */
-  const outlineMode = !readingMode && !!activePageId && !homeActive && !activeTopicId && activeIsMd && activePreview && !manualFeed
-  // 换页复位（v3.27.0）：手动「返回列表」覆盖只对当前页面有效；换一篇重新按阅读态自动判定
+  /** 左栏自动大纲（v3.43.0：阅读态 **与编辑态** 都保持）：md + 用户没有手动要列表 + 没有停在总览/主题页 */
+  const outlineMode = !readingMode && !!activePageId && !homeActive && !activeTopicId && activeIsMd && !manualFeed
+  /** 大纲装载占位（仅非沉浸态的普通左栏用；沉浸态正文由 readingPage 直接给） */
+  const outlineLoading = !readingMode && !!activePageId && !liveContentReady && !outlineLoadTimedOut
+  // 换页复位（v3.27.0）：手动「返回列表」覆盖只对当前页面有效；换一篇重新按自动大纲判定
   useEffect(() => {
     setManualFeed(false)
     setActivePreview(true)
@@ -2505,6 +2538,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                 <OutlinePanel
                   pageTitle={readingPage?.title || '无标题'}
                   headings={outlineHeadings}
+                  pageId={readingPage?.id ?? activePageId ?? undefined}
                   /* 沉浸态无「文件树」可回（切换行按拍板①不渲染）—— 传空实现保住 props 契约 */
                   onBackToFile={() => { /* 沉浸态不提供返回文件视图，退出沉浸即可 */ }}
                   embedded
@@ -2724,7 +2758,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
             而非复制渲染，全部状态留在本组件（方案 §7 风险2）。否则回落原位 ResizablePanel。
             两形态显隐一致：portal 传 null ⇔ ResizablePanel visible=false 不渲染 children；
             且 sidebarEl 形态下 ResizablePanel 整体不渲染，模块中间区不再残留收起边条。 */}
-        {/* 头部动作（v3.27.0 笔记流）：＋ / 排序 / 展开收起 / 聚焦；阅读态自动大纲时只留「返回列表」。
+        {/* 头部动作（v3.27.0 笔记流）：＋ / 排序 / 展开收起 / 聚焦；自动大纲（阅读 / 编辑）时只留「返回列表」。
             house / lock 由工作台头部提供，本模块不重复造。 */}
         {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
           outlineMode ? (
@@ -2837,8 +2871,9 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
             data-wb="kbFeedSidebar"
             data-kb-sidebar-view={outlineMode ? 'outline' : feedView}
           >
-            {/* 左栏两种形态（v3.27.0，docs/knowledge-feed-topics-plan.md §4.1/§4.4）：
-                · 阅读态自动大纲（md + preview + 用户没手动要列表）；
+            {/* 左栏两种形态（v3.27.0，docs/knowledge-feed-topics-plan.md §4.1/§4.4；
+                v3.43.0 起编辑态也保持大纲，见 docs/knowledge-edit-outline-plan.md）：
+                · 自动大纲（md + 用户没手动要列表；阅读 / 编辑都生效）；
                 · 否则三视图：最近（笔记流）/ 主题（虚拟集合）/ 结构（复用 VaultTree）。 */}
             {outlineMode ? (
               <div className="kb-view-in flex min-h-0 flex-1 flex-col" data-wb="kbOutlineMode">
@@ -2851,11 +2886,13 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                   >
                     <List size={13} /><span>返回列表</span>
                   </button>
-                  <span className="ml-auto min-w-0 truncate text-[10.5px] text-[var(--text-muted)]">{activePageForOutline?.title || '无标题'}</span>
+                  <span className="ml-auto min-w-0 truncate text-[10.5px] text-[var(--text-muted)]">{outlineTitle}</span>
                 </div>
                 <OutlinePanel
-                  pageTitle={activePageForOutline?.title || '无标题'}
+                  pageTitle={outlineTitle}
                   headings={outlineHeadings}
+                  pageId={activePageId ?? undefined}
+                  loading={outlineLoading}
                   onBackToFile={() => setManualFeed(true)}
                   embedded
                 />
@@ -3283,7 +3320,7 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
                 onMarkDirty={handleMarkDirty}
                 onClearDirty={handleClearDirty}
                 onRequestReading={enterReading}
-                /* v3.27.0：阅读态上报 → 左栏自动切大纲 */
+                /* v3.27.0：阅读态上报 → 决定大纲解析的实时 / 防抖节奏（编辑态 150ms 防抖） */
                 onPreviewChange={(v) => setActivePreview((prev) => (prev === v ? prev : v))}
                 vaultMode={true} // R6 D9 后恒 vault
                 onOpenInEditor={() => handleOpenInEditor(activePageId)}

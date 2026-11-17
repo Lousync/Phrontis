@@ -2194,3 +2194,10 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 ## [ ] B-59 AI 教学体验问题清单 5 条未落码（2026-11-14，P2；ai-teaching-ux-feedback 转入）
 
 **范围**：① 交接文档重复 + ask 选项卡出现「生成交接文档」；② 支线旁问新建后第一条消息发出去没效果；③~⑤ 全清单见原文（每条已带现象 / 口径 / 根因 / 建议修复 / 涉及文件 / 验收）。方案原文：DP `Phrontis/过程记录/ai-teaching-ux-feedback-2026-10-28.md`。
+
+## [ ] B-60 PDF 阅读器划词翻译选中单个单词时结果框空白（2026-11-17，P2；修离线词典时发现）
+
+**现象**：PDF 内嵌阅读器选中一个单词点「翻译」，浮条里的结果区是空白，无任何报错或提示。
+**根因**：`src/components/shared/pdf/PdfReaderView.tsx` 的 `doTranslateSel` 调 `translateInvoke({ text })`；`electron/lib/translateService.ts` 的 `detectMode` 把单词判为 `word`，`req.ai` 缺省 → 返回 `{ ok: true, mode: 'word', markdown: '' }`（词典结果只在 `dict` 字段）。`TextSelectionBar` 只渲染 `translate.text`（即 markdown 字段），于是空白。
+**建议**：`translateService` 在 `word && !wantAi` 时用 `dict` 拼一段纯文本（词 + 音标 + 前几条释义）回填 `markdown`；或 PDF 浮条直接消费 `dict` 字段并按词典样式渲染。Markdown 文章的 `TranslateCard` 不受影响（它直连 `dictLookup`）。
+

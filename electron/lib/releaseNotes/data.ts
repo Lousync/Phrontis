@@ -4,11 +4,134 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：92
+ * 版本数：94
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.43.1",
+    "date": "2026-11-17",
+    "summary": "本版一句话：划词翻译终于能用轻量模型秒回，安装版里「每个单词都显示未收录」的离线词典也修好了。",
+    "groups": [
+      {
+        "title": "划词翻译",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "场景分配新增「划词翻译」",
+            "rest": "设置 → AI → 模型 → 场景分配里可单独指定翻译用的模型，句子/段落翻译、单词 AI 精讲与 PDF 划词共用；选中的轻量模型严格生效，不再被对话主模型带着走。",
+            "sub": []
+          },
+          {
+            "lead": "留空也不再等思考模型",
+            "rest": "未指定时跟随对话默认；默认是思考型模型时自动换同供应商的非思考模型（与内联续写同一判据），翻译请求不再先思考一大段。",
+            "sub": []
+          },
+          {
+            "lead": "安装版离线词典恢复可用",
+            "rest": "修复打包后词典路径多拼一层 `resources` 的问题——此前所有安装版都加载不到词库，任何单词（包括 the / is）都会显示「离线词典未收录」。",
+            "sub": []
+          },
+          {
+            "lead": "词形还原修正",
+            "rest": "词形表构建改为「高频原形优先」，修掉 `is → i`、`was → wa`（直接查不到）、`has → ha`、`does → doe`（母鹿）等错映射。",
+            "sub": []
+          },
+          {
+            "lead": "缩写与弯撇号可查",
+            "rest": "`don't / isn't / they're / won't / I'm` 等按原形查询；`It’s` 这类排版弯撇号不再被误判成句子。",
+            "sub": []
+          },
+          {
+            "lead": "提示更准确",
+            "rest": "词典数据缺失时明确提示「词典数据未加载」，不再和「词不在库内」共用一句话；AI 精讲也不会再对每个词都谎称「词典未收录」。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "词典查询拆出零 Electron 依赖的 `dictionaryCore`；新增契约 `verify-dict-lookup.mjs`（打包布局 + 26 条真实查询用例）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "`scripts/build-exam-dict.py` 支持 `--lemma-only`（不下载全量 CSV 重算词形表）；场景分配表新增槽位同步纳入 `verify-ai-tab-anchors.mjs` 断言。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": "3.43.0",
+    "date": "2026-11-17",
+    "summary": "本版一句话：笔记进入编辑态时，左栏不再跳回文件列表，而是保持大纲，并跟着正文实时刷新。",
+    "groups": [
+      {
+        "title": "笔记区 · 编辑态左栏大纲",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "编辑态保持大纲",
+            "rest": "打开 Markdown 笔记后，阅读 / 编辑切换不再让左栏在「大纲」与笔记列表之间来回跳；编辑时也一直是大纲。",
+            "sub": []
+          },
+          {
+            "lead": "实时刷新",
+            "rest": "新增 / 删改标题后约 150ms 应用到左栏（防抖，避免大文档每个键都全量解析）。",
+            "sub": []
+          },
+          {
+            "lead": "点标题跳行",
+            "rest": "编辑态点大纲条目直接定位到对应源码行并选中；阅读态仍是平滑滚动。",
+            "sub": []
+          },
+          {
+            "lead": "返回列表",
+            "rest": "大纲顶部与工作台头部仍保留「返回列表」，临时回最近 / 主题 / 结构选别的笔记；换一篇后自动恢复大纲。",
+            "sub": []
+          },
+          {
+            "lead": "边界",
+            "rest": "非 Markdown（PDF / 图片 / 代码 / 文本）保持文件列表；标题解析为空时显示空态。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "大纲解析改为防抖快照；切页立即清空，正文装载前显示「正在加载正文…」。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "`outline:go-to-heading` 事件带 `pageId`：分屏时只驱动主栏那一页，不再两栏一起跳；博客编辑器忽略知识库事件。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "沉浸阅读的大纲改用阅读页正文（双链换页后跟随）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "契约：`.AGENT/scripts/knowledge-outline/verify-outline-edit.mjs`；`verify-topics.mjs` 的「阅读态自动大纲」断言改为「阅读 / 编辑都生效」。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.42.1",
     "date": "2026-11-16",

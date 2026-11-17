@@ -227,7 +227,10 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
   // Outline navigation — scroll editor or preview DOM to target heading
   useEffect(() => {
     const handler = (e: Event) => {
-      const { line, id } = (e as CustomEvent).detail as { line: number; id: string }
+      const { line, id, pageId } = (e as CustomEvent).detail as { line: number; id: string; pageId?: string }
+      // 知识库大纲的事件带目标页 pageId；博客条目没有这层页身份，直接忽略，
+      // 避免隐藏的博客编辑器（工作台保活）跟着知识库的点击滚动。
+      if (pageId) return
       if (showPreview) {
         // Preview mode: 只在**本实例的预览容器**里查。工作台把非激活模块 display:none 保活，
         // 隐藏的笔记 / 其他 MarkdownPreview 可能有同名标题 id；全局 getElementById 会命中

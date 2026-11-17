@@ -108,7 +108,7 @@ export function AiModelsTab() {
   const keyNoticeVisible = unreadableKeyCount > 0 && unreadableKeyNoticeOpen
 
   /**
-   * 打开「把其他槽位也改用它」：**此刻**把七个槽位的 from → to 算好。
+   * 打开「把其他槽位也改用它」：**此刻**把八个槽位的 from → to 算好。
    * 留空（= 跟随）的槽位不进表 —— 它们会跟着默认走，不该被批量改。
    */
   const openAdopt = (pid: string, aid: string) => {
@@ -1172,8 +1172,8 @@ function ModelFamilyPanel({ p, onChanged, open, onToggle }: {
    场景分配表
    ========================================================================= */
 
-/** 五个"模型槽位"（= 原型 SCENE_LABEL 的五个场景）+ 生图两槽（v3.6.0） */
-type ModelSlotKey = 'defaultChatModel' | 'assistantModelId' | 'aiAssistantInlineSuggestModelId' | 'agentCompressModelId' | 'aiTeachVisionModel' | 'aiImageModel' | 'aiImageEditModel'
+/** 场景分配表的模型槽位：对话默认 / 助手 / 内联续写 / 划词翻译 / 压缩摘要 / 视觉转写 + 生图两槽（v3.6.0） */
+type ModelSlotKey = 'defaultChatModel' | 'assistantModelId' | 'aiAssistantInlineSuggestModelId' | 'aiTranslateModelId' | 'agentCompressModelId' | 'aiTeachVisionModel' | 'aiImageModel' | 'aiImageEditModel'
 
 /**
  * 「把其他槽位也改用它」的请求。**rows 在打开改动卡时就算好**（连同每行的原值 from），
@@ -1198,6 +1198,7 @@ const SCENES: Array<{ key: ModelSlotKey; label: string; desc: string; placeholde
   { key: 'defaultChatModel', label: '对话默认模型', desc: 'AI 助手与 AI 教学的默认模型', placeholder: '未设置（AI 功能不可用）' },
   { key: 'assistantModelId', label: 'AI 助手（侧栏）', desc: '侧栏助手会话用', placeholder: '跟随对话默认' },
   { key: 'aiAssistantInlineSuggestModelId', label: '编辑器内联续写', desc: '调用最频繁，建议指定成本较低、响应较快的模型', placeholder: '跟随对话默认（思考型会自动换非思考）' },
+  { key: 'aiTranslateModelId', label: '划词翻译', desc: '句子/段落翻译与单词 AI 精讲（PDF 划词同用）', placeholder: '跟随对话默认（思考型会自动换非思考）' },
   { key: 'agentCompressModelId', label: '长对话压缩摘要', desc: '较早对话压缩为纪要时使用', placeholder: '跟随当前会话模型' },
   { key: 'aiTeachVisionModel', label: '图片视觉转写', desc: 'AI 教学转写图片与 pptx 时使用', placeholder: '自动挑选（任一支持图片的模型）', visionOnly: true },
   // v3.6.0 对话内生图（docs/ai-image-gen-plan.md §7）：两个槽都**不做自动挑选** ——

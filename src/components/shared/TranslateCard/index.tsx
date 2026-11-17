@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { X, Copy, Check, Loader2, Sparkles, BookOpen, Languages, Volume2 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { speak } from '../../../lib/tts'
-import { copyText, dictLookup, translateInvoke } from '../../../lib/ipc'
+import { copyText, dictLookup, dictStatus, translateInvoke } from '../../../lib/ipc'
 import type { DictLookupResult, TranslateMode } from '../../../lib/translateTypes'
 import { MarkdownPreview } from '../MarkdownPreview'
 
@@ -31,12 +31,15 @@ const EXCHANGE_LABELS: [ExchangeKey, string][] = [
 ]
 
 function isSingleWord(text: string): boolean {
-  return /^[A-Za-z][A-Za-z''-]*$/.test(text.trim())
+  // 直撇号与排版弯撇号（’）都算单词内字符，否则文章里 "It’s" 会被当成句子走 LLM
+  return /^[A-Za-z][A-Za-z'’-]*$/.test(text.trim())
 }
 
 export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
   const mode: TranslateMode = isSingleWord(text) ? 'word' : 'sentence'
   const [dict, setDict] = useState<DictLookupResult | null>(null)
+  /** 离线词典数据本身是否加载成功（区别于「词不在库内」，避免把资源缺失说成未收录） */
+  const [dictReady, setDictReady] = useState(true)
   const [aiMd, setAiMd] = useState<string>('')
   const [aiModel, setAiModel] = useState<string>('')
   const [aiLoading, setAiLoading] = useState(false)
@@ -51,6 +54,12 @@ export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
     if (mode !== 'word') return
     dictLookup(text).then(setDict).catch(() => setDict({ found: false }))
   }, [mode, text])
+
+  // 词典资源状态（加载失败时给出与「未收录」不同的提示）
+  useEffect(() => {
+    if (mode !== 'word') return
+    dictStatus().then(s => setDictReady(s.available)).catch(() => { /* 保持默认，按未收录提示 */ })
+  }, [mode])
 
   const runAi = useCallback(async () => {
     const seq = ++reqSeqRef.current
@@ -242,7 +251,9 @@ export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
               </>
             )}
             {dict !== null && !dict.found && (
-              <p className="mt-1.5 text-[12px] text-[var(--text-muted)]">离线词典未收录，可用 AI 精讲查询。</p>
+              <p className="mt-1.5 text-[12px] text-[var(--text-muted)]">
+                {dictReady ? '离线词典未收录，可用 AI 精讲查询。' : '离线词典数据未加载（安装包资源缺失），可用 AI 精讲查询。'}
+              </p>
             )}
           </div>
         )}

@@ -79,9 +79,11 @@ function filterHeadings(nodes: HeadingNode[], query: string): HeadingNode[] {
   return result
 }
 
-/** Navigate to a heading — dispatches custom event consumed by PageEditor (editor + preview) */
-export function navigateToHeading(line: number, id: string) {
-  window.dispatchEvent(new CustomEvent('outline:go-to-heading', { detail: { line, id } }))
+/** Navigate to a heading — dispatches custom event consumed by PageEditor (editor + preview).
+ *  pageId：目标页身份。分屏时主栏 / 副栏各挂一个 PageEditor、都在听同一事件，
+ *  带上 pageId 后消费者只处理自己那一页（不带的旧事件仍按全窗口处理，博客大纲即此口径）。 */
+export function navigateToHeading(line: number, id: string, pageId?: string) {
+  window.dispatchEvent(new CustomEvent('outline:go-to-heading', { detail: { line, id, pageId } }))
 }
 
 // ---- render ----
@@ -91,6 +93,10 @@ interface OutlinePanelProps {
   onBackToFile: () => void
   /** Render inside an existing sidebar panel instead of as a standalone panel */
   embedded?: boolean
+  /** 目标页身份（透传给跳转事件；主栏大纲用它把事件限定到主栏 PageEditor） */
+  pageId?: string
+  /** 正文尚未装载：渲染占位而不是「大纲内容为空」（切页瞬间不误导） */
+  loading?: boolean
 }
 
 const LEVEL_STYLE: Record<number, string> = {
@@ -115,7 +121,7 @@ function HighlightedText({ text, query }: { text: string; query: string }) {
   )
 }
 
-function HeadingRow({ node, depth = 0, query = '' }: { node: HeadingNode; depth: number; query?: string }) {
+function HeadingRow({ node, depth = 0, query = '', pageId }: { node: HeadingNode; depth: number; query?: string; pageId?: string }) {
   const levelClass = LEVEL_STYLE[node.level] ?? LEVEL_STYLE[3]
 
   return (
@@ -123,18 +129,18 @@ function HeadingRow({ node, depth = 0, query = '' }: { node: HeadingNode; depth:
       <div
         className={`flex items-center gap-1.5 py-0.5 cursor-pointer hover:bg-[var(--bg-hover)] rounded transition-colors ${levelClass}`}
         style={{ paddingLeft: `${depth * 12 + 12}px`, paddingRight: '10px' }}
-        onClick={() => navigateToHeading(node.line, node.id)}
+        onClick={() => navigateToHeading(node.line, node.id, pageId)}
       >
         <span className="truncate"><HighlightedText text={node.text} query={query} /></span>
       </div>
       {node.children.map(ch => (
-        <HeadingRow key={ch.id + ':' + (depth + 1)} node={ch} depth={depth + 1} query={query} />
+        <HeadingRow key={ch.id + ':' + (depth + 1)} node={ch} depth={depth + 1} query={query} pageId={pageId} />
       ))}
     </>
   )
 }
 
-export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = false }: OutlinePanelProps) {
+export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = false, pageId, loading = false }: OutlinePanelProps) {
   const [query, setQuery] = useState('')
   const trimmedQuery = query.trim()
   const filtered = useMemo(
@@ -172,7 +178,7 @@ export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = fal
             onKeyDown={e => {
               if (e.key === 'Enter') {
                 const first = filtered[0]
-                if (first) navigateToHeading(first.line, first.id)
+                if (first) navigateToHeading(first.line, first.id, pageId)
               } else if (e.key === 'Escape' && query) {
                 e.preventDefault()
                 setQuery('')
@@ -195,7 +201,12 @@ export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = fal
 
       {/* Heading tree */}
       <div className="flex-1 overflow-y-auto overscroll-contain px-1 py-1">
-        {headings.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
+            <FileText size={28} className="mb-2 opacity-25" />
+            <p className="text-[11px]">正在加载正文…</p>
+          </div>
+        ) : headings.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)]">
             <FileText size={28} className="mb-2 opacity-25" />
             <p className="text-[11px]">大纲内容为空</p>
@@ -208,7 +219,7 @@ export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = fal
           </div>
         ) : (
           filtered.map(h => (
-            <HeadingRow key={h.id} node={h} depth={0} query={trimmedQuery} />
+            <HeadingRow key={h.id} node={h} depth={0} query={trimmedQuery} pageId={pageId} />
           ))
         )}
       </div>
