@@ -2201,3 +2201,21 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 **根因**：`src/components/shared/pdf/PdfReaderView.tsx` 的 `doTranslateSel` 调 `translateInvoke({ text })`；`electron/lib/translateService.ts` 的 `detectMode` 把单词判为 `word`，`req.ai` 缺省 → 返回 `{ ok: true, mode: 'word', markdown: '' }`（词典结果只在 `dict` 字段）。`TextSelectionBar` 只渲染 `translate.text`（即 markdown 字段），于是空白。
 **建议**：`translateService` 在 `word && !wantAi` 时用 `dict` 拼一段纯文本（词 + 音标 + 前几条释义）回填 `markdown`；或 PDF 浮条直接消费 `dict` 字段并按词典样式渲染。Markdown 文章的 `TranslateCard` 不受影响（它直连 `dictLookup`）。
 
+
+## [x] B-61 阅读器删除摘录后正文颜色不消失 + 多色重叠混成脏色（2026-11-17，P2；用户实机反馈；当日修复）
+
+**现象**：EPUB / FB2 里把某段存成摘录（或高亮）后再删除该条，正文里那块颜色仍在，且没有任何入口能「改回去」；同一段叠两条不同色的高亮时，颜色会融合成第三种（黄 + 蓝 = 脏绿），让人分不清该删哪条。
+
+**根因**：
+1. **foliate 的 `addAnnotation` 只加不撤** —— `src/components/shared/epub/EpubReaderView.tsx` 的同步逻辑每轮只把表里现有的 cfi 重画一遍，删掉的那条没人调 `deleteAnnotation`；写盘失败回滚也只清内存表，留下永久残色（同一个根因的第二个出口）。
+2. **三引擎的高亮都是半透明叠加**：PDF 是绝对定位色块（34% 混色）、EPUB 是 foliate overlayer 的 SVG 矩形（42%）、TXT 每个片段各带 `px-0.5` 内边距 —— 重叠区两层 alpha 合成即出现融合色。TXT 另有一处语义错误：片段取**最早**那条（`find`），与「后来的盖前面的」相反。
+
+**修法**：
+- EPUB 同步改**差集**：上一轮画过、这一轮不在表里的 cfi 逐个 `view.deleteAnnotation`；开场 `await` 逐条 add 的窗口里若用户已删除，补一次撤销；`unpaintCfi` 走同一路径。
+- 新增纯函数 `src/components/shared/excerptOverlap.ts`（`subtractRect` / `visibleRects` / `newestMarkAt`）：三引擎统一「**后建的盖住先建的**」—— 旧条目的矩形先扣掉所有更新的矩形再画，屏幕上永远只有一种颜色。
+- PDF：页内签名（id / 颜色 / 几何）不变即跳过，变了整体重画可见碎片；EPUB：每条仍是 overlayer 里自己的 `<g>`（点高亮出回看卡不受影响），children 按碎片重建 + rAF 合并；TXT：`newestMarkAt` 取最新，内边距只加在同色连续段的首尾。
+- **数据一条不动**：被盖住的条目在右栏仍完整可见、可单独删除与定位，不做合并/裁剪落盘。
+
+**验证**：`.AGENT/scripts/excerpt-overlap/verify-overlap.mjs` PASS；`verify-excerpts.mjs` 全绿；`tsc` 两道门 + `npm run build` 通过。探针新增 `probe-epub-reader.mjs` 5.6（删除即褪色）/ 5.7（两色不交叠）与 `probe-pdf-excerpt.mjs` 5.2（两色不交叠），待真机跑。
+
+**未做**：给已有勾画改色 / 「无色但保留摘录」—— 数据层 `excerptPatch` 只收 note，属新功能待排期（入口位置定在右栏摘录卡片的色点）。
