@@ -280,6 +280,45 @@ export async function connect(o = {}) {
     return found
   }
 
+  /**
+   * 全部高亮 `<rect>`（穿透 closed shadow）。每条摘录一个 `<g fill=色>`，其下是我们按可见碎片
+   * 重建的 `<rect fill=色>` —— 探针据此断言「两种颜色的块没有任何交叠」（B-61 的混色口径）。
+   */
+  async function pierceRects() {
+    const msg = await send('DOM.getDocument', { depth: -1, pierce: true })
+    const root = msg?.result?.root
+    const out = []
+    if (!root) return out
+    const attrs = (n) => {
+      const a = n.attributes ?? []
+      const o = {}
+      for (let i = 0; i + 1 < a.length; i += 2) o[a[i]] = a[i + 1]
+      return o
+    }
+    const walk = (n) => {
+      if (!n) return
+      if ((n.nodeName ?? '').toLowerCase() === 'g') {
+        const gf = String(attrs(n).fill ?? '')
+        if (HL_FILLS.includes(gf)) {
+          for (const c of n.children ?? []) {
+            if ((c.nodeName ?? '').toLowerCase() !== 'rect') continue
+            const ra = attrs(c)
+            const geo = {
+              fill: String(ra.fill || gf),
+              x: Number(ra.x), y: Number(ra.y), w: Number(ra.width), h: Number(ra.height),
+            }
+            if ([geo.x, geo.y, geo.w, geo.h].every(Number.isFinite)) out.push(geo)
+          }
+        }
+      }
+      for (const c of n.children ?? []) walk(c)
+      for (const sr of n.shadowRoots ?? []) walk(sr)
+      if (n.contentDocument) walk(n.contentDocument)
+    }
+    walk(root)
+    return out
+  }
+
   // ===== fixture 读写 =====
   const FIXTURE = join(process.cwd(), 'tmp', 'vault-fixture')
   const MODULES = join(FIXTURE, '.knowbase', 'modules')
@@ -380,7 +419,7 @@ export async function connect(o = {}) {
     send, evalJs, evalIn, events,
     evalFailures: () => evalFailures,
     // 帧
-    blobFrames, blobCtxs, visibleCtxs, ctxWithText, frameBox, frameReport, pierceAttrs, pierceHighlightRect,
+    blobFrames, blobCtxs, visibleCtxs, ctxWithText, frameBox, frameReport, pierceAttrs, pierceHighlightRect, pierceRects,
     // 宿主读数
     hostPct, hostLabel, htmlCls,
     // 输入

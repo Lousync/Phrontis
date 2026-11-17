@@ -14,6 +14,7 @@
  *        撤 Tab 后排除即变成静默宽容 → 改成不再排除 + 显式负向）
  *   5) 划选 → 浮条 → 摘录：excerpts.json 落 kind='epub' + cfi + chapter；Overlayer 高亮真的画上
  *   5.5) 点已有高亮 → 回看卡（且不翻页）—— 这条路径曾因写成 `view.getContents()`（不存在）而失效
+ *   5.6) ★ 删除摘录 → 正文高亮立即消失（B-61：foliate 的 addAnnotation 只管加、不管撤）
  *   6) 点目录「第三章」→ toolbar 章节标签变 + 内容帧真的换页（KB_EPUB_GOTO_CFI 的 href 目标可用）
  *   6.5) 侧边点击翻页：悬停边缘出**手型光标**；点左/右边缘真的翻页（跨章 + 进度双向变化）；
  *        ★ 两条负向 —— 点正中不翻页（中间留给划选）、从边缘起**拖**不翻页（拖动 = 划选）
@@ -65,7 +66,7 @@ const { ok, note, assertNotFailed, finish } = createAssertions()
 const K = await connect()
 const {
   evalJs, evalIn, blobFrames, visibleCtxs, ctxWithText,
-  frameBox, frameReport, pierceAttrs, pierceHighlightRect,
+  frameBox, frameReport, pierceAttrs, pierceHighlightRect, pierceRects,
   hostPct, hostLabel, mouse, clickAt,
   resetFixtureState, stateOf, excerptsOf, openBookshelf, openBook, backToShelf, waitAttr, sleep,
 } = K
@@ -214,6 +215,23 @@ async function main() {
       if (b) b.click(); return true
     })()`)
     await sleep(300)
+  }
+
+  // ===== 5.6) 删除摘录 → 正文高亮立即消失（B-61：foliate 的 addAnnotation 只管加，不管撤）=====
+  if (hl && box5) {
+    await clickAt(box5.left + hl.x + 2, box5.top + hl.y + hl.h / 2)
+    await sleep(400)
+    const delClicked = await evalJs(`(() => {
+      const b = [...document.querySelectorAll('.kb-pop button')].find((x) => (x.getAttribute('data-tip') || '') === '删除这条摘录')
+      if (!b) return false
+      b.click(); return true
+    })()`)
+    ok('回看卡上点「删除这条摘录」', delClicked === true)
+    await sleep(1000)
+    const leftRects = (await pierceRects()).filter((r) => r.fill)
+    ok('★ 删除摘录 → 正文高亮立即消失（不留残色）', leftRects.length === 0, `rects=${JSON.stringify(leftRects)}`)
+    ok('删除摘录 → excerpts.json 同步清空（kind=epub）',
+      excerptsOf(BOOK).filter((e) => e.kind === 'epub').length === 0)
   }
 
   // ===== 6) 目录跳转 =====

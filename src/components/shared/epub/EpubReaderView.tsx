@@ -62,7 +62,7 @@ const THUMB_CACHE_MAX = 240
 /** 缩略图宽度（px）。页图解码后动辄 20-30MB（2000×3000），必须下采样后再进网格。 */
 const THUMB_WIDTH = 96
 
-/** 摘录色 → foliate 高亮填充（与 styles/index.css 的 .kb-exc-* 同源；透明度走 CSS 变量） */
+/** 摘录色 → 高亮填充（与 styles/index.css 的 .kb-exc-* 同源；透明度走 CSS 变量） */
 const HL_FILL: Record<ExcerptColor, string> = {
   y: '#efb84c', g: '#7fb844', b: '#5d9bdc', p: '#e0709a', v: '#9188e8',
 }
@@ -312,6 +312,12 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const excerptsRef = useRef<ExcerptItem[]>([])
   /** cfi → 色（高亮重绘查表） */
   const annColorRef = useRef(new Map<string, ExcerptColor>())
+  /**
+   * 已画进 foliate overlayer 的 cfi 快照（上一轮）。
+   * ★ 必需：foliate 的 `addAnnotation` **只管加**，删除摘录不会自己撤色 ——
+   *   要靠这张表做差集、对已消失的 cfi 调 `deleteAnnotation`（2026-11-17 修复，B-61）。
+   */
+  const paintedCfiRef = useRef(new Set<string>())
   /** 已挂过监听的内容文档（同 section 重渲染会复用 doc，避免重复挂） */
   const boundDocsRef = useRef(new WeakSet<Document>())
 
@@ -612,8 +618,18 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     const applyAnnotations = async () => {
       const v = viewRef.current
       if (!v) return
-      for (const cfi of annColorRef.current.keys()) {
+      const keys = [...annColorRef.current.keys()]
+      for (const cfi of keys) {
         try { await v.addAnnotation({ value: cfi }) } catch { /* CFI 失效（换书/换版本）忽略 */ }
+      }
+      // 与真实画上去的一致（差集同步的基线，见 paintedCfiRef 头注）
+      paintedCfiRef.current = new Set(keys)
+      // 开场这一小段（await 逐个 add）里用户可能已经删掉某条：按最新表补一次撤销，
+      // 否则会留下「数据里没有、界面上有」的残色（正是 B-61 的现象）
+      const live = annColorRef.current
+      for (const cfi of keys) {
+        if (live.has(cfi)) continue
+        try { await v.deleteAnnotation({ value: cfi }) } catch { /* CFI 失效忽略 */ }
       }
     }
 
@@ -980,6 +996,8 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       try { view.remove() } catch { /* 已摘除 */ }
       viewRef.current = null
       readyRef.current = false
+      // overlayer 随书销毁：差集基线必须一起清，否则下一本书会拿着旧 cfi 去 deleteAnnotation
+      paintedCfiRef.current.clear()
       // 缩略图队列随书作废：换书/关标签时正在跑的那一页要在产出后被丢弃（判 gen，不是判 alive ——
       // 队列可能跑在这个 effect 之外）。data URL 不需要 revoke，清掉 Map 即释放。
       thumbGenRef.current += 1
@@ -1009,19 +1027,32 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     }).catch(() => { /* 忽略 */ })
   })
 
-  /** foliate 系摘录（有 cfi 的）→ 高亮同步：写 cfi→色 表（供 foliate 回调查表）+ 重画 */
+  /** foliate 系摘录（有 cfi 的）→ 高亮同步：写 cfi→色 表（供 foliate 回调查表）+ 差集重画 */
   const foliateExcerpts = useMemo(() => excerpts.filter((e) => e.kind === kind && !!e.cfi), [excerpts, kind])
   useEffect(() => {
     const m = new Map<string, ExcerptColor>()
     for (const e of foliateExcerpts) m.set(e.cfi as string, e.color)
+    const painted = paintedCfiRef.current
     annColorRef.current = m
     excerptsRef.current = excerpts
     const view = viewRef.current
-    if (!view || !readyRef.current) return
-    // 先删再添：foliate 内部同 key 会自行替换，这里只需把表里已有的 cfi 都画一遍
+    if (!view || !readyRef.current) {
+      // 书还没开好 / 已关：overlayer 本来就没有东西，下一轮 applyAnnotations 会按新表重画
+      painted.clear()
+      for (const cfi of m.keys()) painted.add(cfi)
+      return
+    }
+    // ① 先撤：上一轮画过、这一轮已不在表里的 cfi（删除摘录 / 改判 kind）⇒ 必须从正文里抹掉
+    for (const cfi of painted) {
+      if (m.has(cfi)) continue
+      void view.deleteAnnotation({ value: cfi }).catch(() => { /* CFI 失效（换书/换版本）忽略 */ })
+    }
+    // ② 再添：foliate 内部同 key 会自行替换，这里只需把表里的都画一遍
     for (const cfi of m.keys()) {
       void view.addAnnotation({ value: cfi }).catch(() => { /* CFI 失效忽略 */ })
     }
+    painted.clear()
+    for (const cfi of m.keys()) painted.add(cfi)
   }, [foliateExcerpts, excerpts])
 
   // ===== 右栏摘录 / 左栏目录 → 跳 CFI =====
@@ -1066,6 +1097,17 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     void (dir < 0 ? view.prev() : view.next())
   }, [])
 
+  /**
+   * 撤掉一条已经乐观画上去的 cfi（写盘失败回滚用）。
+   * ★ 只删表不够：foliate 的 overlayer 已经把色块画进正文，必须同时 deleteAnnotation，
+   *   否则会留下一个「数据里没有、界面上有」且删不掉的色块（B-61 的第二个出口）。
+   */
+  const unpaintCfi = useCallback((cfi: string) => {
+    annColorRef.current.delete(cfi)
+    paintedCfiRef.current.delete(cfi)
+    void viewRef.current?.deleteAnnotation({ value: cfi }).catch(() => { /* CFI 失效忽略 */ })
+  }, [])
+
   // ===== 划选 → 建摘录 =====
   const handleCreateExcerpt = useCallback((text: string, color: ExcerptColor, type: ExcerptType, note?: string) => {
     if (!capture || !rootId) return
@@ -1083,15 +1125,15 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       note,
     }).then((r) => {
       if (!r.ok) {
-        annColorRef.current.delete(cfi)
+        unpaintCfi(cfi)
         showToast({ type: 'error', message: r.error || '摘录创建失败' })
       }
     }).catch((e) => {
-      annColorRef.current.delete(cfi)
+      unpaintCfi(cfi)
       showToast({ type: 'error', message: String((e as Error)?.message || e) })
     })
     setCapture(null)
-  }, [capture, rootId, relPath, kind])
+  }, [capture, rootId, relPath, kind, unpaintCfi])
 
   const handleAsk = useCallback((t: string) => {
     window.dispatchEvent(new CustomEvent('ai-assistant:selection-action', { detail: { action: 'ask', text: t } }))
