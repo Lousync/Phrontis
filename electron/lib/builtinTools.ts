@@ -5,7 +5,7 @@ import { listTools, registerTool, getSettingReader, checkModulePermission, check
 import { readWorkspaceTrust } from './workspaceTrust'
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
-import { writeVisual, writeMindmap, writeImage } from './aiTeachingSources'
+import { writeVisual, writeMindmap, writeImage, editArtifactText } from './aiTeachingSources'
 import { readConstraintsForAiTeaching, writeConstraintsForAiTeaching, type AiTeachConstraintLevel } from './aiTeachingScope'
 import { CONSTRAINT_AUTHORING_TEXT_PARAM, CONSTRAINT_AUTHORING_TOOL_RULES, CONSTRAINT_LAYER_HINTS } from './constraintAuthoring'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
@@ -3499,13 +3499,14 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'visual.html',
     title: '生成 HTML 示意图',
-    description: '生成可查看、可交互的单文件 HTML 示意图辅助讲解（不是网页，不做站点导航/多页），写入本会话文件夹 visuals/<slug>.html 并自动在右栏工件栏打开。CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体），可按讲解需要加入点击、悬停、拖拽、滑杆等轻量交互。画幅以 680×400 比例 SVG 为主、中文标注，宽高自适应工件栏；画面不必精美，清晰可读优先（文字与背景保持基本对比）。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+    description: '生成可查看、可交互的单文件 HTML 示意图辅助讲解（不是网页，不做站点导航/多页），写入本会话文件夹 visuals/<slug>.html 并自动在右栏工件栏打开。CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体），可按讲解需要加入点击、悬停、拖拽、滑杆等轻量交互。画幅以 680×400 比例 SVG 为主、中文标注，宽高自适应工件栏；画面不必精美，清晰可读优先（文字与背景保持基本对比）。**改已有图：传 relPath（产物返回的路径）原地覆盖；不传时同名覆盖，不再产生 -v2。只改一处（标注/颜色/参数）优先用 artifact.edit，不要整篇重写。** 仅限 AI教学对话会话内使用',
     inputSchema: {
       type: 'object',
       properties: {
         slug: { type: 'string', description: '文件名（kebab-case 小写英文/数字，如 parabola-open-width；不带 .html 后缀）' },
         title: { type: 'string', description: '示意图中文标题（工件卡与页签展示，如「开口大小与 a 的关系」）' },
         html: { type: 'string', description: '完整 HTML 全文（自包含单文件，无任何外部依赖）' },
+        relPath: { type: 'string', description: '要原地修改的示意图路径（产物工具返回的 relPath）；不传则按 slug 同名覆盖' },
       },
       required: ['slug', 'title', 'html'],
     },
@@ -3518,9 +3519,9 @@ export function registerBuiltinTools(): void {
   }, (args, ctx) => {
     const sid = String(ctx?.sessionId ?? '')
     if (!sid) throw new Error('visual.html 仅可在 AI教学对话中使用（当前会话无归属文件夹）')
-    const r = writeVisual(sid, str(args.slug), String(args.html ?? ''), getSettingReader())
+    const r = writeVisual(sid, str(args.slug), String(args.html ?? ''), getSettingReader(), { relPath: str(args.relPath) })
     if (!r.ok) throw new Error(r.error ?? '示意图写入失败')
-    return { relPath: r.relPath, lines: r.lines }
+    return { relPath: r.relPath, lines: r.lines, ...(r.updated ? { updated: true } : {}) }
   })
 
   // 25. mindmap —— 生成思维导图 JSON 写入会话 mindmaps/（工件栏 / 笔记区可交互渲染）
@@ -3531,13 +3532,14 @@ export function registerBuiltinTools(): void {
       'root 为递归结构，每个节点形如 { text, ref?, children? }：text 必须是一行短短语；' +
       'ref 可选，为「知识库笔记」或「另一张思维导图」的仓库相对路径（.md 笔记 / .json 导图），用于节点点击跳转；children 为子节点数组。' +
       '树深 ≤6、节点总数 ≤120。只把结构交给本工具，**绝不把 JSON 写进回答正文或代码块**，生成后用一句话说明右侧已打开。' +
-      '重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+      '**改已有导图：传 relPath（产物返回的路径）原地覆盖；不传时同名覆盖，不再产生 -v2。只改局部节点先用 artifact.edit。** 仅限 AI教学对话会话内使用',
     inputSchema: {
       type: 'object',
       properties: {
         slug: { type: 'string', description: '文件名（kebab-case 小写英文/数字，如 binary-tree-traversal；不带 .json 后缀）' },
         title: { type: 'string', description: '导图中文标题（工件卡与页签展示，如「二叉树遍历」）' },
         root: { type: 'object', description: '根节点，递归结构 { text, ref?, children? }；ref 可指向知识库笔记(.md)或另一张思维导图(.json)（详见工具说明）' },
+        relPath: { type: 'string', description: '要原地修改的导图路径（产物工具返回的 relPath）；不传则按 slug 同名覆盖' },
       },
       required: ['slug', 'title', 'root'],
     },
@@ -3551,9 +3553,47 @@ export function registerBuiltinTools(): void {
     const sid = String(ctx?.sessionId ?? '')
     if (!sid) throw new Error('mindmap 仅可在 AI教学对话中使用（当前会话无归属文件夹）')
     const doc = { kind: 'mindmap', version: 1, title: str(args.title), root: args.root }
-    const r = writeMindmap(sid, str(args.slug), JSON.stringify(doc), getSettingReader())
+    const r = writeMindmap(sid, str(args.slug), JSON.stringify(doc), getSettingReader(), { relPath: str(args.relPath) })
     if (!r.ok) throw new Error(r.error ?? '思维导图写入失败')
-    return { relPath: r.relPath, nodes: r.nodes }
+    return { relPath: r.relPath, nodes: r.nodes, ...(r.updated ? { updated: true } : {}) }
+  })
+
+  // 25a. artifact.edit —— 在**原文件**上改 AI 教学产物（2026-11-17）
+  // 与 visual.html/mindmap 的「整篇覆盖」互补：只改一处时不必重发全文，也不会因为重写
+  // 顺带改坏未提及的部分。只认本会话文件夹内的产物，不新建文件、不产生新版本。
+  registerTool({
+    name: 'artifact.edit',
+    title: '修改产物',
+    description: '在原文件上改 AI 教学产物（示意图 .html / 思维导图 .json / 讲义 .md），path 用产物工具返回的 relPath。edits 为多组 {oldText,newText}，每处必须唯一命中、全部命中才落盘（全有或全无）；newText 空串=删除。append 追加到文件末尾。只改本会话文件夹内的产物，不新建文件、不产生新版本；整张重画仍用 visual.html/mindmap 带 relPath。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '要修改的产物仓库相对路径（产物工具返回的 relPath）' },
+        edits: {
+          type: 'array',
+          description: '替换列表（1~10 组，按顺序应用；每组 oldText 必须唯一命中）',
+          maxItems: 10,
+          items: {
+            type: 'object',
+            properties: {
+              oldText: { type: 'string', description: '原文片段（必须唯一命中）' },
+              newText: { type: 'string', description: '替换后的文本；空串=删除该片段', allowEmpty: true },
+            },
+            required: ['oldText', 'newText'],
+          },
+        },
+        append: { type: 'string', description: '追加到文件末尾的内容（可选，与 edits 可并用）' },
+      },
+      required: ['path'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid || ctx?.source !== 'aiTeaching') throw new Error('artifact.edit 仅可在 AI 教学对话中使用')
+    const edits = Array.isArray(args.edits) ? (args.edits as Array<Record<string, unknown>>) : []
+    const r = editArtifactText(sid, str(args.path), edits, str(args.append), getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '修改产物失败')
+    return r
   })
 
   // 25b. image —— 对话内生图 / 改图（v3.6.0；docs/ai-image-gen-plan.md §4.2）
@@ -3578,6 +3618,7 @@ export function registerBuiltinTools(): void {
         aspect: { type: 'string', enum: ['16:9', '1:1', '9:16'], description: '画幅；不填=按内容定' },
         ref: { type: 'string', description: '要修改的图的仓库相对路径；给了就改图，不给就新画一张' },
         slug: { type: 'string', description: '文件名（kebab-case 小写英文/数字，如 dp-fill-table；不带扩展名）' },
+        relPath: { type: 'string', description: '要原地覆盖的旧图路径（产物工具返回的 relPath）；不传则新图按版本递增另存' },
       },
       required: ['prompt'],
     },
@@ -3636,11 +3677,13 @@ export function registerBuiltinTools(): void {
     // （那是 agent 会话 id，不是教学会话），按空值判会把普通对话的图塞进一个并不存在的会话夹。
     const sid = String(ctx?.sessionId ?? '')
     let relPath: string
+    let updated = false
     if (ctx?.source === 'aiTeaching') {
       if (!sid) throw new Error('image 在 AI 教学面需要会话归属（当前调用没有 sessionId）')
-      const w = writeImage(sid, str(args.slug), buf, getSettingReader())
+      const w = writeImage(sid, str(args.slug), buf, getSettingReader(), { relPath: str(args.relPath) })
       if (!w.ok) throw new Error(w.error ?? '图片写入会话产物目录失败')
       relPath = String(w.relPath ?? '')
+      updated = w.updated === true
       if (!relPath) throw new Error('图片写入失败：没有拿到产物路径')
     } else {
       const out = stageImageVersioned(root, str(args.slug), buf)
@@ -3659,6 +3702,7 @@ export function registerBuiltinTools(): void {
       h: size?.h,
       model: res.model,
       elapsedMs: Date.now() - t0,
+      ...(updated ? { updated: true } : {}),
       ...(downgraded ? { downgraded: true, note: '改图模型未配置：本次按描述重画，未使用原图（可在 设置 → AI 工具 → 模型 配置「改图重绘」）' } : {}),
       ...(res.revisedPrompt ? { revisedPrompt: res.revisedPrompt.slice(0, 300) } : {}),
     }
@@ -3806,7 +3850,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'course.organize.archive',
     title: '整理对话并归档',
-    description: '把一段内容整理成 markdown 一页并归档。段会话不要填 target，缺省落本段目录；课程助手才可以用 target 指定课程级产物目录。教材 / 知识库正文请用 vault.write（.md 传 ensureId:true），不要用本工具。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。不要用它创建交接文档；交接只由「收尾本段」系统生成。',
+    description: '把一段内容整理成 markdown 一页并归档。段会话不要填 target，缺省落本段目录；课程助手才可以用 target 指定课程级产物目录。教材 / 知识库正文请用 vault.write（.md 传 ensureId:true），不要用本工具。**改已有讲义 / 总结时用同一标题，会原地覆盖原文件（保留文档 id）**；含 ```quiz 的题单仍另存新文件，避免题号重排后旧作答对不上。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。不要用它创建交接文档；交接只由「收尾本段」系统生成。',
     inputSchema: {
       type: 'object',
       properties: {

@@ -47,6 +47,7 @@ export const TOOL_ACTION_LABELS: Record<string, string> = {
   'visual.html': '生成示意图',
   'mindmap': '生成思维导图',
   'image': '生成图片',
+  'artifact.edit': '修改产物',
 }
 
 /** 工具名 → 中文动作标签；未知工具回退为去掉 `builtin.` 的短名 */

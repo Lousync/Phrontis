@@ -4,7 +4,7 @@ import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault, workspaceOpenInSystem,
-  agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
+  agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged, onWsExternalChange,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachCourseGetState, aiTeachCourseGetSources, aiTeachCourseWriteOutlineDraft, onAiTeachCourseRefresh,
   aiTeachCourseOpenSegment, aiTeachCourseSetActiveUnit, aiTeachCourseEndSegment, aiTeachCourseFinalizeSegment,
@@ -472,7 +472,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setArtOpen(v)
     try { localStorage.setItem('aiTeach.artOpen', v ? '1' : '0') } catch { /* ignore */ }
   }, [])
-  /** html 页签 ⟳ 刷新计数（key 版本，ArtHtmlView 重读磁盘） */
+  /** 产物页签重读计数（html / mindmap / image 共用：值一变对应查看器重读磁盘；md 页签走 openArtFile 重读全文） */
   const [htmlSeq, setHtmlSeq] = useState<Record<string, number>>({})
   /** ⤢ 原位放大：工件栏占满内容区（absolute 盖过对话/左右栏，组件不卸载 → 对话滚动与 iframe 全存活），⤡/Esc 退出 */
   const [artZoom, setArtZoom] = useState(false)
@@ -541,9 +541,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     openArtTab({ id: rel, kind: 'md', rel, name: opts?.name ?? rel.split('/').pop() ?? rel, content: r.content })
   }, [openArtTab])
   const reloadArtTab = useCallback((tab: ArtTab) => {
-    if (tab.kind === 'html') { setHtmlSeq(prev => ({ ...prev, [tab.rel]: (prev[tab.rel] ?? 0) + 1 })); return }
+    // html / mindmap / image 都是「按 rel 读一次」的查看器，bump 计数即重读；md 需要重新取全文
+    if (tab.kind === 'html' || tab.kind === 'mindmap' || tab.kind === 'image') {
+      setHtmlSeq(prev => ({ ...prev, [tab.rel]: (prev[tab.rel] ?? 0) + 1 }))
+      return
+    }
     void openArtFile(tab.rel, { name: tab.name, title: tab.title })
   }, [openArtFile])
+  /** 「本次改动」条目点哪里：示意图 / 导图 / 图片进工件栏，md 讲义进编辑器 */
+  const changeOpensInArtifactPane = useCallback((c: { tool?: string; file?: string }) => {
+    const tool = String(c.tool ?? '')
+    if (tool === 'visual.html' || tool === 'image') return true
+    return tool === 'artifact.edit' && /\.(?:html?|json)$/i.test(String(c.file ?? ''))
+  }, [])
   useEffect(() => { void getSettingRaw('aiTeachRootDir').then(v => { const s = String(v ?? '').trim(); if (s) setAiTeachRoot(s) }).catch(() => {}) }, [])
   // / 弹层 Skill 组候选（v3.1.1 条目10）：模块挂载时拉一次（安装/停用在设置页，低频变化）
   useEffect(() => { aiToolsListSkills().then(r => setSlashSkills(r.skills)).catch(() => setSlashSkills([])) }, [])
@@ -1047,28 +1057,50 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       if (step.artifact && step.ok) {
         const a = step.artifact
         if (!a.rel) return
+        /** 同路径页签已开：**原地刷新**，不再新开一个（2026-11-17 原地改产物） */
+        const exists = artTabsRef.current.some(t => !t.generating && t.id === a.rel)
+        const fileName = a.rel.split('/').pop() || a.rel
         // 生图产物（v3.6.0 阶段二，方案 §6.2）：占位原地转正式页签，键与上面同一条回落规则。
         // 页签名取文件名（页签条只有 170px，prompt 会被截成一串省略号），prompt 留作 title 悬浮提示。
         if (a.kind === 'image') {
           const key = a.slug || 'image'
           setArtTabs(prev => {
             const rest = prev.filter(t => !(t.generating && t.slug === key))
-            return rest.some(t => t.id === a.rel) ? rest
-              : [...rest, { id: a.rel, kind: 'image', rel: a.rel, name: a.rel.split('/').pop() || '图片', title: a.title, w: a.w, h: a.h, bytes: a.bytes }]
+            return rest.some(t => t.id === a.rel)
+              ? rest.map(t => t.id === a.rel ? { ...t, title: a.title ?? t.title, w: a.w, h: a.h, bytes: a.bytes } : t)
+              : [...rest, { id: a.rel, kind: 'image', rel: a.rel, name: fileName || '图片', title: a.title, w: a.w, h: a.h, bytes: a.bytes }]
           })
           setArtActive(cur => cur === `gen:${key}` ? a.rel : cur)
-          showToast({ type: 'info', message: `✓ 图片已生成：${a.rel.split('/').pop()}（会话 outputs/ 目录）` })
+          if (a.updated) setHtmlSeq(prev => ({ ...prev, [a.rel]: (prev[a.rel] ?? 0) + 1 }))
+          showToast({ type: 'info', message: a.updated
+            ? `✓ 图片已更新：${fileName}（复用原文件）`
+            : `✓ 图片已生成：${fileName}（会话 outputs/ 目录）` })
+          return
+        }
+        // md 产物（artifact.edit 改讲义）：重读全文交给 md 页签（已有页签原地换内容）
+        if (a.kind === 'md') {
+          void openArtFile(a.rel, { name: a.title, title: a.title, lines: a.lines, silent: true })
+          setArtActive(cur => cur?.startsWith('gen:') ? a.rel : cur)
+          showToast({ type: 'info', message: `✓ 已更新：${fileName}` })
           return
         }
         const kind = a.kind ?? 'html'
         setArtTabs(prev => {
           const rest = prev.filter(t => !(t.generating && a.slug && t.slug === a.slug))
-          return rest.some(t => t.id === a.rel) ? rest : [...rest, { id: a.rel, kind, rel: a.rel, name: a.title || a.rel.split('/').pop() || a.rel, title: a.title, lines: a.lines }]
+          return rest.some(t => t.id === a.rel)
+            ? rest.map(t => t.id === a.rel
+              ? { ...t, kind, name: a.title || t.name, title: a.title ?? t.title, lines: a.lines ?? t.lines }
+              : t)
+            : [...rest, { id: a.rel, kind, rel: a.rel, name: a.title || fileName || a.rel, title: a.title, lines: a.lines }]
         })
+        // 同路径已开 / 明确是原地更新 → 递增加载序号，重读磁盘
+        if (exists || a.updated) setHtmlSeq(prev => ({ ...prev, [a.rel]: (prev[a.rel] ?? 0) + 1 }))
         setArtActive(cur => cur === `gen:${a.slug}` ? a.rel : cur)
-        showToast({ type: 'info', message: kind === 'mindmap'
-          ? `✓ 思维导图已生成：${a.rel.split('/').pop()}（${a.nodes ?? 0} 节点）`
-          : `✓ 示意图已生成：${a.rel.split('/').pop()}（${a.lines} 行）` })
+        showToast({ type: 'info', message: a.updated
+          ? `✓ ${kind === 'mindmap' ? '思维导图' : '示意图'}已更新：${fileName}（复用原文件）`
+          : kind === 'mindmap'
+            ? `✓ 思维导图已生成：${fileName}（${a.nodes ?? 0} 节点）`
+            : `✓ 示意图已生成：${fileName}（${a.lines} 行）` })
       }
       // 工具失败：清掉「生成中」占位页签（禁关页签不能因失败卡死）；停止生成同理（endRun 处兜底）
       if (isProduct && !step.ok && !step.artifact) {
@@ -1792,6 +1824,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     })
     return () => { window.removeEventListener('kb:file-saved', onSaved); window.removeEventListener('focus', onFocus); off(); offFs() }
   }, [syncSessionFiles, reloadCourse])
+  // AI 写工具（vault.edit / artifact.edit）落盘后的外部变更：打开中的工件页签原地刷新。
+  // 与 fsWatcher 那条互补——vault.edit 只广播 ws:external-change，不触发树刷新。
+  useEffect(() => {
+    const off = onWsExternalChange(({ relPath }) => {
+      const rel = String(relPath ?? '')
+      if (!rel) return
+      const hit = artTabsRef.current.find(t => !t.generating && t.rel === rel)
+      if (!hit) return
+      if (hit.kind === 'md') { void openArtFile(rel, { name: hit.name, title: hit.title, silent: true }); return }
+      setHtmlSeq(prev => ({ ...prev, [rel]: (prev[rel] ?? 0) + 1 }))
+    })
+    return off
+  }, [openArtFile])
   // 切回本模块 Tab：回读一次（保活组件不卸载，isActive 是唯一「重新可见」信号）
   useEffect(() => { if (isActive) syncSessionFiles({ constraints: true }) }, [isActive, syncSessionFiles])
   // 文件操作撤销 / 重做（v3.16.1 F-5）：等 fsWatcher 有约 1 秒延迟，这里立即重扫已加载目录
@@ -3046,15 +3091,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             {(m.trace ?? []).filter(s => s.artifact && s.artifact.kind !== 'image').map((s, k) => {
                               const a = s.artifact as NonNullable<typeof s.artifact>
                               const isMind = a.kind === 'mindmap'
+                              const isDoc = a.kind === 'md'
+                              const verb = a.updated ? '已更新' : ''
                               return (
                                 <button key={k} onClick={() => { void openArtFile(a.rel, { title: a.title, lines: a.lines }) }} data-tip={a.rel} aria-label={a.rel}
                                   className="w-full max-w-[440px] flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[var(--accent)]/50 transition-colors text-left">
-                                  {isMind ? <GitBranch size={13} className="shrink-0 text-[var(--accent)]" /> : <ImageIcon size={13} className="shrink-0 text-[var(--accent)]" />}
+                                  {isMind ? <GitBranch size={13} className="shrink-0 text-[var(--accent)]" />
+                                    : isDoc ? <FileText size={13} className="shrink-0 text-[var(--accent)]" />
+                                      : <ImageIcon size={13} className="shrink-0 text-[var(--accent)]" />}
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-[12px] text-[var(--text-primary)]">{a.title || a.rel.split('/').pop()}</span>
-                                    <span className="block truncate text-[10px] text-[var(--text-muted)]">{isMind ? `思维导图 · ${a.nodes ?? 0} 节点` : `${a.rel} · ${a.lines} 行 · 单文件自包含`}</span>
+                                    <span className="block truncate text-[10px] text-[var(--text-muted)]">{isMind
+                                      ? `${verb ? `${verb} · ` : ''}思维导图 · ${a.nodes ?? 0} 节点`
+                                      : isDoc
+                                        ? `${verb ? `${verb} · ` : ''}${a.rel}`
+                                        : `${verb ? `${verb} · ` : ''}${a.rel} · ${a.lines} 行 · 单文件自包含`}</span>
                                   </span>
-                                  <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">在工件栏打开 →</span>
+                                  <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">{verb ? `${verb} →` : '在工件栏打开 →'}</span>
                                 </button>
                               )
                             })}
@@ -3780,8 +3833,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   {lastChanges.map((c, i) => (
                     <li key={i}>
                       {c.file ? (
-                        <button onClick={() => (c.tool === 'visual.html' || c.tool === 'image' ? void openArtFile(String(c.file), { title: c.target }) : window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })))}
-                          data-tip={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : c.tool === 'image' ? '在工件栏查看图片' : '在编辑器中打开'} aria-label={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : c.tool === 'image' ? '在工件栏查看图片' : '在编辑器中打开'}
+                        <button onClick={() => (changeOpensInArtifactPane(c) ? void openArtFile(String(c.file), { title: c.target }) : window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })))}
+                          data-tip={changeOpensInArtifactPane(c) ? '在工件栏打开' : '在编辑器中打开'} aria-label={changeOpensInArtifactPane(c) ? '在工件栏打开' : '在编辑器中打开'}
                           className="w-full flex items-center gap-1 px-2 py-0.5 text-left text-[10.5px] hover:bg-[var(--bg-hover)] transition-colors">
                           <FileText size={9} className="shrink-0 text-[var(--accent)]" />
                           <span className="shrink-0 text-[var(--accent)]">{c.action}</span>

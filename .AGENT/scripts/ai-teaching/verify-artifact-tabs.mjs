@@ -116,6 +116,24 @@ console.log('\n=== F. 同类哨兵：隐藏滚动条的条目条必须接 useStr
     offenders.join('、'))
 }
 
+console.log('\n=== G. 原地改产物：同路径页签刷新、不新开（2026-11-17）===')
+{
+  const teachIndex = read('src/modules/ai-teaching/index.tsx')
+  ok(/const exists = artTabsRef\.current\.some\(t => !t\.generating && t\.id === a\.rel\)/.test(teachIndex),
+    'G1 完成事件先判同路径页签是否已开')
+  ok(/rest\.some\(t => t\.id === a\.rel\)[\s\S]{0,160}?rest\.map\(t => t\.id === a\.rel/.test(teachIndex),
+    'G2 已开则原地更新元信息（不再 push 第二个页签）')
+  ok(/if \(exists \|\| a\.updated\) setHtmlSeq\(prev => \(\{ \.\.\.prev, \[a\.rel\]: \(prev\[a\.rel\] \?\? 0\) \+ 1 \}\)\)/.test(teachIndex),
+    'G3 原地更新递增加载序号，查看器重读磁盘')
+  ok(teachIndex.includes('已更新：${fileName}（复用原文件）'), 'G4 Toast 区分「已更新」与「已生成」')
+  ok(/if \(tab\.kind === 'html' \|\| tab\.kind === 'mindmap' \|\| tab\.kind === 'image'\)/.test(teachIndex),
+    'G5 工具栏 ⟳ 对 html / mindmap / image 都生效')
+  ok(teachIndex.includes('onWsExternalChange') && teachIndex.includes('artTabsRef.current.find(t => !t.generating && t.rel === rel)'),
+    'G6 vault.edit / artifact.edit 的外部写也刷新打开中的工件')
+  ok(/<MindMapView[^>]*reloadSeq=\{htmlSeq\[tab\.rel\] \?\? 0\}/.test(pane), 'G7 MindMapView 接 reloadSeq')
+  ok(/<ImmersiveImageView[^>]*reloadSeq=\{htmlSeq\[tab\.rel\] \?\? 0\}/.test(pane), 'G8 ImmersiveImageView 接 reloadSeq')
+}
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`[OK] 全部通过：${pass} 项断言 PASS`)

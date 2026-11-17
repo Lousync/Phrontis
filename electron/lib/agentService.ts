@@ -52,6 +52,10 @@ import { readUnitConstraintsForSession } from './aiTeachingScope'
 import { buildScopePrompt } from './scopePrompt'
 import { CONSTRAINT_AUTHORING_PROMPT } from './constraintAuthoring'
 import { buildTeachStyleHint, normalizeTeachStyleMode } from './teachStylePrompt'
+import {
+  detectUnbackedArtifactClaim, buildArtifactClaimRepairNotice, artifactCorrectionNotice,
+  mergeClaimRepairReply, type ArtifactProductKind,
+} from './artifactClaimGuardPure'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { buildCourseInjection, buildAiTeachSourcesHint } from './aiTeachingCourse'
@@ -346,14 +350,15 @@ export interface AgentTraceStep {
   summary?: string
   /** visual.html 实时占位事件（仅 agent:step 推送，不落库）：{slug,title}——渲染层据此开「生成中」页签 */
   args?: Record<string, unknown>
-  /** 产物工具（visual.html / mindmap / image）成功产物（落库，随消息 trace 持久）：渲染层画工件卡 + 占位页签原地转正式 */
+  /** 产物工具（visual.html / mindmap / image / artifact.edit）成功产物（落库，随消息 trace 持久）：
+   *  渲染层画工件卡 + 占位页签原地转正式；`updated` = 原地改写了已有产物（页签原地刷新，不新开） */
   artifact?: {
     rel: string
     title: string
     slug: string
     /** visual.html 行数；image 没有"行"这个概念，恒缺省（故可选） */
     lines?: number
-    kind?: 'html' | 'mindmap' | 'image'
+    kind?: 'html' | 'mindmap' | 'image' | 'md'
     nodes?: number
     /** image：像素尺寸 / 字节数 / 生图描述 / 参考图 / 模型 / 耗时（卡上元信息 + 版本切换用，见方案 §4.4） */
     w?: number
@@ -365,6 +370,8 @@ export interface AgentTraceStep {
     elapsedMs?: number
     /** image：改图槽未配置时退化为「按描述重画」（卡上据此标注，不静默降级） */
     downgraded?: boolean
+    /** 原地更新已有产物（不是新生成）：渲染层刷新同路径页签而不是新开一个 */
+    updated?: boolean
   }
   /** 过程旁白：带工具轮次里模型输出的说明文本（落库供历史回看；
    *  最终轮正文是回复本体，已在消息 content 里，不重复存） */
@@ -554,6 +561,38 @@ function buildRecentImagesHint(sessionId: string): string {
 }
 
 /**
+ * 本会话最近的文本产物（示意图 / 导图 / 讲义）：让「改一下刚才那张图」能落到具体 relPath。
+ *
+ * 图片有自己的 `buildRecentImagesHint`（ref 语义不同），这里只收 html / mindmap / md。
+ * 读 trace 不额外扫盘，最多 6 条；没有产物返回空串（零成本）。放在首条 user 消息层，
+ * 不进 system —— 产物变化不该动 prompt cache 前缀。
+ */
+function buildRecentArtifactsHint(sessionId: string): string {
+  try {
+    const rows = getAgentMessages(sessionId)
+    const items: Array<{ rel: string; title: string }> = []
+    for (let i = rows.length - 1; i >= 0 && items.length < 6; i--) {
+      const raw = rows[i]?.trace_json
+      if (!raw) continue
+      let steps: unknown
+      try { steps = JSON.parse(raw) } catch { continue } // 单条 trace 坏掉不该影响本轮发送
+      if (!Array.isArray(steps)) continue
+      for (let j = steps.length - 1; j >= 0 && items.length < 6; j--) {
+        const a = (steps[j] as { artifact?: { kind?: string; rel?: string; title?: string } } | null)?.artifact
+        if (!a?.rel) continue
+        if (a.kind !== 'html' && a.kind !== 'mindmap' && a.kind !== 'md') continue
+        if (items.some(x => x.rel === a.rel)) continue
+        items.push({ rel: a.rel, title: String(a.title ?? '') })
+      }
+    }
+    if (items.length === 0) return ''
+    return '\n\n【本会话最近的产物】用户说「改一下刚才那张图 / 把上次的导图改改 / 更新那篇讲义」时，目标路径从这里取：'
+      + '示意图 / 导图调 visual.html / mindmap 时把 relPath 传回原路径（不要新建版本）；只改局部用 artifact.edit 的 path。\n'
+      + items.map(x => `— ${x.rel}${x.title ? `（${x.title}）` : ''}`).join('\n')
+  } catch { return '' } // 读会话失败不该打断本轮请求
+}
+
+/**
  * 续跑 carry 的入参摘要（A 方案 §3.5）：紧凑截断，取不到就留空。
  * 它是纯展示/给模型看的现场线索，不参与任何判据 —— 序列化失败一律降级为空串，绝不抛。
  */
@@ -588,6 +627,7 @@ const CHANGE_LABELS: Record<string, string> = {
   'visual.html': '生成示意图',
   'mindmap': '生成思维导图',
   'image': '生成图片',
+  'artifact.edit': '修改产物',
 }
 
 /**
@@ -1412,13 +1452,15 @@ async function runAgentLoopInner(
       '产物是「给用户查看、可交互的示意图」，不是网页——不做站点导航/多页结构，但可按讲解需要加入点击、悬停、拖拽、滑杆等轻量交互，让用户自己观察变化。' +
       '技术约束：单文件自包含、CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）。画幅：SVG 用 viewBox（如 680×400）定比例 + style="width:100%;height:auto" 自适应，禁止外层固定 px 宽度与 min-height/100vh——客户端按栏宽渲染并会自动等比放大到全屏，流式宽度才能铺满。中文标注；画面不必精美，清晰可读优先（文字与背景保持基本对比，别用同色系深浅叠加）。' +
       '文档内禁止写 <meta http-equiv> CSP 与 <base> 标签（宿主统一注入安全策略，自带 CSP 会因策略取交集禁掉脚本）。' +
-      'slug 用 kebab-case 小写英文；title 给中文短标题。HTML 全文只作为工具参数传递，**绝不把 HTML 源码写进回答正文或 markdown 代码块**；生成后在回答里用一句话说明右侧工件栏已打开该图。'
+      'slug 用 kebab-case 小写英文；title 给中文短标题。HTML 全文只作为工具参数传递，**绝不把 HTML 源码写进回答正文或 markdown 代码块**；生成后在回答里用一句话说明右侧工件栏已打开该图。' +
+      '**改已有示意图：传 relPath（上一次产物返回的路径）原地覆盖，不要新建 -v2；只改一个标注/颜色/参数时用 artifact.edit 做局部替换（不在工具列表时先 builtin.tool.request 申请），不必重发整篇 HTML。**'
     : ''
   // 思维导图（方案 .AGENT/.claude/plans/ai-teaching-mindmap.md）：整理结构的产物工具，与 visual.html 并列（串行）
   const mindmapHint = source === 'aiTeaching'
     ? '\n\n【思维导图工具 mindmap（AI教学）】用户明确要「思维导图 / 脑图 / 整理结构 / 知识框架」时，调用 mindmap 工具把内容整理成树状结构：' +
       'root 为递归节点 { text, ref?, children? }，text 用一行短短语；节点对应知识库里的某篇笔记（或另一张思维导图）时，ref 填其仓库相对路径（.md 笔记 / .json 导图），点击可跳转。' +
       '树深 ≤6、节点总数 ≤120，超出的先归纳再输出。只把结构交给工具，**绝不把 JSON 写进回答正文**；生成后用一句话说明右侧工件栏已打开。' +
+      '**改已有导图：传 relPath 原地覆盖，不要新建 -v2；只改局部节点用 artifact.edit。** ' +
       '若工具列表中没有 mindmap，先用 builtin.tool.request（tools="mindmap"）申请。'
     : ''
   // P8（§3.14）+ UI 优化条目8.2.2：三层学习者画像注入（全局 → 工作区 → 会话，细颗粒覆盖粗颗粒）
@@ -1618,6 +1660,8 @@ async function runAgentLoopInner(
   // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放首条 user 消息层，
   // 不放 system（它随会话内容递增而变，进 system 就是每生成一张图就把缓存前缀作废一次）
   const recentImagesHint = (!manual && source !== 'schedule' && source !== 'intel') ? buildRecentImagesHint(sessionId) : ''
+  // 文本产物的「改哪一张」索引：只在教学面有用（产物工具也只在教学面可用）
+  const recentArtifactsHint = source === 'aiTeaching' ? buildRecentArtifactsHint(sessionId) : ''
   // 统一助手：缩窄作用域时把元数据清单进首条 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）。
   // 整仓不列清单（成本高且无边界意义），只由 system 的作用域提示说明。
   const aiManifestHint = unifiedAssistant && !scopeAll
@@ -1625,7 +1669,7 @@ async function runAgentLoopInner(
     : ''
   // 首条 user 消息层注入（每轮变化的数据快照）：日程 / 情报各自的数据快照 + 引用骨架 / 感知素材 ——
   // 逐字会变的内容都只进这一层，不进 system（防打散 prompt cache 前缀）
-  const requestInjection = [scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, aiManifestHint].filter(Boolean).join('\n\n')
+  const requestInjection = [scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, recentArtifactsHint, aiManifestHint].filter(Boolean).join('\n\n')
 
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
@@ -1663,6 +1707,32 @@ async function runAgentLoopInner(
   /** 本条消息累计批量移动条目数（v3.16.1 方案 A：整批算 1 次写，但条目总量另有 300 硬上限） */
   let batchMoveItems = 0
   const changes: AgentChange[] = []
+  /**
+   * 产物声称核验（2026-11-17，A 方案）：本轮**成功写入**的产物种类。
+   * 用来判断正文里的「已生成 / 已打开」有没有事实支撑 —— 历史里出现过模型没调用
+   * visual.html、却写「右侧工件栏已打开示意图」的假完成（trace 工具步骤为 0）。
+   */
+  const producedArtifacts: ArtifactProductKind[] = []
+  /** 补救轮只跑一次：模型连续空口声称时不能反复烧轮次 */
+  let artifactClaimRepaired = false
+  /** 触发补救轮时暂存上一轮正文：补救成功后与最终正文合并，避免讲解从历史里消失 */
+  let pendingClaimPrepend = ''
+  /**
+   * 最终回复收口：合并补救轮前的正文 + 必要时追加系统性校正文案（不改写模型原文）。
+   * 落库与返回给渲染层共用，保证历史与界面上看到的是同一个串。
+   */
+  const finalizeArtifactClaimReply = (reply: string, allowCorrection = true): string => {
+    let out = reply
+    if (pendingClaimPrepend) {
+      out = mergeClaimRepairReply(pendingClaimPrepend, out)
+      pendingClaimPrepend = ''
+    }
+    if (allowCorrection && source === 'aiTeaching') {
+      const claim = detectUnbackedArtifactClaim(out, producedArtifacts)
+      if (claim) out += '\n\n' + artifactCorrectionNotice(claim)
+    }
+    return out
+  }
   /**
    * 续跑现场（A 方案 §3.5）：每次工具执行后入账，失败/停止时压成 carry 写进会话行。
    * 只留最近 40 条、单条结果先截到 4000 字符（carry 单条上限 800，留足余量又不用把 24k 全揣着）。
@@ -1812,7 +1882,10 @@ async function runAgentLoopInner(
         const dt = r.detail ?? interruptionDetailOf(rawFailure({
           layer: 'stream-eof', raw: r.interruption.matched, round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
         }))
-        const reply = withTruncationNotice(r.content + changesText, r.interruption, dt)
+        const reply = withTruncationNotice(
+          finalizeArtifactClaimReply(r.content + changesText, false),
+          r.interruption, dt,
+        )
         const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
         // 截断 = 有断点可续（「接着往下写」）：现场与失败出口同款（支线/手册通道不写）
         const ictx = interruptCtxOf(i + 1)
@@ -1824,7 +1897,21 @@ async function runAgentLoopInner(
           contextBudget: asm.budget,
         }
       }
-      const reply = r.content + changesText
+      // 产物声称硬闸门（A 方案）：正文声称已生成 / 已打开，但本轮没有任何成功产物写入
+      // → 先给模型一次补救轮（真正调用工具，或说明只是旧图 / 生成失败）；补救不了由
+      //   finalizeArtifactClaimReply 追加确定性校正文案。收场轮（budgetCapped）不补救，
+      //   避免与强制总结抢预算。
+      if (source === 'aiTeaching' && !artifactClaimRepaired && !budgetCapped) {
+        const claim = detectUnbackedArtifactClaim(r.content, producedArtifacts)
+        if (claim) {
+          artifactClaimRepaired = true
+          pendingClaimPrepend = r.content
+          convo.push(r.assistantMessage)
+          convo.push({ role: 'user', content: buildArtifactClaimRepairNotice(claim) })
+          continue
+        }
+      }
+      const reply = finalizeArtifactClaimReply(r.content + changesText)
       appendAgentMessage(sessionId, 'assistant', reply, trace)
       return {
         ok: true, sessionId, reply, changes, trace, injection,
@@ -1864,10 +1951,33 @@ async function runAgentLoopInner(
         durationMs,
         summary: exec.ok ? undefined : String(exec.message).slice(0, 200),
       }
-      // visual.html / mindmap / image 成功产物落 trace（小字段，不含全文）：渲染层工件卡数据源 + 占位页签原地转正式
-      if ((realName === 'visual.html' || realName === 'mindmap' || realName === 'image') && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
+      // visual.html / mindmap / image / artifact.edit 成功产物落 trace（小字段，不含全文）：
+      // 渲染层工件卡数据源 + 占位页签原地转正式；artifact.edit 只做「同路径刷新」。
+      if ((realName === 'visual.html' || realName === 'mindmap' || realName === 'image' || realName === 'artifact.edit')
+        && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
         const d = exec.data as Record<string, unknown>
-        if (realName === 'image') {
+        // 产物记账（A 方案）：只认本轮真实成功写入。artifact.edit 按扩展名归类；
+        // .md（讲义）不算图 —— 声称「示意图已生成」不能因为改了讲义而免检。
+        if (realName === 'visual.html') producedArtifacts.push('visual')
+        else if (realName === 'mindmap') producedArtifacts.push('mindmap')
+        else if (realName === 'image') producedArtifacts.push('image')
+        else if (realName === 'artifact.edit') {
+          const rel = String(d.relPath ?? '').toLowerCase()
+          if (rel.endsWith('.html')) producedArtifacts.push('visual')
+          else if (rel.endsWith('.json')) producedArtifacts.push('mindmap')
+        }
+        if (realName === 'artifact.edit') {
+          const rel = String(d.relPath ?? '')
+          const ext = rel.split('.').pop()?.toLowerCase() ?? ''
+          toolStep.artifact = {
+            rel,
+            title: rel.split('/').pop() ?? rel,
+            slug: '',
+            kind: ext === 'md' ? 'md' : ext === 'json' ? 'mindmap' : 'html',
+            lines: Number(d.lines ?? 0) || undefined,
+            updated: true,
+          }
+        } else if (realName === 'image') {
           // 生图没有 title/slug 必填参数：卡上的人可读标签取 prompt 首段，取不到再退回文件名
           const prompt = String(args?.prompt ?? '')
           toolStep.artifact = {
@@ -1883,6 +1993,7 @@ async function runAgentLoopInner(
             model: String(d.model ?? '').trim() || undefined,
             elapsedMs: Number(d.elapsedMs ?? 0) || undefined,
             downgraded: d.downgraded === true ? true : undefined,
+            updated: d.updated === true ? true : undefined,
           }
         } else {
           toolStep.artifact = {
@@ -1892,6 +2003,7 @@ async function runAgentLoopInner(
             slug: String(args?.slug ?? ''),
             kind: realName === 'mindmap' ? 'mindmap' : 'html',
             nodes: realName === 'mindmap' ? Number(d.nodes ?? 0) : undefined,
+            updated: d.updated === true ? true : undefined,
           }
         }
       }
@@ -1944,7 +2056,7 @@ async function runAgentLoopInner(
               ? String(((data?.items as Array<{ to?: string }> | undefined)?.[0]?.to) ?? '').trim()
               : realName.startsWith('builtin.vault.')
                 ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
-                : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image') ? String(data?.relPath ?? '').trim()
+                : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image' || realName === 'artifact.edit') ? String(data?.relPath ?? '').trim()
                   : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
                     // 主题整理：结果是主题名（不是文件），「本次改动」清单显示「整理笔记主题 · 面试高频」
                     : realName === 'builtin.knowledge.topic.assign' ? String(data?.name ?? '').trim()
@@ -2168,7 +2280,7 @@ async function runAgentLoopInner(
     const ictx = interruptCtxOf(maxRounds)
     const facts = interruptFactsOf(capIt, capDetail, trace, ictx)
     // 正文用统一的卡片构造器（进度 + 可继续句）；改动清单已由上面的 changesText 列过，这里传空避免重复
-    const reply = fr.content + changesText
+    const reply = finalizeArtifactClaimReply(fr.content + changesText)
       + '\n' + buildInterruptContent({
         reason: facts.reason,
         advice: suggestedActionText(capIt),

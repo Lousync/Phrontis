@@ -54,6 +54,27 @@ export function ensureQuizDocFrontmatter(title: string, content: string, id: str
   return `---\nid: ${id}\ntitle: ${yamlQuote(title)}\ntype: quiz\n---\n\n${text}`
 }
 
+/**
+ * 覆盖写时强制沿用旧文档 id（2026-11-17：AI 产物改为同名覆盖后必须守住知识页身份）。
+ * - 已有 frontmatter 且有 id：替换成旧 id；
+ * - 已有 frontmatter 无 id：插到第一行；
+ * - 无 frontmatter：补一个只有 id 的头。
+ * 只动 id 这一行，其余 frontmatter / 正文原样。
+ */
+export function forceFrontmatterId(raw: string, id: string): string {
+  const text = String(raw ?? '').replace(/\r\n/g, '\n')
+  const keep = String(id ?? '').trim()
+  if (!keep) return text
+  const fm = splitFrontmatter(text)
+  if (fm) {
+    const yaml = /^\s*id\s*:/m.test(fm.yaml)
+      ? fm.yaml.replace(/^\s*id\s*:.*$/m, `id: ${keep}`)
+      : `id: ${keep}\n${fm.yaml}`
+    return `---\n${yaml}\n---\n${fm.body}`
+  }
+  return `---\nid: ${keep}\n---\n\n${text}`
+}
+
 /** 读 frontmatter `id`（去引号）；无 frontmatter / 无 id → null */
 export function readFrontmatterId(raw: string): string | null {
   const fm = splitFrontmatter(raw)

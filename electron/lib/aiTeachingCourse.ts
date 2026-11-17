@@ -11,7 +11,7 @@ import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './works
 import { createAgentSession, getAgentMessages, getAgentSession, sessionExists } from './agentSessionRepo'
 import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
-import { ensureQuizDocFrontmatter } from './quizDocPure'
+import { ensureQuizDocFrontmatter, forceFrontmatterId, hasQuizFence, readFrontmatterId } from './quizDocPure'
 import {
   parseCourseMd,
   rewriteCourseMd,
@@ -961,7 +961,16 @@ export function writeChapterReviewDoc(sessionId: string, content: unknown, getSe
     const dirAbs = join(vault.rootPath, dirRel)
     mkdirSync(dirAbs, { recursive: true })
     const fname = '复习讲义.md'
-    writeFileSync(join(dirAbs, fname), String(content ?? '').replace(/\r\n/g, '\n'), 'utf-8')
+    const target = join(dirAbs, fname)
+    let body = String(content ?? '').replace(/\r\n/g, '\n')
+    // 同名覆盖：沿用旧文档 id（知识页身份不换）
+    if (existsSync(target)) {
+      try {
+        const prevId = readFrontmatterId(readFileSync(target, 'utf-8'))
+        if (prevId) body = forceFrontmatterId(body, prevId)
+      } catch { /* 旧文读不到就按新文原样落盘 */ }
+    }
+    writeFileSync(target, body, 'utf-8')
     const relPath = `${dirRel}/${fname}`
     const f = readProgressFile()
     const s = wsState(f, hit.wsId)
@@ -1655,9 +1664,24 @@ export function archiveOrganizedPage(sessionId: string, title: unknown, content:
     const dirAbs = join(vault.rootPath, rel)
     mkdirSync(dirAbs, { recursive: true })
     const base = sanitizeTitle(String(title ?? '整理'))
-    const fname = uniqueFileName(dirAbs, base.endsWith('.md') ? base : `${base}.md`)
+    const want = base.endsWith('.md') ? base : `${base}.md`
+    const text = String(content ?? '').replace(/\r\n/g, '\n')
+    // 2026-11-17：讲义 / 总结**同名覆盖**（AI 改稿不再另建 v2）；题单例外 —— 题号一旦重排，
+    // 旧作答与错题记录会对不上题（铁律 19），所以仍走版本递增。
+    const isQuiz = hasQuizFence(text)
+    const fname = isQuiz ? uniqueFileName(dirAbs, want) : want
     // 题单落盘即写 frontmatter id（同 organizeDoc；非 quiz 文档原样返回）
-    const body = ensureQuizDocFrontmatter(String(title ?? '整理'), String(content ?? '').replace(/\r\n/g, '\n'))
+    let body = ensureQuizDocFrontmatter(String(title ?? '整理'), text)
+    if (!isQuiz) {
+      // 覆盖写必须沿用旧文档 id，否则知识页换身份，讲义/题单的关联会断。
+      const target = join(dirAbs, fname)
+      if (existsSync(target)) {
+        try {
+          const prevId = readFrontmatterId(readFileSync(target, 'utf-8'))
+          if (prevId) body = forceFrontmatterId(body, prevId)
+        } catch { /* 旧文读不到就按新文原样落盘 */ }
+      }
+    }
     writeFileSync(join(dirAbs, fname), body, 'utf-8')
     broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: rel })
     return { ok: true, relPath: `${rel}/${fname}`, absPath: join(dirAbs, fname) }

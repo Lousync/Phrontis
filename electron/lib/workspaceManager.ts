@@ -709,7 +709,8 @@ function uniqueAttachmentName(dirAbs: string, fileName: string): string {
  * 剪贴板/选图的附件名是用户原文件名，撞车是偶然，加时间戳最省事；
  * 生图产物要的是**可读的版本名** —— 卡上「版本 v1 / v2」切换、改图再次落盘成 `-v2`
  * 都直接读文件名，时间戳看不出先后关系（同秒内还不可排序）。
- * 与 visual.html / mindmap 的「重名不覆盖」也是同一口径。
+ * 2026-11-17 起只有**图片**仍走版本递增：visual.html / mindmap 已改为同名覆盖（原地改），
+ * 生图保留版本是因为对话卡要能切 v1 / v2，覆盖会让历史消息里的图一起变。
  */
 export function uniqueVersionedName(dirAbs: string, fileName: string): string {
   if (!existsSync(join(dirAbs, fileName))) return fileName

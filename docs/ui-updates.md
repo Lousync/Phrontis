@@ -2944,3 +2944,19 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 文档：`docs/knowledge-edit-outline-plan.md`；`docs/knowledge-feed-topics-plan.md` §4.4 / 验收同步；帮助手册《笔记 · 主题与总览》《模块一览》。
 
 **验收**：双端 `tsc --noEmit` 0 错；`verify-outline-edit.mjs`、`verify-topics.mjs`、`verify-workbench-shell.mjs` 全绿；原型 `tmp/knowledge-outline-edit-proto/index.html` 10/10 交互自检。
+
+## 2026-11-17 · AI 教学产物原地修改（不再生成 v2）
+
+**现状 / 用户反馈**：让 AI 改一张示意图时，它总是新建 `xxx-v2.html`，工件栏多出一个页签，原来的图没变；讲义同名也会另存。
+
+**根因**：`writeVisual` / `writeMindmap` / `writeImage` 硬编码「重名不覆盖 → -v2/-v3 递增」，`archiveOrganizedPage` 用 `uniqueFileName`；系统提示与两个示意图技能还明确要求「生成新版本」，且没有「局部改产物」的工具。
+
+**改动点**：
+- 落盘：`writeVisual` / `writeMindmap` 同名覆盖、支持 `relPath` 原地改；`writeImage` 支持显式 `relPath` 覆盖（默认仍版本递增）；`archiveOrganizedPage` 讲义同名覆盖并保留 frontmatter id，题单仍版本递增。
+- 新工具 `artifact.edit`（ondemand / write）：本会话产物内的 `.html` / `.json` / `.md` 多段替换 + 末尾追加，全有或全无。
+- 刷新：`agent:step` 的 artifact 带 `updated`；工件栏同路径页签原地刷新（html / mindmap / image 递增加载序号，md 重读全文），并监听 `ws:external-change`。
+- 提示：`agentService` 的示意图 / 导图提示与 `stem-diagram` / `math-plot` 技能改为「relPath 原地覆盖 + artifact.edit」。
+- 帮助文档《AI 教学素材与代码》补「改产物是原地改」。
+- 契约：`verify-artifact-tabs.mjs` 增原地刷新断言；新增 `verify-artifact-inplace.mjs`。
+
+**验收**：双端 `tsc --noEmit` 0 错；新增/更新契约脚本全绿。

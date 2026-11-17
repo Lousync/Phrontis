@@ -358,7 +358,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           </div>
         ) : tab.kind === 'mindmap' ? (
           <div className="kb-art-in flex-1 min-h-0">
-            <MindMapView relPath={tab.rel} showExport showSource onRef={onOpenRef} />
+            <MindMapView relPath={tab.rel} showExport showSource onRef={onOpenRef} reloadSeq={htmlSeq[tab.rel] ?? 0} />
           </div>
         ) : tab.kind === 'image' ? (
           /* 生图产物（v3.6.0 阶段二）：直接复用**批 3 的**图片查看器（缩放/旋转/平移/棋盘格底 +
@@ -366,7 +366,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
               这正是 `useVaultImage` 头注里那条口径。取回走范围通道（RANGE_EXT_WHITELIST 已含 png），
               零安全面变更。 */
           <div className="kb-art-in flex-1 min-h-0 min-w-0 flex flex-col">
-            <ImmersiveImageView relPath={tab.rel} name={tab.name} sizeBytes={tab.bytes} />
+            <ImmersiveImageView relPath={tab.rel} name={tab.name} sizeBytes={tab.bytes} reloadSeq={htmlSeq[tab.rel] ?? 0} />
           </div>
         ) : (
           /* pptx 逐页阅读并入页签（§1.4：页码即内容） */

@@ -31,9 +31,11 @@ interface Props {
   updatedAt?: string
   onOpenInSystem?: () => void
   onRevealInFolder?: () => void
+  /** 外部（AI 覆盖 / 原子替换）改写文件后的重读计数：变了就重读一次 */
+  reloadSeq?: number
 }
 
-export function ImmersiveImageView({ rootId, relPath, name, sizeBytes, updatedAt, onOpenInSystem, onRevealInFolder }: Props) {
+export function ImmersiveImageView({ rootId, relPath, name, sizeBytes, updatedAt, onOpenInSystem, onRevealInFolder, reloadSeq = 0 }: Props) {
   const [root, setRoot] = useState<string | null>(rootId ?? null)
   useEffect(() => {
     if (rootId) { setRoot(rootId); return }
@@ -44,7 +46,7 @@ export function ImmersiveImageView({ rootId, relPath, name, sizeBytes, updatedAt
     return () => { alive = false }
   }, [rootId])
 
-  const img = useVaultImage(root, relPath)
+  const img = useVaultImage(root, relPath, reloadSeq)
   const natW = img.dims?.w ?? 0
   const natH = img.dims?.h ?? 0
   const nat = useMemo<ViewBox | null>(() => (natW > 0 && natH > 0 ? { w: natW, h: natH } : null), [natW, natH])

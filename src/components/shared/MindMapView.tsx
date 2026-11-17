@@ -37,9 +37,11 @@ interface Props {
   onViewChange?: (v: 'map' | 'source') => void
   /** ref 节点点击回调；缺省派发 kb-open-note（笔记区同模块打开） */
   onRef?: (rel: string) => void
+  /** 外部（AI 工具 / 编辑器）改写文件后的重读计数：变了就重载磁盘内容 */
+  reloadSeq?: number
 }
 
-export function MindMapView({ relPath, showExport, showSource, view, onViewChange, onRef }: Props) {
+export function MindMapView({ relPath, showExport, showSource, view, onViewChange, onRef, reloadSeq = 0 }: Props) {
   const [doc, setDoc] = useState<MindMapDoc | null>(null)
   const [srcDraft, setSrcDraft] = useState('')
   const [loadErr, setLoadErr] = useState('')
@@ -94,7 +96,8 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
     setSaveState('saved')
   }, [relPath])
 
-  useEffect(() => { void load() }, [load])
+  // reloadSeq 变化 = 宿主知道磁盘上的导图被改过（AI 原地改写 / 编辑器保存）→ 重读一次
+  useEffect(() => { void load() }, [load, reloadSeq])
 
   const layout = useMemo(
     () => (doc ? layoutTree(doc.root, { nodeW: NODE_W, nodeH: NODE_H, gapX: GAP_X, gapY: GAP_Y, pad: PAD }) : null),

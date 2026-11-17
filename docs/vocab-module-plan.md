@@ -173,6 +173,8 @@ qwerty-learner 静态构建产物由 `scripts/build-vocab.mjs` 生成到 `resour
 | 桥 | 新增 `src/utils/phrontisBridge.ts` | `isEmbed` / `postToHost` / `initVocabBridge` / `postTypingSession` |
 | 桥 | `src/index.tsx` | 调 `initVocabBridge()` |
 | 桥 | `src/pages/Typing/index.tsx` | 章节完成 + `pagehide` 上报会话 |
+| 发音 | 新增 `src/hooks/useEmbedPronunciation.ts` | 嵌入模式改系统 TTS（speechSynthesis），按发音类型选本地语音、无语音静默；不联网、不增包体 |
+| 发音 | `src/hooks/usePronunciation.ts` | `?embed=1` 时走上面的 TTS hook；云端音频预取仍关闭 |
 
 补丁以字符串替换实现，不依赖 `git apply` 上下文；上游改动导致替换失败时脚本报错，人工更新补丁。
 
@@ -258,15 +260,15 @@ builtin.vocab.words
   2. 检查 `.knowbase/modules/vocab/days/<today>.json` 有该章 words。
   3. 对全局 AI 说「用今天背的单词造句复习」，能拿到今日词 + 近 7 天错词并出 5 题。
   4. 重发同一章（重复完成）不产生重复词/重复计数。
-  5. 嵌入模式默认关闭发音与按键音；打字与记录正常。
+  5. 嵌入模式发音走系统 TTS（免网），没有可用系统语音时静默；按键音仍关闭；打字与记录正常。
 
 ## 9. 遗留工作（下次继续）
 
 **总任务：背单词功能的软件适配与优化。**
 
-- **B-48 读单词功能疑似有问题**：用户 2026-11-02 反馈，具体表现待补充；按用户要求**本次只记录、不修复**，下次先复现再定位。详见 `docs/pending-fixes.md` B-48。
-- 当前嵌入版默认关闭发音播放 / 预取 / 按键音，是无音频设备环境下的临时稳定性处理，不代表 B-48 已解决。
-- 后续适配 / 优化候选：发音链路（本地 TTS 或可选在线发音）、词库裁剪与安装包体积、跨设备进度回灌、AI 造句一键入口 / 练习页沉淀。
+- **B-48 读单词功能疑似有问题**：2026-11-17 已落码——嵌入版改走系统 TTS（免网），不再是有道云端音频的 noop；契约 `.AGENT/scripts/vocab-audio/verify-embed-tts.mjs`（20 项）+ 运行期探针 `.AGENT/scripts/vocab-audio/probe-embed-tts.cjs`（11 项）均绿。待 Windows 真机回归出声与切词，详见 `docs/pending-fixes.md` B-48。
+- 云端音频预取与按键音仍保持嵌入模式关闭（CSP 断网 + 无音频设备稳定性口径未变）。
+- 后续适配 / 优化候选：可选在线真人发音、词库裁剪与安装包体积、跨设备进度回灌、AI 造句一键入口 / 练习页沉淀。
 
 ## 10. 原生模块化路线（暂缓，下一阶段）
 

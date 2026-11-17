@@ -136,10 +136,45 @@ check('artifact kind=image -> 图片页签（不再是直接 return）',
 check('openArtFile 认图片扩展名（排在文本兜底之前）',
   /isRenderableImagePath\(rel\)[\s\S]{0,300}kind: 'image'/.test(teachIdx))
 check('文件树 onOpenImage 已接上', teachIdx.includes('onOpenImage={treeOpenArt}'))
-check('「本次改动」里图片进工件栏（不发 kb-open-note）',
-  teachIdx.includes("c.tool === 'visual.html' || c.tool === 'image'"))
+check('「本次改动」里图片 / 示意图 / 导图进工件栏（不发 kb-open-note）',
+  teachIdx.includes('const changeOpensInArtifactPane')
+  && teachIdx.includes("tool === 'visual.html' || tool === 'image'")
+  && teachIdx.includes("tool === 'artifact.edit' && /\\.(?:html?|json)$/i"))
 check('图片页签不进「按文本回读」那份清单', teachIdx.includes("t.kind !== 'image' && (rel ? t.rel === rel : t.kind === 'md')"))
 check('切回会话能恢复图片页签（docRel 纳入 image）', teachIdx.includes("t.kind === 'image') ? t.rel : null"))
+
+// ---- 2026-11-17：产物原地修改（改图不再生成 v2）----
+// 断的是「链子有没有接上」：落盘覆盖 / relPath / artifact.edit / 同路径页签刷新。
+console.log('\n[原地修改 · 落盘] aiTeachingSources')
+const pure = read('electron/lib/aiTeachingArtifactPure.ts')
+check('writeVisual 无 -v2 循环（同名覆盖）', /export function writeVisual[\s\S]{0,2200}return \{ ok: true, relPath: `\$\{sessionRel\}\/visuals\/\$\{fname\}`, lines, updated \}/.test(sources)
+  && !sources.includes('`${s}-v${v}.html`'))
+check('writeMindmap 无 -v2 循环（同名覆盖）', !sources.includes('`${s}-v${v}.json`'))
+check('writeVisual 支持 relPath 原地改', /resolveProductFileRel\(sessionRel, explicit, 'visuals', \['html'\]\)/.test(sources))
+check('writeMindmap 支持 relPath 原地改', /resolveProductFileRel\(sessionRel, explicit, 'mindmaps', \['json'\]\)/.test(sources))
+check('writeImage 支持显式 relPath 覆盖', /resolveProductFileRel\(sessionRel, explicit, 'outputs', \['png', 'jpg', 'jpeg', 'webp'\]\)/.test(sources))
+check('writeImage 默认仍版本递增（生图卡版本切换不破）', sources.includes('uniqueVersionedName(dirAbs, `${s}.png`)'))
+check('artifact.edit 走纯函数补丁（全有或全无）',
+  sources.includes('applyArtifactEdits(text, edits, append)') && pure.includes('全部校验通过才返回新文本'))
+check('导图 JSON 改后仍合法才落盘', sources.includes('!parseMindmap(next)') && sources.includes('不支持末尾追加'))
+
+console.log('\n[原地修改 · 边界] aiTeachingArtifactPure')
+check('拒绝绝对路径 / ..', pure.includes("不能是绝对路径") && pure.includes("不能包含 . / .."))
+check('拒绝点目录 / SOURCES', pure.includes("隐藏目录 / 点文件") && pure.includes("'SOURCES'"))
+check('产物目录只认直接文件', pure.includes('只认直接文件，不支持子目录'))
+check('扩展名白名单', pure.includes("ARTIFACT_EDIT_EXTS = ['html', 'json', 'md']"))
+
+console.log('\n[原地修改 · 工具与刷新]')
+check('注册 artifact.edit（tier ondemand）', /name: 'artifact\.edit'[\s\S]{0,2400}tier: 'ondemand'/.test(tools))
+check('artifact.edit 仅 AI 教学会话可用', tools.includes('artifact.edit 仅可在 AI 教学对话中使用'))
+check('artifact.edit 串行（不与只读工具并行）', read('electron/lib/agentLoopPolicy.ts').includes("realName !== 'artifact.edit'"))
+check('trace 透传 updated', agent.includes('updated: d.updated === true'))
+check('artifact.edit 也产出 artifact 事件', agent.includes("realName === 'artifact.edit'") && agent.includes("kind: ext === 'md' ? 'md'"))
+check('本会话最近产物索引（改哪一张不必猜路径）', agent.includes('本会话最近的产物') && agent.includes('recentArtifactsHint'))
+check('同路径页签原地刷新（不新开）', teachIdx.includes('const exists = artTabsRef.current.some')
+  && teachIdx.includes('setHtmlSeq(prev => ({ ...prev, [a.rel]'))
+check('监听外部写刷新打开中的工件', teachIdx.includes('onWsExternalChange') && teachIdx.includes('artTabsRef.current.find(t => !t.generating && t.rel === rel)'))
+check('讲义同名覆盖且保留 frontmatter id', course.includes('hasQuizFence(text)') && course.includes('forceFrontmatterId(body, prevId)'))
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)

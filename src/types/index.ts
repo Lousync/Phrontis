@@ -1222,7 +1222,7 @@ export interface AgentTraceStep {
   summary?: string
   /** visual.html / image「生成中」实时事件（agent:step 专用，不落库）：{slug,title} / {prompt,aspect,ref,slug} */
   args?: Record<string, unknown>
-  /** 产物工具（visual.html / mindmap / image）成功产物（落库随消息 trace）：对话流工件卡数据源。
+  /** 产物工具（visual.html / mindmap / image / artifact.edit）成功产物（落库随消息 trace）：对话流工件卡数据源。
    *  ★ 本字段与 electron/lib/agentService.ts 的 AgentTraceStep.artifact **互为镜像**，改一处必须改两处。 */
   artifact?: {
     rel: string
@@ -1230,7 +1230,7 @@ export interface AgentTraceStep {
     slug: string
     /** visual.html 行数；image 没有"行"这个概念，恒缺省（故可选） */
     lines?: number
-    kind?: 'html' | 'mindmap' | 'image'
+    kind?: 'html' | 'mindmap' | 'image' | 'md'
     nodes?: number
     /** image：像素尺寸 / 字节数 / 生图描述 / 参考图 / 模型 / 耗时（卡上元信息 + 版本切换用） */
     w?: number
@@ -1242,6 +1242,8 @@ export interface AgentTraceStep {
     elapsedMs?: number
     /** image：改图槽未配置时退化为「按描述重画」（卡上据此标注，不静默降级） */
     downgraded?: boolean
+    /** 原地更新已有产物（不是新生成）：页签原地刷新，不新开 */
+    updated?: boolean
   }
   /** 过程旁白（落库）：带工具轮次里模型输出的说明文本，历史回看用 */
   processText?: string

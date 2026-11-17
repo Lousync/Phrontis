@@ -1,5 +1,5 @@
-import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync } from 'fs'
-import { join, basename, isAbsolute, relative } from 'path'
+import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync, lstatSync } from 'fs'
+import { join, basename, extname, isAbsolute, relative } from 'path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
@@ -16,6 +16,7 @@ import { convertToPdf, probeSoffice, resetSofficeCache } from './sofficeConvert'
 import { probeWeb, crawlQueue, type ProbeResult, type TocChapter } from './webCrawler'
 import { appendAudit, countMonthVisionTokens, countMonthVisionPages } from './pluginAudit'
 import { getAgentSession } from './agentSessionRepo'
+import { ARTIFACT_EDIT_EXTS, MAX_ARTIFACT_EDIT_BYTES, applyArtifactEdits, normalizeArtifactRel, resolveProductFileRel, type ArtifactEdit } from './aiTeachingArtifactPure'
 // 素材类型识别的代码扩展名清单与 AI 读白名单同源（v3.2.0 条目 9 三处合一）：
 // 连带效果 = 素材库不再把 json/yml/yaml/toml/ini 五个配置类识别为 code（拍板④ 配置类不放开）
 import { AI_TEXT_CODE_EXTS } from '../../src/lib/aiTextExts'
@@ -690,15 +691,23 @@ export function removeSource(sessionId: string, no: number, getSetting: (key: st
   }
 }
 
+/** 符号链接一律拒绝：产物目录是 AI 可写面，不能顺着链接改到别处 */
+function isSymlinkFile(abs: string): boolean {
+  try { return lstatSync(abs).isSymbolicLink() } catch { return false }
+}
+
 /** visual.html 工具产物：
  *  写 `{会话夹}/visuals/<slug>.html`（v3.1.2 条目10：从 `SOURCES/{对话夹}/visuals/` 迁出——
- *  SOURCES 是给 AI 读的素材目录，产物一律落会话文件夹）；重名不覆盖（-v2/-v3 递增）。
+ *  SOURCES 是给 AI 读的素材目录，产物一律落会话文件夹）。
+ *  **同名覆盖**（2026-11-17：改图不再产生 -v2/-v3，用户要的是原地改）；
+ *  传 `opts.relPath` 时改指定产物（必须是本会话 visuals/ 下的 .html），供模型改更早生成的图。
  *  slug 白名单校验（kebab 英文数字，拒 `..`/分隔符/盘符——pathGuard 同口径的入参面收敛），
  *  落盘路径全程由本函数拼装，AI 参数无法越出会话 visuals/ 目录。不登记 SOURCE.md、不参与素材注入 */
 export function writeVisual(
   sessionId: string, slug: string, html: string,
   getSetting: (key: string) => unknown,
-): { ok: boolean; relPath?: string; lines?: number; error?: string } {
+  opts?: { relPath?: string },
+): { ok: boolean; relPath?: string; lines?: number; updated?: boolean; error?: string } {
   try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   try {
     const s = String(slug ?? '').trim()
@@ -718,12 +727,25 @@ export function writeVisual(
     const sessionRel = probe.relPath
     const visualsAbs = join(vault.rootPath, sessionRel, 'visuals')
     mkdirSync(visualsAbs, { recursive: true })
+    const explicit = String(opts?.relPath ?? '').trim()
     let fname = `${s}.html`
-    for (let v = 2; existsSync(join(visualsAbs, fname)) && v <= 99; v++) fname = `${s}-v${v}.html`
-    writeFileSync(join(visualsAbs, fname), body, 'utf-8')
-    broadcastTreeRefresh(sessionRel)
+    if (explicit) {
+      const t = resolveProductFileRel(sessionRel, explicit, 'visuals', ['html'])
+      if ('error' in t) return { ok: false, error: t.error }
+      fname = t.rel.slice(`${sessionRel}/visuals/`.length)
+    }
+    const abs = join(visualsAbs, fname)
+    if (isSymlinkFile(abs)) return { ok: false, error: `产物是符号链接，拒绝写入：${fname}` }
+    const updated = existsSync(abs)
+    writeFileSync(abs, body, 'utf-8')
+    if (updated) {
+      // 覆盖已有产物：通知外部改动（编辑器若正打开会提示重新加载，避免旧内容盖回去）
+      try { broadcast(BROADCAST_CHANNEL.wsExternalChange, { relPath: `${sessionRel}/visuals/${fname}` }) } catch { /* 广播失败不影响写入 */ }
+    } else {
+      broadcastTreeRefresh(sessionRel)
+    }
     const lines = body.replace(/\r\n/g, '\n').split('\n').length
-    return { ok: true, relPath: `${sessionRel}/visuals/${fname}`, lines }
+    return { ok: true, relPath: `${sessionRel}/visuals/${fname}`, lines, updated }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -731,12 +753,14 @@ export function writeVisual(
 
 /** mindmap 工具产物：
  *  写 `{会话夹}/mindmaps/<slug>.json`（结构同 writeVisual——会话产物、非课程素材，落会话文件夹）；
- *  重名不覆盖（-v2/-v3 递增）。slug 白名单校验 + 结构校验（复用 `src/lib/mindmap.parseMindmap`，
+ *  同名覆盖（与 writeVisual 同口径），传 `opts.relPath` 时改指定导图。
+ *  slug 白名单校验 + 结构校验（复用 `src/lib/mindmap.parseMindmap`，
  *  与渲染层识别同一判据）+ 大小上限。不登记 SOURCE.md、不参与素材注入。 */
 export function writeMindmap(
   sessionId: string, slug: string, jsonText: string,
   getSetting: (key: string) => unknown,
-): { ok: boolean; relPath?: string; nodes?: number; error?: string } {
+  opts?: { relPath?: string },
+): { ok: boolean; relPath?: string; nodes?: number; updated?: boolean; error?: string } {
   try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   try {
     const s = String(slug ?? '').trim()
@@ -755,11 +779,24 @@ export function writeMindmap(
     const sessionRel = probe.relPath
     const dirAbs = join(vault.rootPath, sessionRel, 'mindmaps')
     mkdirSync(dirAbs, { recursive: true })
+    const explicit = String(opts?.relPath ?? '').trim()
     let fname = `${s}.json`
-    for (let v = 2; existsSync(join(dirAbs, fname)) && v <= 99; v++) fname = `${s}-v${v}.json`
-    writeFileSync(join(dirAbs, fname), body, 'utf-8')
-    broadcastTreeRefresh(sessionRel)
-    return { ok: true, relPath: `${sessionRel}/mindmaps/${fname}`, nodes: countNodes(doc.root) }
+    if (explicit) {
+      const t = resolveProductFileRel(sessionRel, explicit, 'mindmaps', ['json'])
+      if ('error' in t) return { ok: false, error: t.error }
+      fname = t.rel.slice(`${sessionRel}/mindmaps/`.length)
+    }
+    const abs = join(dirAbs, fname)
+    if (isSymlinkFile(abs)) return { ok: false, error: `产物是符号链接，拒绝写入：${fname}` }
+    const updated = existsSync(abs)
+    writeFileSync(abs, body, 'utf-8')
+    if (updated) {
+      // 覆盖已有产物：通知外部改动（编辑器若正打开会提示重新加载）
+      try { broadcast(BROADCAST_CHANNEL.wsExternalChange, { relPath: `${sessionRel}/mindmaps/${fname}` }) } catch { /* 广播失败不影响写入 */ }
+    } else {
+      broadcastTreeRefresh(sessionRel)
+    }
+    return { ok: true, relPath: `${sessionRel}/mindmaps/${fname}`, nodes: countNodes(doc.root), updated }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -770,7 +807,10 @@ const MAX_IMAGE_OUTPUT_BYTES = 30 * 1024 * 1024
 
 /** image 工具在 **AI 教学面**的产物：
  *  写 `{会话夹}/outputs/<slug>.png`（与 `visuals/`、`mindmaps/` 并列的会话产物目录，
- *  见 docs/ai-image-gen-plan.md §6.1 B1）；重名不覆盖（`-v2`/`-v3` 递增，与两个 write* 同口径）。
+ *  见 docs/ai-image-gen-plan.md §6.1 B1）。
+ *
+ *  默认仍版本递增（`-v2`/`-v3`）：生图卡自带 v1/v2 版本切换，同名直接覆盖会让历史消息里的图
+ *  一起变成最新那张。要原地覆盖某张旧图时，AI 显式传 `opts.relPath`（2026-11-17 用户拍板）。
  *
  *  为什么与普通对话面分家：普通对话没有"会话文件夹"这个概念，产物落仓库隐藏目录 `.attachments/`；
  *  教学面的会话夹是**用户自己会去翻的目录**（左栏资源管理器就挂在它上面），图落在里面才找得回来。
@@ -783,7 +823,8 @@ const MAX_IMAGE_OUTPUT_BYTES = 30 * 1024 * 1024
 export function writeImage(
   sessionId: string, slug: string, bytes: Buffer,
   getSetting: (key: string) => unknown,
-): { ok: boolean; relPath?: string; bytes?: number; error?: string } {
+  opts?: { relPath?: string },
+): { ok: boolean; relPath?: string; bytes?: number; updated?: boolean; error?: string } {
   try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   try {
     const s = String(slug ?? '').trim() || 'image'
@@ -800,10 +841,80 @@ export function writeImage(
     const sessionRel = probe.relPath
     const dirAbs = join(vault.rootPath, sessionRel, 'outputs')
     mkdirSync(dirAbs, { recursive: true })
-    const fname = uniqueVersionedName(dirAbs, `${s}.png`)
+    const explicit = String(opts?.relPath ?? '').trim()
+    let fname: string
+    let updated = false
+    if (explicit) {
+      const t = resolveProductFileRel(sessionRel, explicit, 'outputs', ['png', 'jpg', 'jpeg', 'webp'])
+      if ('error' in t) return { ok: false, error: t.error }
+      fname = t.rel.slice(`${sessionRel}/outputs/`.length)
+      const abs = join(dirAbs, fname)
+      if (isSymlinkFile(abs)) return { ok: false, error: `产物是符号链接，拒绝写入：${fname}` }
+      updated = existsSync(abs)
+    } else {
+      fname = uniqueVersionedName(dirAbs, `${s}.png`)
+    }
     writeFileSync(join(dirAbs, fname), data)
-    broadcastTreeRefresh(sessionRel)
-    return { ok: true, relPath: `${sessionRel}/outputs/${fname}`, bytes: data.length }
+    if (!updated) broadcastTreeRefresh(sessionRel)
+    return { ok: true, relPath: `${sessionRel}/outputs/${fname}`, bytes: data.length, updated }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/** artifact.edit 的工具产物：**在原文件上**做局部替换 / 末尾追加。
+ *
+ *  用户口径（2026-11-17）：AI 改示意图 / 导图 / 讲义时不要另建 v2，只在原文件上改；
+ *  旧版不保留（直接覆盖），所以这里不做备份。
+ *  边界：只认本会话文件夹内的 .html/.json/.md，且拒绝 SOURCES、点目录与系统维护文档；
+ *  多组替换**全部校验通过才落盘**（全有或全无），避免只改一半留下半成品。 */
+export function editArtifactText(
+  sessionId: string, relPath: string, edits: ArtifactEdit[], append: string,
+  getSetting: (key: string) => unknown,
+): { ok: boolean; relPath?: string; changed?: number; lines?: number; error?: string } {
+  try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
+  try {
+    const probe = ensureWriteOwnerFolder(sessionId, getSetting)
+    if (!probe.ok || !probe.relPath) return { ok: false, error: probe.error ?? '会话文件夹不可用' }
+    const n = normalizeArtifactRel(relPath)
+    if ('error' in n) return { ok: false, error: n.error }
+    const sessionRel = probe.relPath
+    if (!n.rel.startsWith(`${sessionRel}/`)) return { ok: false, error: `只能修改本会话文件夹内的产物：${n.rel}` }
+    const ext = extname(n.rel).slice(1).toLowerCase()
+    if (!(ARTIFACT_EDIT_EXTS as readonly string[]).includes(ext)) {
+      return { ok: false, error: 'artifact.edit 只支持 .html / .json / .md 产物' }
+    }
+    const base = (n.rel.split('/').pop() ?? '').toLowerCase()
+    if (base === 'constraints.md' || base === '交接.md' || base === '课程.md' || base === 'source.md') {
+      return { ok: false, error: `${base} 由专用工具维护，不能用 artifact.edit 修改` }
+    }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const abs = join(vault.rootPath, n.rel)
+    let st: ReturnType<typeof lstatSync>
+    try { st = lstatSync(abs) } catch { return { ok: false, error: `产物不存在：${n.rel}` } }
+    if (st.isSymbolicLink() || !st.isFile()) return { ok: false, error: `不是可编辑的产物文件：${n.rel}` }
+    if (st.size > MAX_ARTIFACT_EDIT_BYTES) return { ok: false, error: `产物过大（${st.size} 字节 > 1MB），请整篇重写` }
+    let text: string
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(abs)) } catch {
+      return { ok: false, error: '产物不是 UTF-8 文本，无法局部修改' }
+    }
+    // 思维导图 .json：末尾追加必然破坏结构；改完也要能重新解析，否则拒绝落盘
+    const isMindmap = ext === 'json' && (n.rel.includes('/mindmaps/') || !!parseMindmap(text))
+    if (isMindmap && String(append ?? '').trim()) {
+      return { ok: false, error: '思维导图 .json 不支持末尾追加（会破坏结构），请用 edits 改节点' }
+    }
+    const applied = applyArtifactEdits(text, edits, append)
+    if (!applied.ok) return { ok: false, error: applied.error }
+    const next = applied.next
+    if (isMindmap && !parseMindmap(next)) {
+      return { ok: false, error: '修改后的思维导图 JSON 不合法（需含 kind:"mindmap" 与 root.text），已取消写入' }
+    }
+    if (next === text) return { ok: true, relPath: n.rel, changed: 0, lines: text.split('\n').length }
+    if (Buffer.byteLength(next, 'utf8') > MAX_ARTIFACT_EDIT_BYTES) return { ok: false, error: '修改后超过 1MB，拒绝写入' }
+    writeFileSync(abs, next, 'utf-8')
+    try { broadcast(BROADCAST_CHANNEL.wsExternalChange, { relPath: n.rel }) } catch { /* 广播失败不影响写入 */ }
+    return { ok: true, relPath: n.rel, changed: applied.changed, lines: next.split('\n').length }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

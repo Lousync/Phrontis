@@ -71,7 +71,7 @@ function extOf(relPath: string): string {
   return m ? m[1].toLowerCase() : ''
 }
 
-export function useVaultImage(rootId: string | null, relPath: string | null): VaultImage {
+export function useVaultImage(rootId: string | null, relPath: string | null, reloadSeq = 0): VaultImage {
   const [state, setState] = useState<VaultImageState>(IDLE)
   /** 重读计数器：进 effect 依赖，`reload()` 一 bump 就重跑整条链路 */
   const [nonce, setNonce] = useState(0)
@@ -131,7 +131,7 @@ export function useVaultImage(rootId: string | null, relPath: string | null): Va
       alive = false
       if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null }
     }
-  }, [rootId, relPath, nonce])
+  }, [rootId, relPath, nonce, reloadSeq])
 
   return {
     ...state,

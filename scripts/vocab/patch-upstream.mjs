@@ -30,6 +30,11 @@ function write(rel, text) {
   writeFileSync(join(root, rel), text, 'utf8')
   changed++
 }
+function writeNew(rel, text) {
+  write(rel, text)
+  console.log(`[OK] ${rel}：生成嵌入版发音 hook`)
+}
+
 function replaceOnce(rel, from, to, label) {
   const text = read(rel)
   if (!text.includes(from)) {
@@ -301,26 +306,186 @@ function removeOnce(rel, from, label) {
   )
 }
 
-// ---------- 3b. 嵌入模式关闭发音播放 / 预取 / 按键音（避免无音频设备时 Chromium 音频栈崩溃） ----------
+// ---------- 3b. 嵌入模式改用系统 TTS（免网）+ 关闭云端音频预取 / 按键音 ----------
+// 有道云端 mp3 被 vocab:// 的 CSP（connect-src/media-src 只放行 self）结构性阻断，
+// 旧做法是把发音 hook 整个换成 noop（按钮点了没反应）。现在改为 speechSynthesis：
+// 不联网、不增包体；系统没有可用语音时保持静默（与旧行为一致），避免无音频设备环境
+// 触发音频栈问题。按键音仍保持关闭（WebAudio 合成，不在本次范围内）。
 {
   const rel = 'src/hooks/usePronunciation.ts'
+  writeNew(
+    'src/hooks/useEmbedPronunciation.ts',
+    `import { pronunciationConfigAtom } from '@/store'
+import type { PronunciationType } from '@/typings'
+import { romajiToHiragana } from '@/utils/kana'
+import { useAtomValue } from 'jotai'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
+/**
+ * 嵌入模式（?embed=1）的单词发音：系统 TTS（Web Speech API）。
+ *
+ * 上游默认拉有道云端 mp3；宿主 vocab:// 的 CSP 只放行自身资源，云端音频结构性不可达。
+ * 这里改用 speechSynthesis：不联网、不增包体。系统没有可用语音时保持静默（与旧行为一致），
+ * 避免在无音频设备的环境里触发音频栈问题。
+ */
+type PlayOptions = { playbackRate?: number; forceSoundEnabled?: boolean }
+
+// 全局取消代数：任一实例 cancel 都会自增；旧 utterance 的 end 回调据此区分
+// 「自然播完（可以续循环）」与「被取消（必须收手）」。
+let cancelEpoch = 0
+
+const LANG_BY_PRON: Record<PronunciationType, string[]> = {
+  us: ['en-US', 'en-GB', 'en'],
+  uk: ['en-GB', 'en-US', 'en'],
+  romaji: ['ja-JP', 'ja'],
+  ja: ['ja-JP', 'ja'],
+  zh: ['zh-CN', 'zh'],
+  de: ['de-DE', 'de'],
+  hapin: ['kk-KZ', 'ru-RU', 'ru'],
+  kk: ['kk-KZ', 'ru-RU', 'ru'],
+  id: ['id-ID', 'id'],
+}
+
+function normalizeLang(lang: string): string {
+  return lang.replace('_', '-').toLowerCase()
+}
+
+function pickVoice(type: PronunciationType): SpeechSynthesisVoice | null {
+  const synth = window.speechSynthesis
+  if (!synth) return null
+  const voices = synth.getVoices()
+  if (!voices.length) return null
+  const wanted = (LANG_BY_PRON[type] || LANG_BY_PRON.us).map(normalizeLang)
+  for (const lang of wanted) {
+    const matches = voices.filter((v) => normalizeLang(v.lang) === lang)
+    if (matches.length) return matches.find((v) => v.localService) || matches[0]
+  }
+  // 只装了地区变体（如 en-AU）时也接受，避免明明有语音却完全没声
+  const base = wanted[0].split('-')[0]
+  const loose = voices.filter((v) => normalizeLang(v.lang).split('-')[0] === base)
+  return loose.find((v) => v.localService) || loose[0] || null
+}
+
+export default function useEmbedPronunciationSound(word: string, isLoop?: boolean) {
+  const config = useAtomValue(pronunciationConfigAtom)
+  const loop = typeof isLoop === 'boolean' ? isLoop : config.isLoop
+  const [isPlaying, setIsPlaying] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeRef = useRef(false)
+  const genRef = useRef(0)
+  const loopRef = useRef(loop)
+  loopRef.current = loop
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [])
+
+  const stop = useCallback(() => {
+    activeRef.current = false
+    genRef.current++
+    cancelEpoch++
+    clearTimer()
+    try {
+      window.speechSynthesis?.cancel()
+    } catch {
+      /* 无语音环境：忽略 */
+    }
+    setIsPlaying(false)
+  }, [clearTimer])
+
+  useEffect(() => {
+    return () => {
+      activeRef.current = false
+      genRef.current++
+      cancelEpoch++
+      if (timerRef.current !== null) clearTimeout(timerRef.current)
+      try {
+        window.speechSynthesis?.cancel()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [])
+
+  const play = useCallback(
+    (opts?: PlayOptions) => {
+      if (typeof word !== 'string' || word.length === 0) return
+      const synth = window.speechSynthesis
+      if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return
+      const voice = pickVoice(config.type)
+      if (!voice) return
+
+      const text = config.type === 'romaji' ? romajiToHiragana(word) : word
+      const volume = Math.min(1, Math.max(0, Number.isFinite(config.volume) ? config.volume : 1))
+      const rawRate = opts?.playbackRate ?? config.rate
+      const rate = Math.min(10, Math.max(0.1, Number.isFinite(rawRate) ? (rawRate as number) : 1))
+
+      const gen = ++genRef.current
+      const speakOnce = () => {
+        if (!activeRef.current || genRef.current !== gen) return
+        const epoch = cancelEpoch
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.lang = voice.lang
+        utterance.voice = voice
+        utterance.volume = volume
+        utterance.rate = rate
+        utterance.onstart = () => {
+          if (genRef.current === gen) setIsPlaying(true)
+        }
+        utterance.onerror = () => {
+          if (genRef.current === gen) setIsPlaying(false)
+        }
+        utterance.onend = () => {
+          if (genRef.current !== gen) return
+          // 只有「自然播完」才续播循环；被别的实例 cancel 掉（epoch 变了）就收手
+          if (loopRef.current && activeRef.current && epoch === cancelEpoch) speakOnce()
+          else setIsPlaying(false)
+        }
+        synth.speak(utterance)
+      }
+
+      activeRef.current = true
+      cancelEpoch++
+      clearTimer()
+      try {
+        synth.cancel()
+      } catch {
+        /* ignore */
+      }
+      // Chromium：cancel() 与 speak() 同一 tick 会丢语音，延后一拍再播
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null
+        speakOnce()
+      }, 20)
+    },
+    [word, config.type, config.volume, config.rate, clearTimer],
+  )
+
+  return { play, stop, isPlaying }
+}
+`,
+  )
   replaceOnce(
     rel,
     "import { pronunciationConfigAtom } from '@/store'",
-    "import { pronunciationConfigAtom } from '@/store'\nimport { isEmbed } from '@/utils/phrontisBridge'",
-    '发音 hook 引入 isEmbed',
+    "import { pronunciationConfigAtom } from '@/store'\nimport useEmbedPronunciationSound from '@/hooks/useEmbedPronunciation'\nimport { isEmbed } from '@/utils/phrontisBridge'",
+    '发音 hook 引入嵌入版 TTS',
   )
   replaceOnce(
     rel,
     'export default function usePronunciationSound(word: string, isLoop?: boolean) {',
     `export default function usePronunciationSound(word: string, isLoop?: boolean) {
-  // 嵌入模式（尤其无音频设备的 Linux/CI）关闭播放：避免 Chromium 音频栈崩溃。
-  if (isEmbed()) return { play: noop, stop: noop, isPlaying: false }
+  // 嵌入模式不走有道云端音频（CSP 断网），改用系统 TTS。
+  // isEmbed() 在页面生命周期内恒定，条件调用的 hook 顺序稳定。
+  if (isEmbed()) return useEmbedPronunciationSound(word, isLoop)
   return usePronunciationSoundInner(word, isLoop)
 }
 
 function usePronunciationSoundInner(word: string, isLoop?: boolean) {`,
-    '嵌入模式关闭发音播放',
+    '嵌入模式改用系统 TTS',
   )
   replaceOnce(
     rel,

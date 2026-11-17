@@ -2005,7 +2005,11 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 4. 用户点「收尾本段」后，若 AI 还在同一会话，明确提示「本段已收尾，请看交接 / 去开下一段」，不要把已收尾段继续当作可讲课的 open 段。
 5. 契约补：段内最后一个知识点讲完后的收尾建议、交接生成后的下一段引导；以及「未确认前不自动调用收尾 / finalize」的负向断言。
 
-## [ ] B-48 背单词：读单词功能疑似有问题（2026-11-02，P2；用户反馈，**只记录不解决**）
+## [x] B-48 背单词：读单词功能疑似有问题（2026-11-02，P2；用户反馈；**2026-11-17 已落码**）
+
+> **落码轮（2026-11-17，系统 TTS）**：定位实锤——不是没配，是嵌入版被补丁换成空函数：上游发音走有道云端 mp3，`vocab://` 的 CSP 只放行自身资源（`media-src 'self' data:`），云端音频结构性不可达；`scripts/vocab/patch-upstream.mjs` 3b 段遂让 `isEmbed()` 时返回 `{ play: noop }`，表象即「按钮点了没反应、也不报错」。
+> **修法**：嵌入版改用系统 TTS（Web Speech）——补丁生成 `src/hooks/useEmbedPronunciation.ts`，按发音类型选 `en-US / en-GB / ja-JP / de-DE / kk-KZ→ru-RU / …` 系统语音、优先本地语音、无可用语音时静默（不触发音频栈），罗马音先转假名；云端音频预取与按键音仍保持关闭（CSP 与稳定性口径不变）。
+> **验证**：契约 `.AGENT/scripts/vocab-audio/verify-embed-tts.mjs` 20 项 PASS（补丁锚点 / hook 不联网 / 产物含 TTS / CSP 未放开有道 / 按键音仍关）；运行期探针 `.AGENT/scripts/vocab-audio/probe-embed-tts.cjs` 11 项 PASS（伪造系统语音后 Ctrl+J 产出 `en-US` utterance，文本 / 音量 / 速率正确，cancel 先于 speak，渲染进程无报错）。**待真机回归**：Windows 点词旁喇叭与结果页词条应出声，切词不串音；Linux 无 speech-dispatcher 时应静默不报错。
 
 > **调查结论（2026-11-07，代码路径定位，未复现）**：嵌入版发音走 qwerty-learner 上游 bundle，其词典音频是**云端 URL**；`vocab://` 协议的 CSP（`connect-src 'self'`、`media-src 'self' data:`，见 `electron/main/index.ts` 协议 handler 注释「嵌入模式默认不联网，发音 / 按键音已关闭」）把云端音频**结构性断网**，上游发音主路径必败——这与「读单词疑似有问题」高度吻合。本地 `resources/vocab/assets/` 只有键盘音 wav，**没有词典发音音频产物**；Web Speech（speechSynthesis）是唯一免网路径但上游是否启用待核。修复 = 发音本地化方案（本地 TTS 或预置词典音频库），属 **vocab 适配批次的设计决策（需拍板）**；且 `VOCAB_ENTRY_ENABLED` 仍为 false、用户入口未开。维持「只记录」；与 `docs/vocab-module-plan.md` §9 一起排。
 
