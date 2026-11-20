@@ -293,10 +293,11 @@ export function AppearanceView() {
         <SettingSelect
           title="AI 助手输入样式"
           description="AI 助手对话输入框（侧栏 / 右栏 / aiChat 共用）的外观方案。"
-          value={typeof s.assistantInputStyle === 'string' ? s.assistantInputStyle : 'v1'}
+          value={typeof s.assistantInputStyle === 'string' ? s.assistantInputStyle : 'v10'}
           onChange={id => update('assistantInputStyle', id)}
           options={[
-            { id: 'v1', label: '浅灰填充', desc: '无边框浅灰底，聚焦时底色加深（默认）', isDefault: true },
+            { id: 'v10', label: '浮卡（课堂原型）', desc: '16px 圆角 + 抬升底色 + 三层阴影；聚焦时整层阴影替换，不位移（默认）', isDefault: true },
+            { id: 'v1', label: '浅灰填充', desc: '无边框浅灰底，聚焦时底色加深' },
             { id: 'v2', label: '白卡描边', desc: '白底细边框，聚焦时描边转主题色' },
             { id: 'v3', label: '白卡描边 + 光晕', desc: '描边外发光，聚焦状态最醒目' },
             { id: 'v4', label: '白卡投影', desc: '无边框靠阴影分层，聚焦时投影抬升' },

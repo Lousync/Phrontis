@@ -924,6 +924,24 @@ export default function App() {
     return () => window.removeEventListener('kb-open-note', handler)
   }, [])
 
+  /**
+   * 书架全屏打开（P4 D8）：右侧查看器书架页签的「全屏阅读」把当前书交回书架模块。
+   * 只带 relPath —— 书名 / 引擎由书架与阅读器自己推导（与摘录「回到原文」同一条口径，
+   * 避免又出现「从右侧进来显示文件名、从书架进来显示书名」的两套名字）。
+   */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { relPath?: string } | undefined
+      const relPath = String(detail?.relPath ?? '').trim()
+      if (!relPath) return
+      setActiveToolTab(null)
+      setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind: bookKindOf(relPath) ?? 'pdf' })
+      setActiveTab('bookshelf')
+    }
+    window.addEventListener('kb-open-book', handler)
+    return () => window.removeEventListener('kb-open-book', handler)
+  }, [])
+
   // P2 文件树定位：只切 Tab + 投递「展开这个目录」，不打开右侧编辑区
   useEffect(() => {
     const handler = (e: Event) => {

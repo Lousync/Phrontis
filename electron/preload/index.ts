@@ -303,12 +303,39 @@ const api = {
   aiToolsInstallSkillFromFolder: () => ipcRenderer.invoke('aiTools:installSkillFromFolder'),
   aiToolsUninstallSkill: (id: string) => ipcRenderer.invoke('aiTools:uninstallSkill', id),
   aiToolsToggleSkill: (registryName: string, enabled: boolean) => ipcRenderer.invoke('aiTools:toggleSkill', registryName, enabled),
+  // 右侧查看器 · 网页页签（P4）：真实网页跑在主进程 WebContentsView 里，网页只认 http/https
+  webPaneCreate: (payload: unknown) => ipcRenderer.invoke('webPane:create', payload),
+  webPaneSetUrl: (id: string, url: string) => ipcRenderer.invoke('webPane:setUrl', id, url),
+  webPaneSetBounds: (id: string, bounds: unknown) => ipcRenderer.invoke('webPane:setBounds', id, bounds),
+  webPaneSetVisible: (id: string, visible: boolean) => ipcRenderer.invoke('webPane:setVisible', id, visible),
+  webPaneHideAll: () => ipcRenderer.invoke('webPane:hideAll'),
+  webPaneBack: (id: string) => ipcRenderer.invoke('webPane:back', id),
+  webPaneForward: (id: string) => ipcRenderer.invoke('webPane:forward', id),
+  webPaneReload: (id: string) => ipcRenderer.invoke('webPane:reload', id),
+  webPaneClose: (id: string) => ipcRenderer.invoke('webPane:close', id),
+  webPaneState: (id: string) => ipcRenderer.invoke('webPane:state', id),
+  webPaneClearData: () => ipcRenderer.invoke('webPane:clearData'),
+  webPaneDisposeAll: () => ipcRenderer.invoke('webPane:disposeAll'),
+  onWebPaneChanged: (cb: (p: unknown) => void) => {
+    const handler = (_e: unknown, p: unknown) => cb(p)
+    ipcRenderer.on('webPane:changed', handler)
+    return () => { ipcRenderer.removeListener('webPane:changed', handler) }
+  },
   // Model gateway + agent
   llmListProviders: () => ipcRenderer.invoke('llm:listProviders'),
   llmSaveProvider: (draft: unknown) => ipcRenderer.invoke('llm:saveProvider', draft),
   llmRemoveProvider: (id: string) => ipcRenderer.invoke('llm:removeProvider', id),
   llmToggleProvider: (id: string, enabled: boolean) => ipcRenderer.invoke('llm:toggleProvider', id, enabled),
   llmTestConnection: (draft: unknown) => ipcRenderer.invoke('llm:testConnection', draft),
+  // 模型条目（P3）：配置侧独立于请求链路；不含 Key
+  llmCatalogList: () => ipcRenderer.invoke('llm:catalog:list'),
+  llmCatalogMigrate: (recentSpecs?: string[]) => ipcRenderer.invoke('llm:catalog:migrate', recentSpecs),
+  llmCatalogSave: (input: unknown) => ipcRenderer.invoke('llm:catalog:save', input),
+  llmCatalogRemove: (id: string) => ipcRenderer.invoke('llm:catalog:remove', id),
+  llmCatalogAdoptRefs: (from: string, to: string) => ipcRenderer.invoke('llm:catalog:adoptRefs', from, to),
+  llmCatalogTest: (id: string) => ipcRenderer.invoke('llm:catalog:test', id),
+  llmCatalogSetDefault: (id: string | null) => ipcRenderer.invoke('llm:catalog:setDefault', id),
+  llmCatalogSetWorkspace: (wsId: string, patch: unknown) => ipcRenderer.invoke('llm:catalog:setWorkspace', wsId, patch),
   // 账号（端点内部的第二层，2026-10-13）：同一端点换一把 Key，地址/协议/请求头/模型清单全复用
   llmAddAccount: (payload: unknown) => ipcRenderer.invoke('llm:addAccount', payload),
   llmSetActiveAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('llm:setActiveAccount', providerId, accountId),

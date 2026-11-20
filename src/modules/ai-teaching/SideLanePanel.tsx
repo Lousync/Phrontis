@@ -65,6 +65,12 @@ export interface SideLanePanelProps {
   onFloat?: () => void
   /** 隐藏轮数切换（右栏中心内嵌 / 既有支线快照已固化时） */
   hideTurns?: boolean
+  /**
+   * 「引用到主线」下放到**每条 AI 回答**（右侧查看器 · 旁问页签；方案 §6.4 / C8）。
+   * 缺省 false = 原样：底部一个「引用到主线」，取最后一条 AI 回答。
+   * 两种形态都只调 `onQuote`（塞胶囊队列），**绝不 `agentChat`、绝不自动发送**。
+   */
+  quotePerMessage?: boolean
 }
 
 interface PanelMsg {
@@ -74,7 +80,7 @@ interface PanelMsg {
   createdAt?: string
 }
 
-export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onDock, onLaneReady, titleDrag, onBack, onQuote, onFloat, hideTurns }: SideLanePanelProps) {
+export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onDock, onLaneReady, titleDrag, onBack, onQuote, onFloat, hideTurns, quotePerMessage = false }: SideLanePanelProps) {
   const shell = useInputShell()
   const [laneId, setLaneId] = useState<string | null>(openLaneId ?? null)
   // 支线也是会话：流式草稿 / pending 统一走 N-3 会话桶（v3.15.3）。
@@ -342,6 +348,16 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
             ) : (
               <div className="min-w-0 group relative">
                 <MarkdownPreview content={m.content} codeBlockChrome="card" />
+                {/* 旁问页签：引用下放到每条回答右下角（只塞胶囊队列，不自动发送） */}
+                {quotePerMessage && onQuote && m.content.trim() !== '' && (
+                  <div className="mt-0.5 flex justify-end">
+                    <button onClick={() => onQuote(m.content)}
+                      data-tip="把这条回答作为引用放进主线输入框（不自动发送，你可继续编辑）" aria-label="引用这条回答到主线"
+                      className="inline-flex items-center gap-1 px-1 -mr-1 rounded-md text-[10.5px] text-[var(--text-muted)] opacity-60 hover:opacity-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-opacity">
+                      <Quote size={10} />引用
+                    </button>
+                  </div>
+                )}
                 <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制' })).catch(() => null) }}
                   data-tip="复制" aria-label="复制" className="absolute right-0 -top-1 px-1 py-0.5 rounded text-[10.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-opacity">
                   <Copy size={10} />
@@ -365,10 +381,11 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         ))}
       </div>
 
-      {/* 底部动作条：引用到主线 / 浮出窗口（升格已于 3.14 删除）。 */}
-      {laneId && !pending && (onQuote || onFloat) && (
+      {/* 底部动作条：引用到主线 / 浮出窗口（升格已于 3.14 删除）。
+          `quotePerMessage` 时「引用」已在每条回答右下角，底部只留浮出，避免两处重复。 */}
+      {laneId && !pending && (onFloat || (onQuote && !quotePerMessage)) && (
         <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 border-t border-[var(--border-color)]">
-          {onQuote && (
+          {onQuote && !quotePerMessage && (
             <button onClick={() => { const lastAi = [...messages].reverse().find(m => m.role === 'assistant'); onQuote(lastAi?.content ?? '') }}
               data-tip="把这条支线的结论作为引用放进主线输入框（不自动发送，你可继续编辑）" aria-label="把这条支线的结论作为引用放进主线输入框（不自动发送，你可继续编辑）"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">

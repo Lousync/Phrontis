@@ -21,6 +21,10 @@ import {
 } from './llmFailurePure'
 import { broadcastDataChanged } from '../main/windowBus'
 import { recordAiUsage, usageKeyOf } from 'phrontis-core/agentUsage'
+import { readCatalog } from './modelCatalogStore'
+import { resolveSpec } from './modelCatalogPure'
+import { lookupCapability } from './modelCapabilityTable'
+import type { ModelEntry } from './aiTeachingTypesPure'
 
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。
@@ -1359,11 +1363,16 @@ function resolveLlmTarget(req: LlmInvokeRequest): LlmTarget {
 
   if (req.providerId) {
     provider = providers.find(x => x.id === req.providerId)
-  } else if (!req.modelId && depsRef?.getSettingValue('defaultChatModel')) {
-    const def = String(depsRef.getSettingValue('defaultChatModel'))
-    const [pid, mid] = def.split(':')
-    provider = providers.find(x => x.id === pid)
-    modelId = mid ?? ''
+  } else if (!req.modelId) {
+    // P3：全局默认 = 条目 id / 精选首个 / 旧 spec 三层兜底（见 resolveGlobalModelSpec）
+    const globalSpec = resolveGlobalModelSpec()
+    if (globalSpec) {
+      const target = resolveModelSpec(globalSpec)
+      if (target) {
+        provider = providers.find(x => x.id === target.providerId)
+        modelId = target.modelId
+      }
+    }
   }
   if (!provider) return { ok: false, error: '未找到可用的模型供应商', code: req.providerId ? 'PROVIDER_NOT_FOUND' : 'NO_DEFAULT_MODEL' }
   if (!provider.enabled) return { ok: false, error: `供应商「${provider.name}」已禁用`, code: 'PROVIDER_DISABLED' }
@@ -1383,12 +1392,13 @@ function resolveLlmTarget(req: LlmInvokeRequest): LlmTarget {
  * ——钉死优先级最高，不做任何替换。
  */
 export function resolveNonThinkingFallback(): { providerId: string; modelId: string; degraded: boolean } | null {
-  const def = String(depsRef?.getSettingValue('defaultChatModel') ?? '').trim()
+  const def = resolveGlobalModelSpec()
   if (!def) return null
-  const [pid, mid = ''] = def.split(':')
-  const provider = getProviders().find(x => x.id === pid && x.enabled)
+  // P3：默认值可能是模型条目 id（m_xxx）——直接 split(':') 会把条目 id 当 providerId，永远找不到供应商
+  const parsed = resolveModelSpec(def)
+  const provider = parsed ? getProviders().find(x => x.id === parsed.providerId && x.enabled) : undefined
   if (!provider) return null
-  const target = mid || provider.models[0] || ''
+  const target = parsed?.modelId || provider.models[0] || ''
   if (!target) return null
   if (!REASONING_MODEL_RE.test(target)) return { providerId: provider.id, modelId: target, degraded: false }
   const nonThinking = provider.models.find(m => !REASONING_MODEL_RE.test(m))
@@ -1725,7 +1735,9 @@ export function registerLlmHandlers(deps: {
   bindCcSwitchSaver(d => saveProviderDraft(d))
 
   ipcMain.handle('llm:listProviders', () => {
-    const d = String(deps.getSettingValue('defaultChatModel') ?? '')
+    // P3：默认模型可能是模型条目 id —— 回给渲染层「真正生效的那一个」，
+    // 否则设置页选了条目、对话区仍显示「默认模型」为空。
+    const d = resolveGlobalModelSpec(deps.getSettingValue)
     return { providers: getProviders().map(p => sanitizeInfo(p, d)), defaultChatModel: d }
   })
 
@@ -1972,6 +1984,8 @@ export function registerLlmHandlers(deps: {
   ipcMain.handle('llm:setDefaultModel', (_e, value: string) => {
     if (typeof value !== 'string') return { ok: false, error: '参数非法' }
     deps.setSettingValue('defaultChatModel', value)
+    // 用户刚手动选了默认 → 清掉「显式条目」，否则新的默认会被旧的显式条目永久遮住
+    deps.setSettingValue('defaultModelEntryId', '')
     return { ok: true }
   })
 
@@ -2031,15 +2045,58 @@ export interface VisionChatRequest {
 export interface VisionChatResponse { ok: boolean; text?: string; model?: string; providerName?: string; tokens?: number; error?: string }
 
 /** 找一个疑似支持图片的模型（仅 openai-compatible——visionChat 的线格式为 OpenAI 多模态） */
+/**
+ * 槽位值 → 可用模型目标（P3 / B6）。
+ *
+ * 槽位值有两种形态：模型条目 id（`m_xxx`，新写入）与旧 `providerId:modelId`。
+ * 返回 null 表示「配错了」——条目 id 在目录里找不到时**不静默退化成默认模型**，
+ * 否则用户会看到「明明选了 A 却用了 B」而没有任何报错。
+ */
+/**
+ * 全局默认模型（P3 / B4）：**显式指定的条目 → 旧 defaultChatModel → 精选首个**。
+ *
+ * 为什么不是直接读 `defaultChatModel`：设置页的「设为全局默认」写的是
+ * `defaultModelEntryId`（用户明确点过的那一枚），而 `defaultChatModel` 是旧场景槽位。
+ * 两者都不读会变成「点了没反应」；只读新的又会让老用户升级后掉回「没默认模型」。
+ * 所以按「显式 > 遗留 > 精选」的顺序兜底，**每一层都只在上一层为空时才生效**。
+ */
+export function resolveGlobalModelSpec(getValue?: (key: string) => unknown): string {
+  const read = getValue ?? ((k: string) => depsRef?.getSettingValue(k))
+  const explicit = String(read('defaultModelEntryId') ?? '').trim()
+  if (explicit) return explicit
+  const legacy = String(read('defaultChatModel') ?? '').trim()
+  if (legacy) return legacy
+  try {
+    const raw = read('modelCatalogV1')
+    const list = typeof raw === 'string' ? JSON.parse(raw) : raw
+    if (Array.isArray(list)) {
+      const first = list.find((e) => e && typeof e === 'object' && (e as { curated?: unknown }).curated === true && typeof (e as { id?: unknown }).id === 'string')
+      if (first) return String((first as { id: string }).id)
+    }
+  } catch { /* 坏 JSON 当没有，交给上层报「未配置模型」 */ }
+  return ''
+}
+
+export function resolveModelSpec(spec: string): {
+  providerId: string
+  modelId: string
+  entry?: ModelEntry
+  contextWindow?: number
+} | null {
+  return resolveSpec(spec, readCatalog())
+}
+
 export function findVisionModel(preferredSpec?: string): { provider: ProviderConfig; model: string } | null {
   const providers = getProviders().filter(p => p.enabled && p.type === 'openai-compatible')
   if (preferredSpec) {
-    const [pid, mid] = preferredSpec.split(':')
-    const p = providers.find(x => x.id === pid)
-    if (p && mid) return { provider: p, model: mid }
+    const target = resolveModelSpec(String(preferredSpec))
+    if (target && target.modelId) {
+      const p = providers.find(x => x.id === target.providerId)
+      if (p) return { provider: p, model: target.modelId }
+    }
   }
   for (const p of providers) {
-    const m = p.models.find(x => VISION_MODEL_RE.test(x))
+    const m = p.models.find(x => VISION_MODEL_RE.test(x) || lookupCapability(x, 'vision') === 'yes')
     if (m) return { provider: p, model: m }
   }
   return null
@@ -2054,13 +2111,16 @@ export function visionChatCapable(modelSpec?: string): boolean {
   let spec = String(modelSpec ?? '').trim()
   if (!spec) spec = String(depsRef?.getSettingValue('defaultChatModel') ?? '').trim()
   if (!spec) return false
-  const ci = spec.indexOf(':')
-  const pid = ci > 0 ? spec.slice(0, ci) : spec
-  const mid = ci > 0 ? spec.slice(ci + 1) : ''
-  const p = getProviders().find((x) => x.id === pid)
+  const target = resolveModelSpec(spec)
+  if (!target) return false
+  const p = getProviders().find((x) => x.id === target.providerId)
   if (!p || !providerUsable(p)) return false
-  const model = mid || p.models[0] || ''
-  if (!model || !VISION_MODEL_RE.test(model)) return false
+  const model = target.modelId || p.models[0] || ''
+  if (!model) return false
+  // B8：条目上的三态声明优先 —— 显式 no 直接否掉；auto 才走「正则 + 内置表」兜底
+  const declared = target.entry?.capabilities?.vision
+  if (declared === 'no') return false
+  if (declared !== 'yes' && !VISION_MODEL_RE.test(model) && lookupCapability(model, 'vision') !== 'yes') return false
   return familyOf(p.type, p.modelFamilies, model) !== null
 }
 
@@ -2150,16 +2210,15 @@ export interface ImageResult {
 
 interface ImageSlot { provider: ProviderConfig; model: string }
 
-/** `providerId:modelId` → 供应商与模型名；缺省 / 供应商不存在 / 未启用 / 非 openai-compatible 一律 null */
+/** `providerId:modelId`（或模型条目 id）→ 供应商与模型名；缺省 / 供应商不存在 / 未启用 / 非 openai-compatible 一律 null */
 function findImageProvider(spec: string): ImageSlot | null {
   const s = String(spec ?? '').trim()
-  const i = s.indexOf(':')
-  if (i <= 0) return null
-  const pid = s.slice(0, i)
-  const mid = s.slice(i + 1)
-  if (!pid || !mid) return null
-  const p = getProviders().find(x => x.id === pid && x.enabled && x.type === 'openai-compatible')
-  return p ? { provider: p, model: mid } : null
+  if (!s) return null
+  // P3：槽位可能存的是模型条目 id，统一解析后再校验供应商
+  const target = resolveModelSpec(s)
+  if (!target) return null
+  const p = getProviders().find(x => x.id === target.providerId && x.enabled && x.type === 'openai-compatible')
+  return p ? { provider: p, model: target.modelId } : null
 }
 
 /**

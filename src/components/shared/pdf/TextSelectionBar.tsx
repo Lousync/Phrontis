@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { X, Copy, Languages, GraduationCap, Loader2, Highlighter, Lightbulb, Check } from 'lucide-react'
 import { EXCERPT_COLOR_IDS, EXCERPT_COLOR_NAMES, type ExcerptColor, type ExcerptType } from '../../../types'
 import { useSettings } from '../../../lib/SettingsContext'
+import { FLOAT_GAP, clampFloatingLeft, floatingBounds, placeFloatingVertically, toCssBottom } from '../../../lib/floatingPlacement'
 
 export interface SelectionRect { left: number; top: number; width: number; height: number }
 
@@ -29,6 +30,9 @@ interface Props {
 /**
  * 划词 AI 工具条（方案 §6）：文本层选区浮条 —— 5 色点 / 摘录 / 想法 / 问 AI / 翻译（带缓存）/ 复制。
  * fixed 定位按选区 rect 锚定，越界自动翻面。色板单源 EXCERPT_COLOR_IDS，上次用色落 settings。
+ *
+ * 定位口径见 `lib/floatingPlacement`（与 TXT 的 ExcerptCaptureBar 同一套）：横向夹进
+ * **阅读面**并与悬浮 AI 侧栏取交，否则选区靠右时右侧按钮会滑进侧栏底下；放不下就限宽换行。
  */
 export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, onClose, onCreateExcerpt }: Props) {
   const { s, update } = useSettings()
@@ -36,11 +40,46 @@ export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, 
   const [ideaOpen, setIdeaOpen] = useState(false)
   const [ideaText, setIdeaText] = useState('')
 
+  // 定位：先渲染再量宽高（useLayoutEffect 在绘制前跑，不会闪），尺寸变化（翻面 / 翻译结果）后重摆
+  const barRef = useRef<HTMLDivElement>(null)
+  const [box, setBox] = useState<{ left: number; top?: number; bottom?: number; maxW: number } | null>(null)
+  const rectTop = rect?.top ?? 0
+  const rectLeft = rect?.left ?? 0
+  const rectHeight = rect?.height ?? 0
+  useLayoutEffect(() => {
+    const el = barRef.current
+    if (!el) return
+    const place = () => {
+      const bounds = floatingBounds(el)
+      const maxW = Math.max(180, bounds.right - bounds.left - FLOAT_GAP * 2)
+      const left = clampFloatingLeft(rectLeft, Math.min(el.offsetWidth, maxW), bounds)
+      // 浮条习惯在选区上方（不压住要点的原文），上方实在没位置才翻到下方
+      const v = placeFloatingVertically({
+        anchorTop: rectTop,
+        anchorBottom: rectTop + rectHeight,
+        bounds,
+        cap: 360,
+        prefer: 'above',
+        minUsable: 46,
+      })
+      setBox({
+        left,
+        top: v.top,
+        bottom: v.bottomEdge !== undefined ? toCssBottom(v.bottomEdge) : undefined,
+        maxW,
+      })
+    }
+    place()
+    const ro = new ResizeObserver(place)
+    ro.observe(el)
+    window.addEventListener('resize', place)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', place)
+    }
+  }, [rectLeft, rectTop, rectHeight])
+
   if (!rect) return null
-  const BAR_H = 34
-  const showAbove = rect.top > BAR_H + 56
-  const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 340))
-  const top = showAbove ? rect.top - BAR_H - 8 : rect.top + rect.height + 8
 
   const pickColor = (color: ExcerptColor) => {
     if (!onCreateExcerpt) return
@@ -61,8 +100,9 @@ export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, 
   }
 
   return (
-    <div className="kb-pop origin-top fixed z-[60] select-none" style={{ left, top }}>
-      <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 px-1 py-0.5 text-[12px] text-[var(--text-secondary)] shadow-lg backdrop-blur">
+    <div ref={barRef} className="kb-pop origin-top fixed z-[60] select-none"
+      style={{ left: box?.left ?? rectLeft, top: box?.top, bottom: box?.bottom, maxWidth: box?.maxW }}>
+      <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 px-1 py-0.5 text-[12px] text-[var(--text-secondary)] shadow-lg backdrop-blur">
         {EXCERPT_COLOR_IDS.map((c) => (
           <button key={c} onClick={() => pickColor(c)} data-tip={`以${EXCERPT_COLOR_NAMES[c]}色高亮`} aria-label={`以${EXCERPT_COLOR_NAMES[c]}色高亮`}
             className={`kb-exc-dot kb-exc-${c} hover:scale-110 transition-transform`} />

@@ -1311,7 +1311,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   )
 
   return (
-    <div data-wb="epubReader" data-wb-state={loadErr ? 'error' : loading ? 'loading' : 'ready'}
+    <div data-wb="epubReader" data-reader-surface data-wb-state={loadErr ? 'error' : loading ? 'loading' : 'ready'}
       className="kb-theme-surface relative flex h-full min-h-0 flex-col">
       {toolbar}
       {/* 渲染宿主**常驻 DOM，error 态也在**：foliate 要读宿主尺寸才能分页，加载态只做**覆盖层**而不是替换内容。

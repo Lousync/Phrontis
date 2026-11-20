@@ -102,6 +102,8 @@ import { registerReaderStateHandlers } from '../database/repositories/readerStat
 import { registerDashboardHandlers } from '../database/repositories/dashboardRepo'
 import { registerUsageHandlers } from '../database/repositories/usageRepo'
 import { registerExcerptHandlers } from '../database/repositories/excerptRepo'
+import { registerWebPaneHandlers } from '../database/repositories/webPaneRepo'
+import { disposeAllWebPanes } from '../lib/webPaneView'
 import { registerBookMarketHandlers } from '../database/repositories/bookMarketRepo'
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
 import { initScheduleReminders } from '../lib/scheduleReminder'
@@ -119,6 +121,7 @@ import { registerBuiltinTools } from '../lib/builtinTools'
 import { registerMcpHandlers, restoreMcpConnections } from '../lib/mcpService'
 import { registerSkillHandlers } from '../lib/skillService'
 import { registerLlmHandlers } from '../lib/llmService'
+import { registerModelCatalogHandlers } from '../lib/modelCatalogStore'
 import { registerAgentHandlers } from '../lib/agentService'
 import { registerAgentCompressHandlers } from '../lib/agentCompress'
 import { registerInlineSuggestHandlers } from '../lib/aiAssistant/inlineSuggest'
@@ -1482,6 +1485,8 @@ app.whenReady().then(async () => {
   registerUsageHandlers()
   // 摘录（阅读器 · 摘录先行批次）：四通道
   registerExcerptHandlers()
+  // 右侧查看器 · 网页页签（P4）：主进程 WebContentsView 12 通道（网页只认 http/https）
+  registerWebPaneHandlers()
   // 书市（book market）：书源 CRUD + 三态探测 + 聚合检索 + 下载队列（S3）
   registerBookMarketHandlers()
   // 开发者工具(内部对 app.isPackaged 自行守卫,打包版不注册任何 handler)
@@ -1531,6 +1536,8 @@ app.whenReady().then(async () => {
       return true
     }
     registerLlmHandlers({ getSettingValue, setSettingValue })
+    // 模型目录（P3）：条目 CRUD / 迁移 / 删除保护 / 连通性测试；配置侧独立成层，不进请求链路
+    registerModelCatalogHandlers({ getSettingValue, setSettingValue })
     registerAgentHandlers()
     // 会话压缩（conversation-compaction-design）：agent:compressSession（/compress 指令 + 自动预检共用）
     registerAgentCompressHandlers()
@@ -1727,6 +1734,8 @@ app.on('before-quit', () => {
   stopIntelScheduler()
   disposeDayPanel()
   stopClipperServer()
+  // 右侧查看器原生视图：随主进程一起收，别留无主的 webContents
+  disposeAllWebPanes()
   // P1-3：后台 AI 命令不能活过主进程（Windows 子进程默认会继续跑）
   killAllAiJobs()
   // v3.2.0 条目 ④：关掉仓库文件监听（防句柄泄漏、防 dev 重启后重复挂载）

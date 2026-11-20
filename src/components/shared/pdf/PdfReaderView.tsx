@@ -1413,7 +1413,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
   }
 
   return (
-    <div ref={rootRef} data-kb-pdf-root="" data-sel-float-ignore className={`kb-pdf-scope relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
+    <div ref={rootRef} data-kb-pdf-root="" data-reader-surface data-sel-float-ignore className={`kb-pdf-scope relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
       {toolbar}
       {effectiveScan !== 'full' && (
         <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] text-[var(--text-tertiary)]" data-wb="scanHint">

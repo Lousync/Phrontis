@@ -60,6 +60,11 @@
 | `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
 | `.kb-sweep` | `::after` 短条 `transform: translateX(0→194%)` 1.15s ease-in-out alternate infinite；轨道 2px | AI 回复生成态的等待指示（下滑条）。见 §J 与 `docs/ai-reply-loading-plan.md` |
+| `.kb-composer-v10` | 三层阴影 ↔ 聚焦态整层替换，`--dur-std`；边框恒 1px | AI 输入卡「浮卡」外观（2026-11-20 课堂原型对齐）。用内环 `0 0 0 1px` 代替加粗边框，避免卡内文字位移 |
+| `.kb-dock-fade` | 输入卡上方 56px `transparent → --bg-primary` 渐变 | 让对话正文在输入卡后淡出，而不是被硬边切掉 |
+| 输入卡下托盘（inline） | `transform translateY(0↔38px)` + `opacity`，380ms `cubic-bezier(.34,1.56,.64,1)`（带回弹） | 卡下控件条展开/收起。**高度不变**（收起后仍占位），只动 transform/opacity |
+| `.kb-input-glow` | `box-shadow` 由无到「3px 主题色光晕 + 30px 投影」，`--dur-std` | AI 输入卡聚焦光效（2026-11-19）。只给**自带没有 focus 阴影**的外壳挂（`inputShells` 的 `glow` 字段），v3/v4/v7 自带 focus 阴影，不叠两层 |
+| `.kb-stop-pulse` | `::after` 圆环 `scale 0.9→1.35` + `opacity 0.32→0`，1.6s 无限 | AI 回复生成中的停止按钮呼吸（2026-11-19）。只动 transform/opacity；reduced-motion 关闭 |
 | `.kb-tip` / `.kb-tip-anim` | `opacity 0→1 + translateY(±3px→0) + scale(0.96→1)`，160ms；方向随 `data-place` 翻转 | 悬停提示气泡进场（全局 TooltipHost 与 HelpHint 共用）。只动 transform/opacity；量化后（data-ready）才播，避免落位前闪一下 |
 
 > 所有类统一包一段 `@media (prefers-reduced-motion: reduce)` 关闭。

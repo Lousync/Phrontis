@@ -1,7 +1,11 @@
 import { useRef, useState } from 'react'
 import { Search, Star } from 'lucide-react'
 import { AnchoredLayer } from '../../../components/shared/AnchoredLayer'
-import type { LlmProviderInfo, LlmProviderType, LlmModelFamily } from '../../../types'
+import { capabilityChips, entryLabel, resolveCatalogEntry, slotIncompatibleReason } from '../../../lib/modelCatalog'
+import { applyEntryPick, filterEntries, groupForPicker } from './modelCatalogUiPure'
+import type {
+  LlmCatalogSlotKey, LlmModelEntry, LlmModelFamily, LlmProviderInfo, LlmProviderType,
+} from '../../../types'
 import { prettyModelName } from '../../../lib/modelNames'
 
 /**
@@ -16,6 +20,10 @@ import { prettyModelName } from '../../../lib/modelNames'
  *   · ☆ 直接标记免费（原来的「手填 ID 列表」改成点星）。
  * 组的头部还会显示每个模型实际走哪条协议（chat / messages / responses），
  * 因为那是"能不能调通"的判据，而它只写在官方端点表里、用户无从得知。
+ *
+ * 2026-11-19 增补 **条目模式**（`mode='entry'`，P3.2）：数据源换成 `entries`（模型条目），
+ * 分组换成「精选 / 全部」，回传条目 id；不满足槽位能力的条目置灰 + 右侧原因。
+ * 不传 `mode` / `entries` 时**行为与改造前逐字一致**，现有调用方无需改动。
  */
 
 /** 供应商 type → 默认协议族（与主进程 FAMILY_BY_TYPE 同口径；ollama 无协议族概念） */
@@ -49,7 +57,22 @@ function FamilyChip({ family }: { family: LlmModelFamily | null }) {
   return <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border ${tone || 'border-[var(--border-color)] text-[var(--text-muted)]'}`}>{FAMILY_LABEL[family]}</span>
 }
 
-export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFree, placeholder, onlySpecs }: {
+/** 条目模式的当前值展示：条目 → 「名称 · 供应商」；未纳入目录的旧 spec / 失效 id → 原样 */
+function entryTriggerOf(
+  value: string,
+  entries: LlmModelEntry[],
+  providers: LlmProviderInfo[],
+): { label: string; model: string; free: boolean } | null {
+  if (!value) return null
+  const resolved = resolveCatalogEntry(value, entries)
+  if (!resolved) return { label: value, model: '', free: false }
+  const e = resolved.entry
+  if (!e) return { label: `${resolved.providerId}:${resolved.modelId}`, model: '', free: false }
+  const pname = providers.find((p) => p.id === e.providerId)?.name ?? e.providerId
+  return { label: entryLabel(e, pname), model: e.modelId, free: !!e.free }
+}
+
+export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFree, placeholder, onlySpecs, entries, mode = 'spec', slot }: {
   value: string
   onChange: (spec: string) => void
   providers: LlmProviderInfo[]
@@ -58,22 +81,30 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
   placeholder: string
   /** 只允许这些 spec（图片视觉转写那行用它把候选收窄到"疑似支持图片"的模型） */
   onlySpecs?: Set<string>
+  /** 条目模式的数据源（`mode='entry'` 时生效） */
+  entries?: LlmModelEntry[]
+  /** `entry` = 只列模型条目、回传条目 id；默认 `spec` 保持旧行为（回传 `providerId:modelId`） */
+  mode?: 'spec' | 'entry'
+  /** 条目模式的槽位：不满足能力的条目置灰 + 原因，不可选 */
+  slot?: LlmCatalogSlotKey
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   // 下拉面板走 AnchoredLayer（portal + fixed）：这个选择器在「模型」页的场景分配表里用，
   // 而那张表已折叠成一组 —— 就地 absolute 的下拉会被折叠容器的 overflow:hidden 裁掉大半。
   const btnRef = useRef<HTMLButtonElement | null>(null)
+  const entryMode = mode === 'entry' && Array.isArray(entries)
 
   // 当前值的展示：供应商名 · 账号名 / 模型名（找不到就照原样显示 spec，别装作没选）
   const cur = (() => {
-    if (!value) return null
+    if (entryMode || !value) return null
     const i = value.indexOf(':')
     const pid = value.slice(0, i), mid = value.slice(i + 1)
     const p = providers.find(x => x.id === pid)
     const acct = p?.accounts.find(a => a.id === p.activeAccountId)
     return { pname: p?.name ?? pid, acct: acct?.name ?? '', model: mid, free: /(^|[-._])free([-._]|$)/i.test(mid) || freeSet.has(mid) }
   })()
+  const curEntry = entryMode ? entryTriggerOf(value, entries ?? [], providers) : null
 
   const ql = q.trim().toLowerCase()
   const groups = providers
@@ -89,19 +120,37 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
     .filter(g => g.models.length > 0)
   const total = groups.reduce((n, g) => n + g.models.length, 0)
 
+  const entryGroups = entryMode ? groupForPicker(filterEntries(entries ?? [], q)) : []
+  const entryTotal = entryGroups.reduce((n, g) => n + g.items.length, 0)
+  /** 当前选中项按条目 id 比对：槽位里可能还是同一个模型的旧 spec */
+  const curEntryId = entryMode ? resolveCatalogEntry(value, entries ?? [])?.entry?.id : undefined
+
   return (
     <div className="relative">
       <button ref={btnRef} onClick={() => { setOpen(v => !v); setQ('') }} aria-expanded={open}
-        data-tip={cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder} aria-label={cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder}
+        data-tip={entryMode
+          ? (curEntry ? curEntry.label : placeholder)
+          : (cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder)}
+        aria-label={entryMode
+          ? (curEntry ? curEntry.label : placeholder)
+          : (cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder)}
         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-left text-[12px] hover:border-[var(--accent)]/50 transition-colors">
         <span className="min-w-0 flex-1 truncate">
-          {cur
-            ? <>
-                {cur.free && <span className="mr-1.5 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
-                <span className="text-[var(--text-primary)]">{prettyModelName(cur.model)}</span>
-                <span className="ml-1.5 font-mono text-[10.5px] text-[var(--text-muted)]">{cur.model}</span>
-              </>
-            : <span className="text-[var(--text-disabled)]">{placeholder}</span>}
+          {entryMode
+            ? (curEntry
+                ? <>
+                    {curEntry.free && <span className="mr-1.5 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
+                    <span className="text-[var(--text-primary)]">{curEntry.label}</span>
+                    {curEntry.model && <span className="ml-1.5 font-mono text-[10.5px] text-[var(--text-muted)]">{curEntry.model}</span>}
+                  </>
+                : <span className="text-[var(--text-disabled)]">{placeholder}</span>)
+            : (cur
+                ? <>
+                    {cur.free && <span className="mr-1.5 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
+                    <span className="text-[var(--text-primary)]">{prettyModelName(cur.model)}</span>
+                    <span className="ml-1.5 font-mono text-[10.5px] text-[var(--text-muted)]">{cur.model}</span>
+                  </>
+                : <span className="text-[var(--text-disabled)]">{placeholder}</span>)}
         </span>
         <span className="shrink-0 text-[var(--text-muted)]">▾</span>
       </button>
@@ -113,52 +162,103 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
         className="w-[400px] max-w-[calc(100vw-16px)] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg">
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-[var(--border-color)]">
           <Search size={12} className="text-[var(--text-muted)] shrink-0" />
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜索模型"
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder={entryMode ? '搜索条目或模型 id' : '搜索模型'}
             className="flex-1 min-w-0 bg-transparent text-[12px] outline-none text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]" />
         </div>
         <div className="max-h-[280px] overflow-y-auto py-1">
-          {groups.map(({ p, models }) => {
-            const acct = p.accounts.find(a => a.id === p.activeAccountId)
-            return (
-              <div key={p.id}>
-                <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-[var(--text-muted)] sticky top-0 bg-[var(--bg-primary)] kb-scroll-edge kb-scroll-edge--on">
-                  <span className="truncate">{p.name}</span>
-                  <span className="text-[var(--accent)] shrink-0">{acct ? acct.name : '无可用账号'}</span>
-                  <span className="text-[var(--text-disabled)] shrink-0">· {models.length}</span>
+          {entryMode ? (
+            <>
+              {entryGroups.map(g => (
+                <div key={g.title}>
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-[var(--text-muted)] sticky top-0 bg-[var(--bg-primary)] kb-scroll-edge kb-scroll-edge--on">
+                    <span className="truncate">{g.title}</span>
+                    <span className="text-[var(--text-disabled)] shrink-0">· {g.items.length}</span>
+                  </div>
+                  {g.items.map(entry => {
+                    const reason = slot ? slotIncompatibleReason(entry, slot) : null
+                    const pname = providers.find(p => p.id === entry.providerId)?.name ?? entry.providerId
+                    const isCur = curEntryId === entry.id
+                    const chips = capabilityChips(entry)
+                    return (
+                      <div key={entry.id} data-tip={`${pname} / ${entry.modelId}`} aria-label={`${pname} / ${entry.modelId}`}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] transition-colors ${
+                          reason
+                            ? 'opacity-50 cursor-not-allowed'
+                            : isCur ? 'bg-[var(--accent)]/10 cursor-pointer' : 'cursor-pointer hover:bg-[var(--bg-hover)]'
+                        }`}
+                        onClick={reason ? undefined : () => { onChange(applyEntryPick('entry', entry)); setOpen(false) }}>
+                        <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{entryLabel(entry, pname)}</span>
+                        {entry.free && <span className="shrink-0 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
+                        {chips.map(c => (
+                          <span key={c.key}
+                            className={`shrink-0 text-[10px] px-1 py-0.5 rounded border ${
+                              c.state === 'no'
+                                ? 'border-[var(--border-color)] text-[var(--text-disabled)] line-through'
+                                : 'border-[var(--border-color)] text-[var(--text-muted)]'
+                            }`}>
+                            {c.label}
+                          </span>
+                        ))}
+                        <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)] max-w-[32%] truncate">{entry.modelId}</span>
+                        {isCur && !reason && <span className="shrink-0 text-[var(--accent)] text-[11px]">✓</span>}
+                        {reason && <span className="shrink-0 max-w-[45%] truncate text-[10px] text-[var(--text-disabled)]">{reason}</span>}
+                      </div>
+                    )
+                  })}
                 </div>
-                {models.map(m => {
-                  const spec = `${p.id}:${m}`
-                  const isCur = value === spec
-                  const free = freeSet.has(m) || /(^|[-._])free([-._]|$)/i.test(m)
-                  return (
-                    <div key={spec} data-tip={spec} aria-label={spec}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] cursor-pointer transition-colors ${isCur ? 'bg-[var(--accent)]/10' : 'hover:bg-[var(--bg-hover)]'}`}
-                      onClick={() => { onChange(spec); setOpen(false) }}>
-                      <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{prettyModelName(m)}</span>
-                      {free && <span className="shrink-0 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
-                      <FamilyChip family={effectiveFamily(p, m)} />
-                      <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)] max-w-[38%] truncate">{m}</span>
-                      <button onClick={e => { e.stopPropagation(); onToggleFree(m) }}
-                        data-tip={free ? '取消免费标记' : '标记为免费模型'} aria-label={free ? '取消免费标记' : '标记为免费模型'}
-                        className={`shrink-0 p-0.5 rounded transition-colors ${free ? 'text-amber-400' : 'text-[var(--text-disabled)] hover:text-amber-400'}`}>
-                        <Star size={11} className={free ? 'fill-amber-400' : ''} />
-                      </button>
-                      {isCur && <span className="shrink-0 text-[var(--accent)] text-[11px]">✓</span>}
+              ))}
+              {entryTotal === 0 && (
+                <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)]">
+                  {ql ? `没有匹配「${q}」的条目` : '还没有模型条目 —— 在「模型条目」里添加一个'}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {groups.map(({ p, models }) => {
+                const acct = p.accounts.find(a => a.id === p.activeAccountId)
+                return (
+                  <div key={p.id}>
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-[var(--text-muted)] sticky top-0 bg-[var(--bg-primary)] kb-scroll-edge kb-scroll-edge--on">
+                      <span className="truncate">{p.name}</span>
+                      <span className="text-[var(--accent)] shrink-0">{acct ? acct.name : '无可用账号'}</span>
+                      <span className="text-[var(--text-disabled)] shrink-0">· {models.length}</span>
                     </div>
-                  )
-                })}
-              </div>
-            )
-          })}
-          {total === 0 && (
-            <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)]">
-              {ql ? `没有匹配「${q}」的模型` : '暂无可选模型：端点均已停用、账号未配置 Key，或尚未获取模型清单'}
-            </div>
+                    {models.map(m => {
+                      const spec = `${p.id}:${m}`
+                      const isCur = value === spec
+                      const free = freeSet.has(m) || /(^|[-._])free([-._]|$)/i.test(m)
+                      return (
+                        <div key={spec} data-tip={spec} aria-label={spec}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] cursor-pointer transition-colors ${isCur ? 'bg-[var(--accent)]/10' : 'hover:bg-[var(--bg-hover)]'}`}
+                          onClick={() => { onChange(spec); setOpen(false) }}>
+                          <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{prettyModelName(m)}</span>
+                          {free && <span className="shrink-0 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
+                          <FamilyChip family={effectiveFamily(p, m)} />
+                          <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)] max-w-[38%] truncate">{m}</span>
+                          <button onClick={e => { e.stopPropagation(); onToggleFree(m) }}
+                            data-tip={free ? '取消免费标记' : '标记为免费模型'} aria-label={free ? '取消免费标记' : '标记为免费模型'}
+                            className={`shrink-0 p-0.5 rounded transition-colors ${free ? 'text-amber-400' : 'text-[var(--text-disabled)] hover:text-amber-400'}`}>
+                            <Star size={11} className={free ? 'fill-amber-400' : ''} />
+                          </button>
+                          {isCur && <span className="shrink-0 text-[var(--accent)] text-[11px]">✓</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+              {total === 0 && (
+                <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)]">
+                  {ql ? `没有匹配「${q}」的模型` : '暂无可选模型：端点均已停用、账号未配置 Key，或尚未获取模型清单'}
+                </div>
+              )}
+            </>
           )}
         </div>
         <div className="px-2.5 py-1.5 border-t border-[var(--border-color)] flex items-center justify-between gap-2 text-[10.5px] text-[var(--text-muted)]">
-          <span>☆ 标记为免费模型</span>
-          <span className="shrink-0">{total} 个可选</span>
+          <span>{entryMode ? null : '☆ 标记为免费模型'}</span>
+          <span className="shrink-0">{entryMode ? `${entryTotal} 个可选` : `${total} 个可选`}</span>
         </div>
       </AnchoredLayer>
     </div>

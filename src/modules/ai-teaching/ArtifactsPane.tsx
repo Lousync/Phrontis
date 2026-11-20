@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network, Layers, Check } from 'lucide-react'
+import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network, Layers, Check, ChevronDown } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { QuizRecordContext, useQuizRecordStore } from '../../components/shared/QuizRecordStore'
 import { QuizSheetBar } from '../../components/shared/QuizSheetBar'
@@ -20,7 +20,7 @@ import type { ArtTab } from './artifacts'
  * expanded（宿主管状态）= 原位占满内容区放大阅读（仿编辑器全屏，非弹窗），页签行 ⤢/⤡ 切换、Esc 退出；
  * 页签列表为会话内存态（切会话清空），阅读位置记忆 per-rel 保存在本组件（跨会话不失效）。
  */
-function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit, onOpenRef }: {
+function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit, onOpenRef, changes, onOpenChange }: {
   tabs: ArtTab[]
   activeId: string | null
   widthPx: number
@@ -36,6 +36,12 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
   onEdit: (rel: string) => void
   /** 导图节点 ref 点击 → 在工件栏开该笔记页签（左聊右看不跳模块） */
   onOpenRef: (rel: string) => void
+  /**
+   * 「本次改动」（P4，D2 已拍板）：原在右栏底部，右栏被查看器替换后落到工件栏底部。
+   * 只做**收纳**，点击仍交给宿主决定是进工件栏还是编辑器（判据 keep 在 index.tsx）。
+   */
+  changes?: Array<{ tool?: string; action: string; target: string; file?: string }>
+  onOpenChange?: (c: { tool?: string; action: string; target: string; file?: string }) => void
 }) {
   const tab = tabs.find(t => t.id === activeId) ?? null
   /** 页签条横向溢出（v3.16.1 F-3）：复用页面条基建 —— 滚轮横滚 + 激活归位 + 边沿渐隐 */
@@ -123,6 +129,8 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
   const mdScrollRef = useRef<HTMLDivElement>(null)
   const mdScrollPos = useRef<Record<string, number>>({})
   const [outline, setOutline] = useState<Array<{ id: string; text: string; lv: number }>>([])
+  /** 「本次改动」折叠态（默认展开：它只在会话有改动时出现，出现即想被看见） */
+  const [changesOpen, setChangesOpen] = useState(true)
   // v3.1.1 条目11：示意图手动缩放——manualMap 存用户手动值（缺省 = fit 自动），effMap 存有效值（工具条展示）
   const [manualMap, setManualMap] = useState<Record<string, number | null>>({})
   const [effMap, setEffMap] = useState<Record<string, number>>({})
@@ -396,6 +404,35 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           </div>
         )}
       </div>
+      {/* 「本次改动」：P4 D2 拍板后从右栏搬到这里。默认展开、可收起；
+          只做列表与点击转发，判断"进工件栏还是编辑器"的权力留在宿主（见 index.tsx）。 */}
+      {changes && changes.length > 0 && (
+        <div className="shrink-0 border-t border-[var(--border-color)]">
+          <button onClick={() => setChangesOpen(v => !v)} aria-expanded={changesOpen}
+            className="w-full flex items-center gap-1 px-2 py-1 text-[10px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors select-none">
+            <ChevronDown size={10} className={`kb-chevron shrink-0 ${changesOpen ? 'rotate-0' : '-rotate-90'}`} />
+            <span className="flex-1 text-left">本次改动（{changes.length}）</span>
+          </button>
+          <div className={`kb-collapse ${changesOpen ? 'open' : ''}`}>
+            <div>
+              <ul className="pb-1 max-h-[132px] overflow-y-auto">
+                {changes.map((c, i) => (
+                  <li key={`${c.file ?? c.target}:${i}`}>
+                    <button onClick={() => onOpenChange?.(c)}
+                      data-tip={c.file ? '打开改动文件' : '该改动没有落点'} aria-label={c.file ? '打开改动文件' : '该改动没有落点'}
+                      disabled={!c.file}
+                      className="w-full flex items-center gap-1 px-2 py-0.5 text-left text-[10.5px] hover:bg-[var(--bg-hover)] transition-colors disabled:hover:bg-transparent">
+                      <FileText size={9} className={`shrink-0 ${c.file ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
+                      <span className="shrink-0 text-[var(--accent)]">{c.action}</span>
+                      <span className={`truncate ${c.file ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>{c.target}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

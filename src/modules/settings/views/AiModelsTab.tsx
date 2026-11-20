@@ -19,11 +19,13 @@ import {
   llmSetModelFamily,
   llmAddAccount, llmSetActiveAccount, llmUpdateAccount, llmRemoveAccount, llmTestAccount,
 } from '../../../lib/ipc'
-import type { LlmProviderInfo, LlmProviderType, LlmModelFamily, LlmTestResultInfo, LlmModelTestResultInfo, LlmAccountInfo, CcSwitchItem } from '../../../types'
+import type { LlmProviderInfo, LlmProviderType, LlmModelFamily, LlmTestResultInfo, LlmModelTestResultInfo, LlmAccountInfo, CcSwitchItem, LlmModelEntry } from '../../../types'
 import { prettyModelName, familyHintOf } from '../../../lib/modelNames'
 import { LLM_PRESETS, presetAddChip } from '../../../lib/llmPresets'
 import type { LlmPreset } from '../../../lib/llmPresets'
+import { entryLabel, resolveCatalogEntry, useModelCatalog } from '../../../lib/modelCatalog'
 import { AiModelPicker, TYPE_LABEL, FAMILY_LABEL, FAMILY_BY_TYPE } from './AiModelPicker'
+import { ModelCatalogSection } from './ModelCatalogSection'
 
 /** 免费=用户手动标记 ∪ id 含 free（上游不提供该元数据，双轨启发式） */
 export function parseFreeSet(raw: string): Set<string> {
@@ -80,6 +82,11 @@ const inputCls = 'w-full px-2.5 py-1.5 rounded-md border border-[var(--border-co
 /** 设置 → AI → 模型：供应商与账号 + 场景分配表 + 逐模型协议 + 回复长度 */
 export function AiModelsTab() {
   const { s, update } = useSettings()
+  /**
+   * 模型条目（P3.2）：场景分配的候选来源。这里读取是为了两件事 ——
+   * 把条目传给选择器（`mode="entry"`），以及判断槽位里的值还停在旧 `providerId:modelId`。
+   */
+  const catalog = useModelCatalog()
   const [providers, setProviders] = useState<LlmProviderInfo[]>([])
   const [loading, setLoading] = useState(true)
   /** 当前展开（= 正在编辑）的端点 id。一次只开一个：展开即编辑，没有"只读态 → 编辑态"两级 */
@@ -120,15 +127,21 @@ export function AiModelsTab() {
       .filter(sc => String(s[sc.key] ?? '').length > 0)
       .map(sc => {
         const from = String(s[sc.key])
-        const mid = from.slice(from.indexOf(':') + 1)
-        const fromText = specText(providers, from)
-        if (from.slice(0, from.indexOf(':')) === p.id) {
+        // 槽位值可能是条目 id（P3.2 新口径），也可能是旧 providerId:modelId —— 统一解析后再拼文案
+        const fromEntry = resolveCatalogEntry(from, catalog.entries)?.entry
+        const fromPid = fromEntry ? fromEntry.providerId : from.slice(0, Math.max(0, from.indexOf(':')))
+        const mid = fromEntry ? fromEntry.modelId : from.slice(from.indexOf(':') + 1)
+        const fromPname = providers.find(x => x.id === fromPid)?.name
+        const fromText = fromEntry ? entryLabel(fromEntry, fromPname) : specText(providers, from)
+        if (fromPid === p.id) {
           return { key: sc.key, label: sc.label, from, to: from, fromText, noop: true, toText: '已使用该端点：切换账号即可，模型无需更改' }
         }
         const toModel = p.models.includes(mid) ? mid : (p.models[0] ?? '')
+        // 新写入优先条目 id（同 spec 的条目存在时），没有才退回旧 spec
+        const toEntry = catalog.entries.find(e => e.providerId === p.id && e.modelId === toModel)
         return {
           key: sc.key, label: sc.label, from, fromText, noop: !toModel,
-          to: toModel ? `${p.id}:${toModel}` : '',
+          to: toModel ? (toEntry?.id ?? `${p.id}:${toModel}`) : '',
           toText: toModel ? `${who} / ${prettyModelName(toModel)}` : '该端点尚无模型清单，请先刷新模型',
         }
       })
@@ -178,6 +191,10 @@ export function AiModelsTab() {
           </button>
         </div>
       )}</Collapsible>
+
+      {/* 模型条目（P3.2）：这一页的第一个概念 —— 先有「可命名的模型」，场景分配只是引用它。
+          方案要求放顶部（场景分配之上）；供应商是它的数据来源，紧随其后。 */}
+      <ModelCatalogSection />
 
       {/* 供应商：常驻的**唯一**一层列表；加供应商收成一个按钮，8 个预设磁贴不再占首屏 */}
       <div>
@@ -261,7 +278,7 @@ export function AiModelsTab() {
               onUndo={() => { for (const r of adopt.rows) if (!r.noop) void update(r.key, r.from); setAdopt({ ...adopt, applied: false }) }}
               onCancel={() => setAdopt(null)} />
           )}
-          <SceneTable providers={providers} freeSet={freeSet} onToggleFree={toggleFree} />
+          <SceneTable providers={providers} freeSet={freeSet} onToggleFree={toggleFree} entries={catalog.entries} />
         </SettingsGroup>
       </div>
 
@@ -1271,10 +1288,12 @@ function AdoptCard({ who, rows, onApply, onUndo, onCancel, applied }: {
   )
 }
 
-function SceneTable({ providers, freeSet, onToggleFree }: {
+function SceneTable({ providers, freeSet, onToggleFree, entries }: {
   providers: LlmProviderInfo[]
   freeSet: Set<string>
   onToggleFree: (modelId: string) => void
+  /** 模型条目（P3.2）：场景分配的候选；空目录时仍可显示旧 spec 兜底 */
+  entries: LlmModelEntry[]
 }) {
   const [visionSpecs, setVisionSpecs] = useState<Set<string>>(new Set())
 
@@ -1291,49 +1310,65 @@ function SceneTable({ providers, freeSet, onToggleFree }: {
     <div className="max-w-md rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3.5 py-0.5">
       {SCENES.filter(sc => !sc.visionOnly && !sc.anchor).map(sc => (
         <SceneRow key={sc.key} sc={sc} providers={providers} freeSet={freeSet}
-          onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
+          onToggleFree={onToggleFree} visionSpecs={visionSpecs} entries={entries} />
       ))}
       {/* 第五行·图片视觉转写：它那个设置项的**唯一落点**（控件从「教学」页搬到这里），
           所以锚点写成字面量 —— 设置搜索「图片视觉转写模型」要能跳到这一行。
           （写 data-setting-anchor={...} 表达式则契约脚本的文本扫描认不出来。） */}
       <div data-setting-anchor="aiTeach.visionModel">
         <SceneRow sc={SCENES.filter(sc => sc.visionOnly)[0]} providers={providers} freeSet={freeSet}
-          onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
+          onToggleFree={onToggleFree} visionSpecs={visionSpecs} entries={entries} />
       </div>
       {/* 生图两行（v3.6.0 对话内生图）：与上一行同理，锚点必须是**字面量** ——
           设置搜索「文生图模型 / 改图重绘模型」要能跳到这里，且 `verify-ai-tab-anchors.mjs`
           是按字面量串数 anchor 的（表达式形式它认不出来）。 */}
       <div data-setting-anchor="aiTools.imageModel">
         <SceneRow sc={SCENES.filter(sc => sc.key === 'aiImageModel')[0]} providers={providers} freeSet={freeSet}
-          onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
+          onToggleFree={onToggleFree} visionSpecs={visionSpecs} entries={entries} />
       </div>
       <div data-setting-anchor="aiTools.imageEditModel">
         <SceneRow sc={SCENES.filter(sc => sc.key === 'aiImageEditModel')[0]} providers={providers} freeSet={freeSet}
-          onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
+          onToggleFree={onToggleFree} visionSpecs={visionSpecs} entries={entries} />
       </div>
     </div>
   )
 }
 
 /** 场景表的一行：标签 + ⓘ 释义 + 选择器 + 悬停才显的「测试这个模型」+ 行内结果 */
-function SceneRow({ sc, providers, freeSet, onToggleFree, visionSpecs }: {
+function SceneRow({ sc, providers, freeSet, onToggleFree, visionSpecs, entries }: {
   sc: { key: ModelSlotKey; label: string; desc: string; placeholder: string; visionOnly?: boolean }
   providers: LlmProviderInfo[]
   freeSet: Set<string>
   onToggleFree: (modelId: string) => void
   visionSpecs: Set<string>
+  entries: LlmModelEntry[]
 }) {
   const { s, update } = useSettings()
   const [testing, setTesting] = useState(false)
   const [out, setOut] = useState('')
   const cur = typeof s[sc.key] === 'string' ? String(s[sc.key]) : ''
+  const resolved = resolveCatalogEntry(cur, entries)
+  const entry = resolved?.entry
+  /**
+   * 目录为空时**退回旧 spec 选择器**：此时条目模式没有任何候选，整行会变成"不可选"，
+   * 而迁移只建「被引用过的」条目 —— 一个都没引用过就是空目录。等用户加了条目再切过来。
+   */
+  const entryMode = entries.length > 0
+  /**
+   * 旧 spec 兜底（B8）：槽位里还可能躺着 `providerId:modelId`（迁移前的写法）。
+   * 解析不到条目**不自动替换** —— 只把原值照原样显示，并挂一枚灰标说明它还没纳入条目。
+   */
+  const orphan = entryMode && !!cur && !entry
+  /** 测试要真实 providerId / modelId：条目从条目取，旧 spec 从 spec 拆 */
+  const target = entry
+    ? { pid: entry.providerId, mid: entry.modelId }
+    : (resolved ? { pid: resolved.providerId, mid: resolved.modelId } : null)
 
   const testModel = async () => {
-    const i = cur.indexOf(':')
-    if (!cur || i < 0 || testing) return
+    if (!target || testing) return
     setTesting(true)
     try {
-      const r = await llmTestModel(cur.slice(0, i), cur.slice(i + 1))
+      const r = await llmTestModel(target.pid, target.mid)
       setOut(r.ok ? `✓ 可用（${r.latencyMs}ms）` : `✗ ${r.error}`)
     } finally { setTesting(false) }
   }
@@ -1346,8 +1381,11 @@ function SceneRow({ sc, providers, freeSet, onToggleFree, visionSpecs }: {
       </span>
       <div className="min-w-0 flex-1">
         <AiModelPicker
+          mode={entryMode ? 'entry' : 'spec'}
+          slot={sc.key}
+          entries={entries}
           value={cur}
-          onChange={spec => { void update(sc.key, spec) }}
+          onChange={id => { void update(sc.key, id) }}
           providers={providers}
           freeSet={freeSet}
           onToggleFree={onToggleFree}
@@ -1355,8 +1393,14 @@ function SceneRow({ sc, providers, freeSet, onToggleFree, visionSpecs }: {
           onlySpecs={sc.visionOnly && visionSpecs.size > 0 ? visionSpecs : undefined}
         />
       </div>
+      {orphan && (
+        <span data-tip={cur} aria-label={`${cur} 尚未纳入模型条目`}
+          className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-disabled)]">
+          未纳入条目
+        </span>
+      )}
       {out && <span data-tip={out} aria-label={out} className={`shrink-0 max-w-[45%] truncate text-[10.5px] ${out.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{out}</span>}
-      <button onClick={() => { void testModel() }} disabled={!cur || testing}
+      <button onClick={() => { void testModel() }} disabled={!target || testing}
         data-tip="用当前选中的模型发一次最小请求" aria-label={`测试模型 ${sc.label}`}
         className="kb-hoveronly shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
         {testing && <Loader2 size={11} className="animate-spin" />} 测试这个模型

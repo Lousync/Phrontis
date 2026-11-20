@@ -3,6 +3,7 @@ import { X, Copy, Check, Loader2, Sparkles, BookOpen, Languages, Volume2 } from 
 import { showToast } from '../../../lib/toast'
 import { speak } from '../../../lib/tts'
 import { copyText, dictLookup, dictStatus, translateInvoke } from '../../../lib/ipc'
+import { FLOAT_GAP, clampFloatingLeft, floatingBounds, placeFloatingVertically, toCssBottom } from '../../../lib/floatingPlacement'
 import type { DictLookupResult, TranslateMode } from '../../../lib/translateTypes'
 import { MarkdownPreview } from '../MarkdownPreview'
 
@@ -14,7 +15,7 @@ import { MarkdownPreview } from '../MarkdownPreview'
  */
 
 interface TranslateCardProps {
-  /** 选区矩形（viewport 坐标），卡片据此定位：优先放选区下方，放不下放上方，且不遮住选中的原文 */
+  /** 选区矩形（viewport 坐标），卡片据此定位：优先放选区下方，放不下翻到上方，高度按可用空间封顶 */
   rect: { left: number; top: number; right: number; bottom: number }
   text: string
   onClose: () => void
@@ -125,31 +126,40 @@ export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
     } else showToast({ type: 'error', message: '复制失败' })
   }
 
-  // ===== 智能定位：先渲染量高，再"先量后摆"，避免溢出屏幕或盖住选中的原文 =====
+  // ===== 智能定位：按**可用空间**选边，不按「已渲染高度」=====
+  // 老写法在挂载那一刻量高度：那时词典还没查回来，卡片只有一行，于是被判成「放得下」摆到选区
+  // 下方；词典 / AI 结果随后长出来 → 卡片长过窗口底缘被截断（2026-11-17 用户反馈）。
+  // 现在方向一次定死（下方放不下就翻上去，底缘贴着选区），高度用 maxHeight 封顶 ——
+  // 内容流式长多少都在框内滚动，既不会被截断，也不会在生成过程中上下跳。
   const CARD_W = 400
-  const cardRef = useRef<HTMLDivElement>(null)
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null)
+  const CARD_MAX_H = 560
+  const [place, setPlace] = useState<{ left: number; top?: number; bottom?: number; width: number; maxHeight: number } | null>(null)
   useLayoutEffect(() => {
-    const h = cardRef.current?.offsetHeight ?? 320
-    const vw = window.innerWidth
-    const vh = window.innerHeight
-    const M = 8 // 视口边距
-    // 垂直：优先选区下方，放不下放上方，都放不下则取最大可视高度
-    let top: number
-    if (rect.bottom + M + h <= vh - M) top = rect.bottom + M
-    else if (rect.top - M - h >= M) top = rect.top - M - h
-    else top = Math.max(M, Math.min(vh - M - h, rect.bottom + M))
-    // 水平：与选区左缘对齐并夹进视口
-    let left = Math.max(M, Math.min(rect.left, vw - CARD_W - M))
-    // 若仍与选区纵向重叠（上下都放不下的兜底），横移到选区侧旁避免盖住原文
-    const vOverlap = top < rect.bottom && top + h > rect.top
-    if (vOverlap && left < rect.right && left + CARD_W > rect.left) {
-      if (rect.right + M + CARD_W <= vw - M) left = rect.right + M
-      else if (rect.left - M - CARD_W >= M) left = rect.left - M - CARD_W
+    const apply = () => {
+      const bounds = floatingBounds()
+      const width = Math.max(240, Math.min(CARD_W, bounds.right - bounds.left - FLOAT_GAP * 2))
+      const left = clampFloatingLeft(rect.left, width, bounds)
+      const v = placeFloatingVertically({
+        anchorTop: rect.top,
+        anchorBottom: rect.bottom,
+        bounds,
+        cap: CARD_MAX_H,
+        prefer: 'below',
+        // 下方少于 220px 就不硬塞（词典卡至少要有词头 + 几条释义才可用）
+        minUsable: 220,
+      })
+      setPlace({
+        left,
+        width,
+        top: v.top,
+        bottom: v.bottomEdge !== undefined ? toCssBottom(v.bottomEdge) : undefined,
+        maxHeight: v.maxHeight,
+      })
     }
-    setPlace({ left, top })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    apply()
+    window.addEventListener('resize', apply)
+    return () => window.removeEventListener('resize', apply)
+  }, [rect.left, rect.top, rect.right, rect.bottom])
 
   const entry = dict?.found ? dict.entry : undefined
   const examTags = entry?.tags.filter(t => t === 'cet4' || t === 'cet6' || t === 'ky') ?? []
@@ -160,10 +170,16 @@ export function TranslateCard({ rect, text, onClose }: TranslateCardProps) {
   // 改走同一套 transition，补一个 scale 让「出现/消失」有方向感，origin 对准锚点
   return (
     <div
-      ref={cardRef}
       data-translate-card
-      className={`fixed z-50 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl flex flex-col overflow-hidden origin-top-left transition-[opacity,scale] ${place ? '' : 'scale-95'}`}
-      style={{ left: place?.left ?? -9999, top: place?.top ?? -9999, width: CARD_W, maxHeight: 'min(70vh, 560px)', opacity: place ? 1 : 0 }}
+      className={`fixed z-50 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl flex flex-col overflow-hidden transition-[opacity,scale] ${place?.bottom !== undefined ? 'origin-bottom-left' : 'origin-top-left'} ${place ? '' : 'scale-95'}`}
+      style={{
+        left: place?.left ?? -9999,
+        top: place?.top,
+        bottom: place?.bottom,
+        width: place?.width ?? CARD_W,
+        maxHeight: place?.maxHeight,
+        opacity: place ? 1 : 0,
+      }}
     >
       {/* 头部 */}
       <div className="shrink-0 h-8 px-2.5 flex items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">

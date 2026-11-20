@@ -77,16 +77,18 @@ check('打开即已读（agentMarkSideLaneRead）', center.includes('agentMarkSi
 check('搜索：标题 + 来源回答 + 摘要', center.includes('l.title +') && center.includes('anchorTitle') && center.includes('excerpt'))
 check('详情复用 SideLanePanel 且带 onBack/onQuote/onFloat', center.includes('<SideLanePanel') && center.includes('onBack={back}') && center.includes('onQuote={onQuote}') && center.includes('onFloat='))
 const idx = read('src/modules/ai-teaching/index.tsx')
-check('index 引入 SideLaneCenter', idx.includes("import { SideLaneCenter } from './SideLaneCenter'"))
-// v3.9.1 学习流 v2：右栏从两分区扩到「素材 / 支线 / 层级」三分区（方案 §三-1），
-// 断言按新口径收：**三分区齐全 + 落到 localStorage + 读取时白名单**，而不是钉死旧的两态字面量。
-check('右栏分区状态 railTab（三分区：进度 / 素材 / 支线）',
-  /useState<'progress' \| 'sources' \| 'lanes'>\(/.test(idx) && idx.includes('aiTeach.railTab'))
+// P4（2026-11-19）：右栏退役，支线中心并入查看器「旁问」页签 —— 断言跟着落点走。
+check('index 挂 RightViewer', idx.includes("import { RightViewer } from './right-viewer/RightViewer'") && idx.includes('<RightViewer'))
+// 旁问页签自建列表（按 scope 分组 / 徽标），详情仍复用 SideLanePanel —— 断言钉行为而不是钉组件
+const ask = read('src/modules/ai-teaching/right-viewer/AskPane.tsx')
+check('旁问页签：列表 + 已读 + 详情复用 SideLanePanel',
+  ask.includes('agentListSideLanes(') && ask.includes('agentMarkSideLaneRead(') && ask.includes("from '../SideLanePanel'"))
 check('锚点映射由会话库派生（不再 localStorage）', idx.includes('const anchorLanes = useMemo') && !idx.includes('ANCHOR_LANES_KEY'))
 check('锚点 chip 走 openCenter（open/create）', idx.includes("openCenter(al ? { kind: 'open', laneId: al.laneId } : { kind: 'create'"))
 check('引用回主线接 setQuotes', idx.includes('const quoteFromLane = useCallback') && idx.includes('setQuotes(prev'))
 check('支线详情保留浮出能力（onFloat 可选）', read('src/modules/ai-teaching/SideLaneCenter.tsx').includes('onFloat?') && read('src/modules/ai-teaching/SideLanePanel.tsx').includes('onFloat?'))
-check('右栏可切到素材库分区', idx.includes("setRailTab('sources')"))
+// P4 D2：素材从右栏搬到左栏资源管理器「文件 / 素材」分段
+check('素材分段在左栏资源管理器', idx.includes("setExplorerSeg('sources')") && idx.includes('<CourseSources'))
 
 console.log('\n=== 7. SideLanePanel 内嵌形态 ===')
 const panel = read('src/modules/ai-teaching/SideLanePanel.tsx')

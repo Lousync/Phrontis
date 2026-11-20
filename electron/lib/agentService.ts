@@ -10,7 +10,8 @@ import { buildAttachedRefsInjection } from './aiAssistant/refSkeleton'
 import { readVaultRefText } from './aiAssistant/refText'
 import { runPerception } from './aiAssistant/perception'
 import { buildPerceptionInjection } from './aiAssistant/perceptionBudget'
-import { invokeLlmStreamInternal, visionChatCapable } from './llmService'
+import { invokeLlmStreamInternal, visionChatCapable, resolveModelSpec, resolveGlobalModelSpec } from './llmService'
+import { getWorkspaceModelEntryId } from './modelCatalogStore'
 import {
   classifyFailure, friendlyReason, buildInterruptNotice, buildDiagnostics, suggestedActionText,
   interruptionDetailOf, rawFailure, configInterruptionOf,
@@ -1044,8 +1045,54 @@ function buildSideLaneSnapshot(parentSessionId: string, anchor: AgentMessageRow 
   return text.length > CAP ? text.slice(-CAP) : text
 }
 
-/** 从会话库当前内容直接推理（不追加新用户消息）——重新生成/编辑重推共用 */
-/** 中断出口的上下文（可选）：进度 / 改动清单 / carry / 是否写「继续」现场 */
+/**
+ * 锚点序号：分叉点是主线第几条 AI 回答（从 1 起）。
+ *
+ * 为什么在服务端算：渲染层拿到的是分页消息，主线很长时它数不全；
+ * 而「第 N 条回答」是用户识别锚点的唯一稳定说法（消息 id 不可读）。
+ * 找不到锚点返回 undefined —— 旧数据 / 锚点已删时不瞎猜。
+ */
+function anchorOrdinalOf(parentSessionId: string, messageId: string): number | undefined {
+  if (!parentSessionId || !messageId) return undefined
+  let n = 0
+  for (const m of getAgentMessages(parentSessionId)) {
+    if (m.role !== 'assistant') continue
+    n++
+    if (m.id === messageId) return n
+  }
+  return undefined
+}
+
+/**
+ * 问整段对话的上下文（C9 已拍板 A）：**每轮现算**，不落快照。
+ *
+ * 与锚定支线的区别：锚定是「分叉那一刻」的固定背景（prompt cache 友好）；
+ * 整段对话要跟着主线一起长，否则用户刚聊完的内容旁问却不知道。
+ * 代价是前缀每轮变化 —— 这是该模式本身的语义，不是失误。
+ *
+ * 口径：总 24000 字符 / 单条最多 6000，从最新往前取，按时间正序拼接。
+ * 不读全局记忆、不注入工具 schema（旁问只读，C10）。
+ */
+function buildWholeConversationContext(parentSessionId: string): string {
+  if (!parentSessionId) return ''
+  const rows = getAgentMessages(parentSessionId).filter(m => m.role === 'user' || m.role === 'assistant')
+  const TOTAL_CAP = 24000
+  const ITEM_CAP = 6000
+  const picked: string[] = []
+  let used = 0
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i]
+    const body = r.content.length > ITEM_CAP ? r.content.slice(0, ITEM_CAP) + '…' : r.content
+    const line = `${r.role === 'user' ? '用户' : 'AI'}：${body}`
+    if (used + line.length > TOTAL_CAP && picked.length > 0) break
+    picked.push(line)
+    used += line.length
+  }
+  const ordered = picked.reverse()
+  return ordered.length > 0 ? `— 主线最近对话（共 ${ordered.length} 条）—\n` + ordered.join('\n\n') : ''
+}
+
+/** 从会话库当前内容直接推理（不追加新用户消息）——重新生成/编辑重推共用 *//** 中断出口的上下文（可选）：进度 / 改动清单 / carry / 是否写「继续」现场 */
 interface InterruptContext {
   /** 本次真实写改动（此前只在成功分支返回，失败时「本次改动」面板拿不到已写的东西） */
   changes?: AgentChange[]
@@ -1573,12 +1620,17 @@ async function runAgentLoopInner(
     : ''
   // v3.1.2 条目11：支线旁问上下文（仅带 sideContext 的会话注入）。快照在建支线时固化，跨轮稳定 → 不扰动缓存前缀。
   // 升格为正式会话（lane='main'）后仍保留来源快照，只是不再套「支线纪律」措辞。
-  // laneRow / isSideLane 已在前面规则装配处算好（纪律必须早于出题协议，故提前）。
-  const sideLaneHint = laneRow?.sideContext
+  // P4（C9 已拍板 A）：sideScope='conversation' 的旁问不读快照，**每轮现算**主线最近对话。
+  const sideLaneText = isSideLane && laneRow?.sideScope === 'conversation'
+    ? buildWholeConversationContext(laneRow.parentSessionId ?? '')
+    : (laneRow?.sideContext ?? '')
+  const sideLaneHint = sideLaneText
     ? (isSideLane
-        ? SIDE_LANE_DISCIPLINE + '\n\n【支线上下文快照（分叉时刻固化）】被追问的回答 + 主线前若干轮：\n'
+        ? SIDE_LANE_DISCIPLINE + (laneRow?.sideScope === 'conversation'
+            ? '\n\n【旁问上下文（已读整段对话，每轮现算）】\n'
+            : '\n\n【支线上下文快照（分叉时刻固化）】被追问的回答 + 主线前若干轮：\n')
         : '\n\n【来源上下文（快照）】本条对话由主线会话的一条回答升格而来，以下是其来源快照（仅供参考背景；后续进展以本对话自身历史为准）。\n')
-      + laneRow.sideContext
+      + sideLaneText
     : ''
   // 日程助手（source==='schedule'）：人设进 system（逐字稳定）；数据快照进首条 user 消息层（每轮现算）
   const schedulePersona = source === 'schedule' ? SCHEDULE_PERSONA : ''
@@ -1751,19 +1803,36 @@ async function runAgentLoopInner(
     // 常规档触顶 / 中断时，续跑会升长任务档 —— 卡片上先把这件事说清（教学面走长资料检测，不适用）
     longTaskResume: source !== 'aiTeaching' && !isSideLane && !manual && profileId !== 'long',
   })
-  // P3b：本对话模型覆盖（'pid:mid' 串拆分）——解析一次，全轮次复用
+  /**
+   * 模型解析顺序（P3 收口，B 组已拍板）：**本对话覆盖 → 本课程默认 → 全局默认**。
+   *
+   * 为什么工作区这条要在主进程算：渲染层发送时只知道「本对话有没有覆盖」，
+   * 它不知道会话属于哪门课（sessionWs 的真相源在主进程）。若把这条逻辑写进渲染层，
+   * 就会与「模型条目 / 工作区绑定」的设置页出现两套判定。
+   * 只对 AI 教学面生效 —— 统一助手 / 日程 / 情报没有「课程」概念，套上去只会莫名其妙换模型。
+   */
+  const workspaceEntryId = (() => {
+    if (String(llmOpts?.modelId ?? '').trim()) return ''
+    if (source !== 'aiTeaching') return ''
+    const wsId = getWorkspaceOfSession(sessionId)
+    return wsId ? getWorkspaceModelEntryId(wsId) : ''
+  })()
+  const effectiveModelRaw = String(llmOpts?.modelId ?? '').trim()
+    || workspaceEntryId
+    || resolveGlobalModelSpec(getSettingReader())
+  // P3b：本对话模型覆盖（'pid:mid' 串或模型条目 id）——解析一次，全轮次复用
   let providerId: string | undefined
   let modelOverride: string | undefined
-  if (llmOpts?.modelId) {
-    const ci = llmOpts.modelId.indexOf(':')
-    providerId = ci > 0 ? llmOpts.modelId.slice(0, ci) : undefined
-    modelOverride = ci > 0 ? llmOpts.modelId.slice(ci + 1) : llmOpts.modelId
+  if (effectiveModelRaw) {
+    // P3：条目 id（m_xxx）与旧 spec 都认；解析失败时保留原文，交给网关报「配错了」
+    const target = resolveModelSpec(effectiveModelRaw)
+    providerId = target?.providerId
+    modelOverride = target?.modelId ?? effectiveModelRaw
   }
-  // 用量记账的模型键（v3.9.0 §3.4）：本对话覆盖优先，否则全局默认；经 usageKeyOf 归一为 `providerId:modelId`
+  // 用量记账的模型键（v3.9.0 §3.4）：与上面同一条解析链，避免「用了 A 模型、记到 B 名下」
   const usageModel = (() => {
-    const raw = String(llmOpts?.modelId || getSettingReader()('defaultChatModel') || '')
-    const ci = raw.indexOf(':')
-    return ci > 0 ? usageKeyOf(raw.slice(0, ci), raw.slice(ci + 1)) : usageKeyOf('', raw)
+    const target = resolveModelSpec(effectiveModelRaw)
+    return target ? usageKeyOf(target.providerId, target.modelId) : usageKeyOf('', effectiveModelRaw)
   })()
 
   // 流式增量出口（不落库）：思考链 / 正文 delta 经合批后推给发起窗口。
@@ -2396,8 +2465,12 @@ function buildSideLaneInfo(row: AgentSessionRow): Record<string, unknown> {
   // 来源回答标题（分叉点那条主线回答的首行）：仅用于展示与搜索，缺锚点则空
   const anchorMsg = row.branchFromMessageId && row.parentSessionId ? getMessageById(row.parentSessionId, row.branchFromMessageId) : null
   const anchorTitle = (anchorMsg?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 40)
+  // 旁问作用域（C8/C11）：旧数据没有 sideScope 字段，按有无锚点推断 —— 有锚点=anchor，无=conversation。
+  const sideScope = row.sideScope ?? (row.branchFromMessageId ? 'anchor' : 'conversation')
   return {
     ...row,
+    sideScope,
+    anchorOrdinal: sideScope === 'anchor' ? anchorOrdinalOf(row.parentSessionId ?? '', row.branchFromMessageId ?? '') : undefined,
     // camel 别名（与 camelRow 口径一致，渲染层按 camel 消费）
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -2643,13 +2716,16 @@ export function registerAgentHandlers(): void {
     const anchorMessageId = String(p.anchorMessageId ?? '')
     const anchor = anchorMessageId ? getMessageById(parentSessionId, anchorMessageId) : null
     const turns = Math.min(5, Math.max(1, Math.floor(Number(p.contextTurns)) || 3))
-    const snapshotText = buildSideLaneSnapshot(parentSessionId, anchor, turns)
+    // C9（P4）：整段对话作用域不落快照 —— 每轮现算，否则旁问永远停在建支线那一刻
+    const sideScope: 'conversation' | 'anchor' = anchor ? 'anchor' : 'conversation'
+    const snapshotText = anchor ? buildSideLaneSnapshot(parentSessionId, anchor, turns) : ''
     const titleCore = (anchor?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 16)
     const lane = createSideLaneSession({
       parentSessionId,
       branchFromMessageId: anchor?.id ?? '',
       sideContext: snapshotText,
-      title: titleCore ? `支线·${titleCore}` : '支线旁问',
+      sideScope,
+      title: titleCore ? `支线·${titleCore}` : '旁问·整段对话',
       source: 'aiTeaching',
     })
     return { ok: true, laneSessionId: lane.id, title: lane.title, snapshotText, turns }

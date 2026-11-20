@@ -183,8 +183,11 @@ for (const k of ['teach', 'side', 'assistant', 'learn']) {
   ok(`${k} 输入壳限宽 820 居中（max-w-[820px] mx-auto）`,
     has(k, 'max-w-[820px] mx-auto'))
 }
+// 2026-11-20：教学面输入壳拆成「全宽 dock（渐变遮罩 / 托盘的定位基准）+ 内层 820 居中」，
+// 因此这里断言两段同时存在，而不是一段连着写 —— 不变的是「限宽只在外壳、不在卡本体」。
 ok('限宽只落在输入壳，不影响输入卡本体类名',
-  code.teach.includes('max-w-[820px] mx-auto px-3 pb-2.5 pt-2')
+  code.teach.includes('w-full px-3 pb-2.5 pt-2 relative')
+  && code.teach.includes('mx-auto w-full max-w-[820px]')
   && code.side.includes('max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2')
   && code.assistant.includes('max-w-[820px] mx-auto w-full')
   && code.learn.includes('mx-auto ${compact ? \'px-3\' : \'px-4\'} pb-2.5 pt-2'))

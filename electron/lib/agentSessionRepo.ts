@@ -133,6 +133,12 @@ export interface AgentSessionRow {
   lane?: 'main' | 'side'
   /** 支线旁问：固化上下文快照（分叉回答全文 + 主线前 K 轮），每轮注入 system。不参与摘要压缩 */
   sideContext?: string
+  /**
+   * 旁问作用域（P4，C8/C11 已拍板）：'conversation' = 已读整段对话（每轮现算，不落快照）；
+   * 'anchor' = 锚定某条回答（旧支线一律按此读，sideContext 快照继续用）；
+   * 'selection' = 锚定选区。缺省按 branchFromMessageId 有无推断。
+   */
+  sideScope?: 'conversation' | 'anchor' | 'selection'
   /** 支线旁问：运行态 'run' 进行中 / 'done' 已答 / 'cut' 已中断（缺省 run） */
   lane_status?: 'run' | 'done' | 'cut'
   /** 支线旁问：上次打开（已读）的本地时间串；缺省 = 从未打开 */
@@ -306,6 +312,8 @@ export function createSideLaneSession(opts: {
   branchFromMessageId: string
   /** 固化上下文快照（分叉回答全文 + 主线前 K 轮）；调用方负责截断 */
   sideContext: string
+  /** 旁问作用域；缺省按有无锚点推断（有锚点=anchor，无=conversation） */
+  sideScope?: 'conversation' | 'anchor' | 'selection'
   title?: string
   source?: AgentSessionSource
 }): AgentSessionRow {
@@ -320,6 +328,7 @@ export function createSideLaneSession(opts: {
     branchFromMessageId: opts.branchFromMessageId,
     lane: 'side',
     sideContext: opts.sideContext,
+    sideScope: opts.sideScope ?? (opts.branchFromMessageId ? 'anchor' : 'conversation'),
     lane_status: 'run',
   }
   const sessions = readSessions()

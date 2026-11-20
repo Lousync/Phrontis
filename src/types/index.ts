@@ -1126,6 +1126,88 @@ export interface LlmProviderInfo {
 
 export interface LlmVisionModelInfo { spec: string; providerName: string; model: string }
 
+/* ============================== 右侧查看器 · 网页页签（P4） ============================== */
+
+export interface WebPaneBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** 主进程回传的网页页签状态；渲染层只把它当"护照"，真实像素由原生视图承担 */
+export interface WebPaneState {
+  id: string
+  url: string
+  title: string
+  canGoBack: boolean
+  canGoForward: boolean
+  loading: boolean
+  /** did-fail-load 的 errorDescription；成功导航后清空 */
+  error?: string
+}
+
+/* ============================== 模型条目（P3 · B1–B8） ============================== */
+
+export type LlmCapabilityState = 'auto' | 'yes' | 'no'
+export type LlmCapabilityKey = 'tools' | 'vision' | 'json' | 'imageGeneration' | 'imageEdit'
+
+/** 场景槽位（键名与设置项一致） */
+export type LlmCatalogSlotKey =
+  | 'defaultChatModel' | 'assistantModelId' | 'aiAssistantInlineSuggestModelId'
+  | 'aiTranslateModelId' | 'agentCompressModelId' | 'aiTeachVisionModel'
+  | 'aiImageModel' | 'aiImageEditModel'
+
+/** 一条可命名的模型配置；不含 API Key（Key 仍在供应商账号里加密存储） */
+export interface LlmModelEntry {
+  id: string
+  /** 用户看到的名称 */
+  name: string
+  providerId: string
+  accountId?: string
+  /** 上游真实 model id */
+  modelId: string
+  contextWindow?: number
+  maxOutputTokens?: number
+  reasoning: { supported: boolean; default: 'off' | 'low' | 'medium' | 'high' }
+  capabilities: Partial<Record<LlmCapabilityKey, LlmCapabilityState>>
+  /** 是否进入日常选择器 */
+  curated: boolean
+  tags?: string[]
+  free?: boolean
+  source: 'auto' | 'user'
+  sortOrder?: number
+  /** 最近一次连通性测试结果（只在用户点「测试」后写） */
+  lastTest?: { ok: boolean; latencyMs?: number; at: string; error?: string }
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LlmCatalogSnapshot {
+  catalog: LlmModelEntry[]
+  defaultEntryId: string
+  workspaceEntry: Record<string, { modelEntryId?: string; curatedEntryIds?: string[] }>
+  /** 8 个槽位当前值（可能是条目 id 或旧 providerId:modelId） */
+  slots: Record<string, string>
+  /** 引用清点：哪个条目被哪一处引用（删除保护用） */
+  refs: Array<{ entryId: string; where: string }>
+}
+
+export interface LlmCatalogSaveInput {
+  id?: string
+  name?: string
+  providerId: string
+  accountId?: string
+  modelId: string
+  contextWindow?: number | null
+  reasoningSupported?: boolean
+  reasoningDefault?: 'off' | 'low' | 'medium' | 'high'
+  capabilities?: Partial<Record<LlmCapabilityKey, LlmCapabilityState>>
+  curated?: boolean
+  tags?: string[]
+  free?: boolean
+}
+
 export interface LlmProviderDraft {
   id?: string
   name: string
@@ -1423,6 +1505,10 @@ export interface AgentSideLaneInfo extends AgentSessionInfo {
   excerpt?: string
   /** 来源回答标题（分叉点主线回答首行，供列表展示与搜索） */
   anchorTitle?: string
+  /** 旁问作用域（C8/C11 已拍板）：整段对话 / 锚定某条回答 / 锚定选区。旧支线一律按 anchor 读 */
+  sideScope?: 'conversation' | 'anchor' | 'selection'
+  /** 锚定的是主线第几条 AI 回答（从 1 起）；sideScope='conversation' 时缺省 */
+  anchorOrdinal?: number
 }
 
 /** 选择页预览用：最近 2 条对话（只读摘要） */
@@ -2845,6 +2931,20 @@ export interface ElectronAPI {
   pdfReaderCoverList: () => Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }>
   pdfReaderCoverGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; dataUrl?: string | null; error?: string }>
   pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => Promise<{ ok: boolean; error?: string }>
+  // ===== 右侧查看器 · 网页页签（P4）：主进程 WebContentsView，网页只认 http/https =====
+  webPaneCreate: (payload: { id: string; url: string }) => Promise<{ ok: boolean; error?: string }>
+  webPaneSetUrl: (id: string, url: string) => Promise<{ ok: boolean; error?: string }>
+  webPaneSetBounds: (id: string, bounds: WebPaneBounds) => Promise<{ ok: boolean }>
+  webPaneSetVisible: (id: string, visible: boolean) => Promise<{ ok: boolean }>
+  webPaneHideAll: () => Promise<{ ok: boolean }>
+  webPaneBack: (id: string) => Promise<{ ok: boolean }>
+  webPaneForward: (id: string) => Promise<{ ok: boolean }>
+  webPaneReload: (id: string) => Promise<{ ok: boolean }>
+  webPaneClose: (id: string) => Promise<{ ok: boolean }>
+  webPaneState: (id: string) => Promise<WebPaneState | null>
+  webPaneClearData: () => Promise<{ ok: boolean }>
+  webPaneDisposeAll: () => Promise<{ ok: boolean }>
+  onWebPaneChanged: (cb: (p: { id: string; state: WebPaneState }) => void) => () => void
   // ===== 阅读状态（书架升级全格式阅读器一期）：txt 进度 =====
   readerStateGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: ReaderBookState | null; error?: string }>
   readerStatePatch: (rootId: string, relPath: string, patch: ReaderStatePatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: ReaderBookState; conflict?: boolean; error?: string }>
@@ -3141,6 +3241,15 @@ export interface ElectronAPI {
   llmRemoveAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; accounts?: LlmAccountInfo[]; activeAccountId?: string; error?: string }>
   llmTestAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; latencyMs: number; models?: string[]; error?: string }>
   llmVisionModels: () => Promise<{ models: LlmVisionModelInfo[] }>
+  // 模型条目（P3）：配置侧独立于请求链路；不含 Key
+  llmCatalogList: () => Promise<LlmCatalogSnapshot>
+  llmCatalogMigrate: (recentSpecs?: string[]) => Promise<{ created: number; total: number }>
+  llmCatalogSave: (input: LlmCatalogSaveInput) => Promise<{ ok: boolean; entry?: LlmModelEntry; error?: string }>
+  llmCatalogRemove: (id: string) => Promise<{ ok: boolean; refs?: Array<{ entryId: string; where: string }>; error?: string }>
+  llmCatalogAdoptRefs: (from: string, to: string) => Promise<{ ok: boolean; changed: number; error?: string }>
+  llmCatalogTest: (id: string) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>
+  llmCatalogSetDefault: (id: string | null) => Promise<{ ok: boolean }>
+  llmCatalogSetWorkspace: (wsId: string, patch: { modelEntryId?: string | null; curatedEntryIds?: string[] | null }) => Promise<{ ok: boolean }>
   /** P2 多模态：当前模型（空 = 全局默认）是否可用于图片输入 */
   llmVisionChatCapable: (spec?: string) => Promise<boolean>
   llmRefreshModels: (id: string) => Promise<{ ok: boolean; models: string[]; error?: string }>

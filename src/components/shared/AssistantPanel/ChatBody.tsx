@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
-  RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2, ListChecks, ImagePlus,
+  RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2, ListChecks, ImagePlus, Settings2,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
@@ -11,6 +11,8 @@ import { AiMascotAnchor } from '../AiMascot/AiMascotAnchor'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { useInputShell } from './inputShells'
 import { getKnowledgePages, llmListProviders, getSemanticStatus, workspaceGetCurrent, llmVisionChatCapable } from '../../../lib/ipc'
+import { capabilityChips, pushRecentSpec, readRecentSpecs, resolveCatalogEntry, useModelCatalog } from '../../../lib/modelCatalog'
+import { buildChatModelSections, filterChatModels, shouldShowSearch, type ChatModelRow } from './chatModelMenuPure'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
@@ -66,6 +68,11 @@ interface ChatBodyProps {
   onExpand?: () => void
   /** 未配模型引导跳设置（缺省 = 派发 settings:open 事件） */
   onGoSettings?: () => void
+  /**
+   * 模型浮层底部的「管理模型」入口（可选）。不传就不渲染这一条 ——
+   * 三个宿主共用本组件，只有确实有地方可跳的宿主才接线，避免出现死按钮。
+   */
+  onManageModels?: () => void
   /** 空态提示文案 */
   emptyHint?: ReactNode
   /** 输入容器顶部插槽（悬浮侧栏：划词引用胶囊） */
@@ -115,7 +122,7 @@ const CARD_WRAP: Record<AssistantBodyVariant, string> = {
  * 输入卡外壳样式已抽至 inputShells.ts（与 AI 教学对话输入框共用，样式统一影响所有 AI 问答面）。
  */
 
-export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyHint, inputTop, inputBarLeft, showDrawer = true, sidebarEl, surface, headerTitle }: ChatBodyProps) {
+export function ChatBody({ chat, variant, active, onExpand, onGoSettings, onManageModels, emptyHint, inputTop, inputBarLeft, showDrawer = true, sidebarEl, surface, headerTitle }: ChatBodyProps) {
   const scheduleMode = surface === 'schedule'
   const {
 
@@ -285,15 +292,110 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     setFileQuery(seg)
   }
 
-  // 模型候选：打开时拉启用供应商的模型清单（扁平 pid:model 串；「默认模型」置顶）
+  // ---- 模型菜单（P3 收口：条目口径）----
+  // 目录走组件顶层 hook（不放进 pop 的 effect）：三条宿主共挂一份，切面即用；
+  // 展示名与选中值都按条目解析，旧 `pid:mid` 只作为读入兼容。
+  const catalog = useModelCatalog()
+  const catalogEntries = catalog.entries
+  /** 精选只认显式 `curated:true` —— hook 的 `curated` 在无人精选时退回全部，那是设置页兜底，不是菜单语义 */
+  const curatedEntries = useMemo(() => catalogEntries.filter(e => e.curated === true), [catalogEntries])
+
+  // 供应商清单有两个用途：① 条目行补供应商小字 ② 目录为空时按旧的扁平 `pid:model` 列表兜底
   const [providers, setProviders] = useState<Array<{ id: string; name: string; models: string[] }>>([])
+  /** 最近使用（localStorage 跨宿主共享，每次打开重读，state 这份只在浮层打开期间有效） */
+  const [recentSpecs, setRecentSpecs] = useState<string[]>([])
+  const [modelQuery, setModelQuery] = useState('')
   useEffect(() => {
     if (pop !== 'model') return
+    // 每次打开重读：别的宿主 / 上一个会话里选过的模型不该漏掉；搜索词同时复位
+    setRecentSpecs(readRecentSpecs())
+    setModelQuery('')
     llmListProviders()
       .then(r => setProviders(r.providers.filter(p => p.enabled && p.models.length > 0).map(p => ({ id: p.id, name: p.name, models: p.models }))))
       .catch(() => setProviders([]))
   }, [pop])
-  const modelLabel = modelId ? modelId.split(':').slice(1).join(':') || modelId : '默认模型'
+
+  const providerNames = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const p of providers) m[p.id] = p.name
+    return m
+  }, [providers])
+
+  const chatSections = useMemo(() => buildChatModelSections({
+    entries: catalogEntries,
+    curated: curatedEntries,
+    recentSpecs,
+    resolve: (spec) => resolveCatalogEntry(spec, catalogEntries),
+  }), [catalogEntries, curatedEntries, recentSpecs])
+
+  /** 搜索框只看「全部模型」的**未过滤**条数：边打字边缩表时输入框不能自己消失 */
+  const allSectionRows = chatSections.find(s => s.id === 'all')?.rows.length ?? 0
+  const searchVisible = shouldShowSearch(allSectionRows)
+  const queryOn = modelQuery.trim().length > 0
+  const rowById = useMemo(() => {
+    const m = new Map<string, ChatModelRow>()
+    for (const sec of chatSections) for (const row of sec.rows) m.set(row.entry.id, row)
+    return m
+  }, [chatSections])
+  /** 搜索跨全目录：精选 / 最近里的条目已从「全部模型」去重掉，但按名字也必须搜得到 */
+  const searchRows = useMemo(() => (queryOn
+    ? filterChatModels(catalogEntries, modelQuery)
+      .map(e => rowById.get(e.id))
+      .filter((r): r is ChatModelRow => !!r)
+    : []), [queryOn, modelQuery, catalogEntries, rowById])
+
+  /** 选中：一律写条目 id（旧 spec 不再从菜单写出去）；「默认模型」单独写空串。
+   *  刻意**不**回写 recentSpecs state：浮层还开着，重排会让刚点的那一行在指针下跳走；
+   *  下次打开时 `readRecentSpecs()` 自然生效。 */
+  const pickModel = (value: string) => {
+    pushRecentSpec(value)
+    setModelId(value)
+  }
+
+  /** 展示名：条目命中 → 条目名；旧 spec → 冒号后段；空 → 默认模型 */
+  const modelLabel = useMemo(() => {
+    const hit = resolveCatalogEntry(modelId, catalogEntries)?.entry
+    if (hit) return hit.name?.trim() || hit.modelId || hit.id
+    if (!modelId) return '默认模型'
+    return modelId.split(':').slice(1).join(':') || modelId
+  }, [modelId, catalogEntries])
+
+  /** 条目行：主名 + 供应商小字 + 显式能力 chip（≤2，复用 capabilityChips 的上色口径）+ 免费标 + 勾 */
+  const renderModelRow = (row: ChatModelRow) => {
+    const e = row.entry
+    const name = e.name?.trim() || e.modelId || e.id
+    const providerName = providerNames[e.providerId] ?? e.providerId
+    const on = modelId === e.id
+    return (
+      <button
+        key={e.id}
+        onClick={() => pickModel(e.id)}
+        aria-pressed={on}
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+      >
+        <Check size={12} className={`shrink-0 ${on ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12px] text-[var(--text-primary)]">{name}</span>
+          <span className="block truncate text-[10px] text-[var(--text-muted)]">{providerName}</span>
+        </span>
+        {capabilityChips(e).slice(0, 2).map(chip => (
+          <span
+            key={chip.key}
+            className={`shrink-0 rounded border px-1 text-[10px] leading-4 ${
+              chip.state === 'yes'
+                ? 'border-[var(--accent)]/40 text-[var(--accent)]'
+                : 'border-[var(--border-color)] text-[var(--text-disabled)]'
+            }`}
+          >
+            {chip.label}
+          </span>
+        ))}
+        {row.free && (
+          <Star size={10} fill="currentColor" data-tip="免费模型" aria-label="免费模型" className="shrink-0 text-amber-400" />
+        )}
+      </button>
+    )
+  }
 
   // ---- / 弹层派生态：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const [slashActive, setSlashActive] = useState(0)
@@ -583,7 +685,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
             <div className={`shrink-0 mx-auto ${INPUT_WRAP[variant]} pb-2.5 pt-2`}>
               <div
                 ref={inputCardRef}
-                className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}`}
+                className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}${shell.glow ? ' kb-input-glow' : ''}`}
                 onDragOver={composerImages.onDragOver}
                 onDragLeave={composerImages.onDragLeave}
                 onDrop={composerImages.onDrop}
@@ -950,7 +1052,9 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </div>
                 )}
 
-                {/* ── 模型浮层 ── */}
+                {/* ── 模型浮层 ──
+                    外壳（思考模式开关 / 位置 / 宽度 / 层级）保持原样：它比通用菜单多这一行，
+                    所以不复用 ModelMenu，只把列表区换成条目口径（精选 → 最近 → 全部）。 */}
                 {pop === 'model' && (
                   <div data-wb="aiModelPop" className="absolute bottom-full left-0 mb-2 w-[250px] max-w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
                     {/* 思考模式：开 = 深度思考（reasoning_effort 仅思考型透传）；关 = 快速回答。
@@ -959,39 +1063,78 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       <span className="text-[12px] text-[var(--text-primary)]">思考模式</span>
                       <SettingSwitch checked={thinking} onChange={setThinking} />
                     </label>
+                    {searchVisible && (
+                      <div className="border-b border-[var(--border-color)] px-2 py-1">
+                        <input
+                          value={modelQuery}
+                          onChange={e => setModelQuery(e.target.value)}
+                          onKeyDown={e => e.stopPropagation()}
+                          placeholder="搜索模型"
+                          aria-label="搜索模型"
+                          spellCheck={false}
+                          className="block h-6 w-full rounded bg-[var(--bg-tertiary)] px-1.5 text-[12px] leading-none text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)]"
+                        />
+                      </div>
+                    )}
                     <div className="max-h-[240px] overflow-y-auto p-1">
-                      <button
-                        onClick={() => setModelId('')}
-                        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
-                      >
-                        <Check size={12} className={`shrink-0 ${modelId === '' ? 'text-[var(--accent)]' : 'opacity-0'}`} />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[12px] text-[var(--text-primary)]">默认模型</span>
-                          <span className="block text-[10px] text-[var(--text-muted)]">设置里的全局默认对话模型</span>
-                        </span>
-                      </button>
-                      {providers.map(p => p.models.map(m => {
-                        const id = `${p.id}:${m}`
-                        const on = modelId === id
-                        return (
-                          <button
-                            key={id}
-                            onClick={() => setModelId(id)}
-                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
-                          >
-                            <Check size={12} className={`shrink-0 ${on ? 'text-[var(--accent)]' : 'opacity-0'}`} />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[12px] text-[var(--text-primary)]">{m}</span>
-                              <span className="block text-[10px] text-[var(--text-muted)]">{p.name}</span>
-                            </span>
-                          </button>
-                        )
-                      }))}
-
-                      {providers.length === 0 && (
-                        <div className="px-2 py-4 text-center text-[11px] text-[var(--text-muted)]">没有已启用的模型供应商</div>
+                      {!queryOn && (
+                        <button
+                          onClick={() => setModelId('')}
+                          className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          <Check size={12} className={`shrink-0 ${modelId === '' ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[12px] text-[var(--text-primary)]">默认模型</span>
+                            <span className="block text-[10px] text-[var(--text-muted)]">设置里的全局默认对话模型</span>
+                          </span>
+                        </button>
                       )}
+
+                      {/* 条目口径：精选 / 最近使用 / 全部模型（同一 entry.id 只出现在最靠前的一组） */}
+                      {catalogEntries.length > 0 && !queryOn && chatSections.map(sec => (
+                        <div key={sec.id}>
+                          <div className="px-2 pb-0.5 pt-1.5 text-[10.5px] text-[var(--text-muted)]">{sec.title}</div>
+                          {sec.rows.map(renderModelRow)}
+                        </div>
+                      ))}
+
+                      {/* 搜索跨全目录（精选 / 最近里的条目已去重掉，但按名字仍要搜得到） */}
+                      {queryOn && (searchRows.length > 0
+                        ? searchRows.map(renderModelRow)
+                        : <div className="px-2 py-4 text-center text-[11px] text-[var(--text-muted)]">没有匹配的模型</div>)}
+
+                      {/* 兜底：目录还没建起来（新用户 / 还没跑目录同步）时按旧扁平列表渲染，否则是一片空菜单 */}
+                      {catalogEntries.length === 0 && !queryOn && (providers.length > 0
+                        ? providers.map(p => p.models.map(m => {
+                          const id = `${p.id}:${m}`
+                          const on = modelId === id
+                          return (
+                            <button
+                              key={id}
+                              onClick={() => pickModel(id)}
+                              aria-pressed={on}
+                              className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                            >
+                              <Check size={12} className={`shrink-0 ${on ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[12px] text-[var(--text-primary)]">{m}</span>
+                                <span className="block text-[10px] text-[var(--text-muted)]">{p.name}</span>
+                              </span>
+                            </button>
+                          )
+                        }))
+                        : <div className="px-2 py-4 text-center text-[11px] text-[var(--text-muted)]">还没有可用模型 → 去设置里添加</div>)}
                     </div>
+                    {onManageModels && (
+                      <button
+                        type="button"
+                        onClick={() => { onManageModels(); setPop(null) }}
+                        className="flex w-full items-center gap-2 border-t border-[var(--border-color)] px-2.5 py-1.5 text-left text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      >
+                        <Settings2 size={11} className="shrink-0 text-[var(--text-muted)]" />
+                        <span className="min-w-0 flex-1 truncate">管理模型</span>
+                      </button>
+                    )}
                   </div>
                 )}
 

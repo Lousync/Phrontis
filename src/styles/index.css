@@ -466,6 +466,79 @@ input:focus, textarea:focus, select:focus {
   content-visibility: auto;
   contain-intrinsic-size: auto 28px;
 }
+/* AI 教学对话行（2026-11-19 卡顿优化）：侧栏开合会改中栏宽度 → 整个对话流**重新折行**。
+   长对话下这一步是每帧全量重排，10 条与 500 条的体感差距就出在这里。
+   content-visibility:auto 让视口外的行不参与布局与绘制（auto 关键字记住上次实测高度），
+   开合 / 拖宽时只剩可见的十来条在变。估值 180px 只影响首帧未测过的行。 */
+.kb-cv-msg {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 180px;
+}
+
+/* ===== AI 输入卡聚焦光效（2026-11-19 输入区动效）=====
+   v1 / v2 / v5 / v6 / v8 / v9 这些外壳只有颜色过渡，聚焦时没有阴影反馈；
+   shadow 是绘制属性（不触发布局），与既有 v3 / v4 的做法同源。
+   v3 / v4 / v7 自带 focus 阴影 → 由 inputShells 的 glow 字段关掉，避免叠成两层。 */
+.kb-input-glow {
+  transition:
+    box-shadow var(--dur-std) var(--ease-kb),
+    border-color var(--dur-std) var(--ease-kb),
+    background-color var(--dur-std) var(--ease-kb);
+}
+/* ===== v10 浮卡（2026-11-20 课堂原型对齐）=====
+   原型 `docs/...` 的 composer：三层阴影 + 聚焦时**整层替换**。
+   为什么不用 `focus-within:shadow-*` 的 Tailwind 写法：需要在两种阴影之间做 200ms 过渡，
+   而 Tailwind 的任意值阴影带下划线/逗号，转义后难读且容易与主题变量脱节。 */
+.kb-composer-v10 {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text-primary) 4.5%, transparent),
+    0 2px 4px rgba(0, 0, 0, 0.22),
+    0 14px 34px -14px rgba(0, 0, 0, 0.55);
+  transition: box-shadow var(--dur-std) var(--ease-kb), border-color var(--dur-std) var(--ease-kb);
+}
+.kb-composer-v10:focus-within {
+  border-color: color-mix(in srgb, var(--text-primary) 18%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text-primary) 18%, transparent),
+    0 2px 6px rgba(0, 0, 0, 0.16),
+    0 18px 42px -16px rgba(0, 0, 0, 0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-composer-v10 { transition: none; }
+}
+
+/* 输入卡上方 56px 渐隐：消息从卡后淡出，而不是被一条硬边切掉（原型 dock::before）。 */
+.kb-dock-fade {
+  background: linear-gradient(to bottom, transparent, var(--bg-primary) 82%);
+}
+
+.kb-input-glow:focus-within {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 10px 30px -18px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* 生成中：停止按钮外圈脉冲。只动 transform / opacity（铁律 13），reduced-motion 直接关掉。 */
+.kb-stop-pulse { position: relative; }
+.kb-stop-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0;
+  pointer-events: none;
+  animation: kb-stop-pulse 1.6s var(--ease-kb) infinite;
+}
+@keyframes kb-stop-pulse {
+  0%   { transform: scale(0.9); opacity: 0.32; }
+  70%  { transform: scale(1.35); opacity: 0; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-input-glow { transition: none; }
+  .kb-stop-pulse::after { animation: none; }
+}
 
 /* ===== Markdown 标记淡化（编辑器弱化版 Live Preview，光标所在行除外）=====
    Monaco inline decoration 的类直接落在包裹 token 的 span 上——token 的 mtk 颜色在

@@ -60,9 +60,19 @@ interface Props {
    * 展开时靠手柄那 1px 分隔线 + 分区头 `border-b` 分界，不缺结构感。
    */
   bare?: boolean
+  /**
+   * 折叠时**保留子树**（默认 false = 卸载）。
+   *
+   * 为什么需要：AI 教学左栏的子树一挂载就会扫目录（文件树）与拉素材，而
+   * `{visible && children}` 会把整棵子树卸载 → 每次展开都重新扫盘 + 重建 DOM，
+   * 内容越多越像「顿一下」。置 true 后收起只 `display:none`，状态与已加载数据都留着，
+   * 展开是**零 IPC**。
+   * ★ 只给「展开有副作用」的面板用；多数面板卸载更省内存，别默认打开。
+   */
+  keepMounted?: boolean
 }
 
-export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange, onHandleClick, openDelayMs = 0, translucent = false, bare = false }: Props) {
+export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange, onHandleClick, openDelayMs = 0, translucent = false, bare = false, keepMounted = false }: Props) {
   const [width, setWidth] = useState(initialWidth ?? defaultWidth)
   const [dragging, setDragging] = useState(false)
   /** pointer capture 不可用时的退路标记（退回 window 监听，老实现同构但带 dead-zone 与统一收尾） */
@@ -291,6 +301,15 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
   }, [edgeDrag, applyEdgeDrag, endEdgeDrag])
 
   const isRight = side === 'right'
+  /**
+   * keepMounted 时：可见 = 正常渲染；不可见 = `display:none`（不是卸载）。
+   * 不用 visibility:hidden —— 那仍会参与布局，等于把「展开重新扫盘」换成「收起每帧排版」。
+   */
+  const mountedChildren = keepMounted ? (
+    <div className="flex min-h-0 flex-1 flex-col" style={visible ? undefined : { display: 'none' }}>
+      {children}
+    </div>
+  ) : null
   return (
     <div
       ref={panelRef}
@@ -305,7 +324,7 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
           : `width 200ms ease-out${visible && openDelayMs > 0 ? ` ${openDelayMs}ms` : ''}`,
       }}
     >
-      {visible && children}
+      {keepMounted ? mountedChildren : (visible ? children : null)}
 
       {/* 折叠边缘分割条 — 悬停显示蓝色可拖拽条；支持拖拽拉出 + 单击兜底展开
           （★ 不挂 z-30，同上：显式正 z 在圆角裁切层内会盖过全窗 fixed 遮罩） */}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { fmtThinkSec, ThinkEvent, ToolEvent } from './ProcessRail'
@@ -29,7 +29,11 @@ export interface TraceRowView {
   durationMs?: number
 }
 
-export function ProcessSummary({ rows }: { rows: TraceRowView[] }) {
+/**
+ * memo（2026-11-19 卡顿优化）：侧栏开合会重渲染整个模块，而每条 AI 消息都挂一行过程摘要。
+ * 行数据由调用方按消息缓存（同一数组引用），这里浅比较即可整片跳过。
+ */
+export const ProcessSummary = memo(function ProcessSummary({ rows }: { rows: TraceRowView[] }) {
   const { s } = useSettings()
   const showThinking = s.aiShowThinking !== false
   const [open, setOpen] = useState(false)
@@ -65,4 +69,4 @@ export function ProcessSummary({ rows }: { rows: TraceRowView[] }) {
       </div>
     </div>
   )
-}
+})
