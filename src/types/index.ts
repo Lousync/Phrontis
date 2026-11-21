@@ -1150,7 +1150,7 @@ export interface WebPaneState {
 /* ============================== 模型条目（P3 · B1–B8） ============================== */
 
 export type LlmCapabilityState = 'auto' | 'yes' | 'no'
-export type LlmCapabilityKey = 'tools' | 'vision' | 'json' | 'imageGeneration' | 'imageEdit'
+export type LlmCapabilityKey = 'tools' | 'vision' | 'json' | 'imageGeneration' | 'imageEdit' | 'reasoning'
 
 /** 场景槽位（键名与设置项一致） */
 export type LlmCatalogSlotKey =
@@ -1169,6 +1169,10 @@ export interface LlmModelEntry {
   modelId: string
   contextWindow?: number
   maxOutputTokens?: number
+  /**
+   * 思考（推理）能力判定以 `capabilities.reasoning` 为准；`supported` 仅兼容旧数据，
+   * 保存时由 `capabilities.reasoning === 'yes'` 派生写入（不要再作为判定来源）。
+   */
   reasoning: { supported: boolean; default: 'off' | 'low' | 'medium' | 'high' }
   capabilities: Partial<Record<LlmCapabilityKey, LlmCapabilityState>>
   /** 是否进入日常选择器 */
@@ -1200,6 +1204,7 @@ export interface LlmCatalogSaveInput {
   accountId?: string
   modelId: string
   contextWindow?: number | null
+  /** @deprecated 判定以 `capabilities.reasoning` 为准；保留仅为兼容旧调用点（保存时会被派生覆盖） */
   reasoningSupported?: boolean
   reasoningDefault?: 'off' | 'low' | 'medium' | 'high'
   capabilities?: Partial<Record<LlmCapabilityKey, LlmCapabilityState>>
@@ -2072,13 +2077,38 @@ export interface AgentCompressResult {
   error?: string
 }
 
-/** AI教学 system 注入分段字符数（基础人设 / CONSTRAINTS / 三层画像 / SOURCE 目录 / 教学规则） */
+/**
+ * AI教学 system 注入分段字符数（基础人设 / CONSTRAINTS / 三层画像 / SOURCE 目录 / 教学规则）。
+ *
+ * 2026-11-20 扩展（上下文用量明细）：旧 5 字段口径不变；新 7 个 `*Chars` 是 **systemFull 的互斥分区**
+ * （口径与聚合实现见 `electron/lib/aiTeachContextUsagePure.ts` 头注）。
+ * `messagesChars` / `toolsDefChars` 不在 systemFull 内；主进程类型镜像在 `electron/lib/agentService.ts`。
+ */
 export interface AiTeachInjectionStats {
+  /** 基础人设（`buildSystemPrompt`）字符数 —— 旧字段 / 「系统提示词」行 */
   systemChars: number
+  /** 四层 CONSTRAINTS 原始正文合计 —— 旧字段（新分类里归入「工作区」） */
   constraintChars: number
+  /** 三层学习者画像 —— 旧字段（新分类里归入「学习画像与课程」） */
   profileChars: number
+  /** 素材 / 来源清单 —— 旧字段 / 「来源」行 */
   sourcesChars: number
+  /** 教学规则合计 —— 旧字段（新分类里归入「教学协议」） */
   ruleChars: number
+  /** 「对话消息」：首轮非 system 消息 JSON 长度（历史 + 纪要 + 首条 user 注入，不含后续 tool 结果） */
+  messagesChars?: number
+  /** 「内置工具定义」：本轮 tools 载荷 `JSON.stringify` 长度 */
+  toolsDefChars?: number
+  /** 「工具装载提示」：扩展工具提示（ondemand 工具申请说明）长度 */
+  toolsListChars?: number
+  /** 「技能」：已配置 Skill 清单 + 显式指定 Skill 提示词长度 */
+  skillChars?: number
+  /** 「工作区」：四层要求注入 + 仓库规则 + 收藏 + 取材 / 落点纪律长度 */
+  workspaceChars?: number
+  /** 「学习画像与课程」：三层画像 + 课程 / 复习上下文长度 */
+  ledgerChars?: number
+  /** 「教学协议」：教学协议 + 权限执行纪律 + 运行期提示长度 */
+  capabilityChars?: number
 }
 
 // ===== PDF 工具箱 =====

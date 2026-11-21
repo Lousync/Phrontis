@@ -134,7 +134,7 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
         aria-label={entryMode
           ? (curEntry ? curEntry.label : placeholder)
           : (cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder)}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-left text-[12px] hover:border-[var(--accent)]/50 transition-colors">
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--field-border)] bg-[var(--input-bg)] text-left text-[12px] hover:border-[var(--accent)]/50 transition-colors">
         <span className="min-w-0 flex-1 truncate">
           {entryMode
             ? (curEntry

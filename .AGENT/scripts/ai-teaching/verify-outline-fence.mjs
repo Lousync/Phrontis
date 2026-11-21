@@ -25,7 +25,7 @@ const check = (name, ok, detail = '') => {
 console.log('\n[协议注入] agentService.ts')
 check('新增 outlineRuleHint（```outline 草稿协议）', agent.includes('outlineRuleHint') && agent.includes('大纲草稿协议'))
 check('并入 system 拼接', /baseSystem[\s\S]{0,400}outlineRuleHint/.test(agent))
-check('并入 ruleChars 统计', agent.includes('outlineRuleHint.length'))
+check('并入 ruleChars 统计（protocols 聚合）', agent.includes('+ outlineRuleHint +'))
 
 console.log('\n[渲染层] index.tsx')
 check('解析 ```outline 围栏', mod.includes('/```outline') && mod.includes('outlineFence'))

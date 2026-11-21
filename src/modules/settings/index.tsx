@@ -137,8 +137,9 @@ export function SettingsModule() {
     <div className="kb-theme-surface relative flex h-full">
       {/* 主题氛围特效：垫底画布（左右两栏 z-[1] 压在其上） */}
       <ThemeFxLayer />
-      {/* Left nav */}
-      <div className="relative z-[1] w-48 shrink-0 bg-[var(--bg-secondary)] kb-glass-chrome border-r border-[var(--border-color)] flex flex-col">
+      {/* Left nav —— 窄窗口（<480px，devtools 模拟 320 舞台）下隐藏，与原型一致；
+          桌面窗口 minWidth=900，正常使用时不会触发 */}
+      <div className="relative z-[1] w-48 shrink-0 bg-[var(--bg-secondary)] kb-glass-chrome border-r border-[var(--border-color)] flex flex-col max-[479px]:hidden">
         <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
           <Settings size={12} />
           设置
@@ -182,9 +183,9 @@ export function SettingsModule() {
       </div>
 
       {/* Right content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
         {/* Search bar */}
-        <div className="px-6 pt-4 pb-2 shrink-0">
+        <div className="px-4 min-[480px]:px-6 pt-4 pb-2 shrink-0">
           <div className="max-w-2xl mx-auto">
             <SettingsSearchBox
               query={query}
@@ -206,7 +207,7 @@ export function SettingsModule() {
 
         {/* Content */}
         <div ref={contentRef} className="relative z-[1] flex-1 overflow-y-auto py-6">
-          <div className="max-w-2xl mx-auto px-6">
+          <div className="max-w-2xl mx-auto px-4 min-[480px]:px-6">
             {/* 切换大项时内容淡入上移（key 变化触发重挂载 → 动画重播；搜索态与结果视图共用固定 key，
                 避免每次输入都重播） */}
             <div key={searching ? 'search-results' : section} className="kb-view-in">

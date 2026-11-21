@@ -60,7 +60,11 @@ function officialUrlFor(baseUrl: string): string | null {
   return LEGACY_BASE_URL[key] ?? null
 }
 
-const inputCls = 'w-full px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] outline-none focus:border-[var(--accent)]'
+/**
+ * 本页 A 形态输入（单控件）：走 `--field-border` —— 深色下 `--border-color` 与 `--input-bg`
+ * 同为 #3c3c3c，直接用 --border-color 等于没有框。只在本页挂类，不改全局 input 规则。
+ */
+const inputCls = 'kb-field-input w-full px-2.5 py-1.5 rounded-md bg-[var(--input-bg)] text-[12px] outline-none focus:border-[var(--accent)]'
 
 /**
  * 设置 → AI → 模型（2026-10-14 改造，方案 docs/ai-settings-v2-plan.md 第 2 刀）。
@@ -197,18 +201,18 @@ export function AiModelsTab() {
       <ModelCatalogSection />
 
       {/* 供应商：常驻的**唯一**一层列表；加供应商收成一个按钮，8 个预设磁贴不再占首屏 */}
-      <div>
-        <div className="flex items-start justify-between gap-2 max-w-md">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <SectionHead title="供应商" className="mb-3 min-w-0"
             hint="选择预设后仅需填写 API Key；如需修改接口地址、协议类型或请求头，点开端点行里的「自定义设置」。" />
           <button onClick={() => { setPresetForm(null); setPickerOpen(v => !v) }}
             aria-expanded={pickerOpen}
-            className="flex items-center gap-1 shrink-0 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-            <Plus size={13} /> 添加供应商
+            className="flex items-center gap-1 shrink-0 h-7 px-2.5 rounded-[7px] text-[11.5px] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+            <Plus size={12} /> 添加供应商
           </button>
         </div>
 
-        <div className="max-w-md">
+        <div className="min-w-0">
           {pickerOpen && (
             <PresetPicker
               onPick={id => { setPickerOpen(false); setPresetForm(id) }}
@@ -262,14 +266,12 @@ export function AiModelsTab() {
           助手面板与对话输入区里，改了默认模型却发现某处没变时无从解释。现在收成一张表。
           ★ anchorIds 必须列全组内**每一个**可搜索锚点：折叠后内层不挂载，只声明组头那一个，
             搜「图片视觉转写模型」会滚到一个收起的分组、什么都看不见。
-          ★ className="max-w-md" 是 2026-10-15 的宽度对齐：`SettingsGroup` 的组头默认撑满内容列，
-            比下面 max-w-md 的内容卡长一截（截图上右侧会多伸出两条长条），收进同一档之后
-            整个 AI 模型页是一条等宽的列。**只在本页签收窄，其他页签的组头不动。** */}
+          ★ 2026-11-20 按原型重做：不再收窄到 max-w-md —— 模型页是一条内容列，
+            供应商 / 场景表与条目卡同宽（此前组头比内容卡长一截的历史问题也一并消失）。 */}
       <div data-setting-anchor="aiTools.scenes">
         <SettingsGroup
           title="场景分配"
           summary={`已指定 ${assigned} / ${SCENES.length}`}
-          className="max-w-md"
           anchorIds={['aiTools.scenes', 'aiTeach.visionModel', 'aiTools.imageModel', 'aiTools.imageEditModel']}
           hint="各场景可分别指定模型（这张表就是「哪个场景用哪个模型」）；留空表示跟随「对话默认模型」（见各行占位文字），显式指定后不再跟随。此处修改不影响单个对话的临时覆盖。">
           {adopt && (
@@ -358,14 +360,24 @@ function ProviderRow({ p, open, onToggle, onChanged, onSetDefault, onAdopt }: {
         aria-expanded={open}
         onClick={() => { setWantModelList(false); onToggle() }}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setWantModelList(false); onToggle() } }}
-        className="group flex items-center gap-2 px-3.5 py-2.5 cursor-pointer transition-colors hover:bg-[var(--bg-hover)]"
+        className="group flex flex-wrap items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors hover:bg-[var(--bg-hover)]"
       >
         <ChevronRight size={12} className={`kb-chevron shrink-0 text-[var(--text-muted)] ${open ? 'rotate-90' : ''}`} />
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${p.enabled ? 'bg-emerald-500' : 'bg-[var(--text-disabled)]'}`} />
-        <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">{p.name}</span>
+        {/* 状态点三态：可用绿 / 有端点但无可用账号黄 / 停用灰。光环只是弱提示，不抢名称 */}
+        <span
+          aria-hidden="true"
+          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+            !p.enabled
+              ? 'bg-[var(--text-disabled)]'
+              : p.usable
+                ? 'bg-[var(--success)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_16%,transparent)]'
+                : 'bg-[var(--warning)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--warning)_16%,transparent)]'
+          }`}
+        />
+        <span className={`min-w-0 truncate text-[13px] font-medium ${p.enabled ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>{p.name}</span>
         <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-muted)]">{TYPE_LABEL[p.type]}</span>
         {p.isDefault && <Star size={12} className="shrink-0 text-yellow-400 fill-yellow-400" />}
-        <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-muted)]">
+        <span className="min-w-0 flex-1 basis-[140px] truncate text-[11.5px] text-[var(--text-muted)]">
           {accounts.length} 个账号 · {p.models.length > 0 ? `${p.models.length} 个模型` : '尚未获取模型'}
           {p.enabled ? '' : ' · 端点已停用'}
         </span>
@@ -377,7 +389,7 @@ function ProviderRow({ p, open, onToggle, onChanged, onSetDefault, onAdopt }: {
           disabled={busy}
           data-tip="测试当前账号连通性"
           aria-label="测试当前账号连通性"
-          className={`kb-hoveronly ${peek ? 'is-peek' : ''} shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors`}
+          className={`kb-hoveronly ${peek ? 'is-peek' : ''} shrink-0 grid place-items-center w-[26px] h-[26px] rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors`}
         >
           {testing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
         </button>
@@ -748,7 +760,8 @@ function ProviderEditor({ p, onChanged, onSaved, onClose, onAdopt, initialModelL
                   <div key={m} className="kb-hoveronly-host flex items-center gap-2 py-1">
                     <code className="min-w-0 flex-1 truncate text-[11.5px] font-mono text-[var(--text-secondary)]" data-tip={m} aria-label={m}>{m}</code>
                     {t && (
-                      <span className={`shrink-0 text-[10.5px] ${t.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                      <span data-tip={t.ok ? `可用（${t.latencyMs}ms）` : t.error} aria-label={t.ok ? '可用' : t.error}
+                        className={`shrink-0 max-w-[45%] truncate text-[10.5px] ${t.ok ? 'text-emerald-400' : 'text-red-400'}`}>
                         {t.ok ? `✓ 可用（${t.latencyMs}ms）` : `✗ ${t.error}`}
                       </span>
                     )}
@@ -973,7 +986,7 @@ function PresetAddForm({ preset, onDone, onCancel }: {
     <div className="mt-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] kb-pop">
       <div className="flex items-center gap-2 mb-2">
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: preset.color }} />
-        <span className="text-[13px] font-medium text-[var(--text-primary)]">添加「{preset.name}」</span>
+        <span className="min-w-0 truncate text-[13px] font-medium text-[var(--text-primary)]">添加「{preset.name}」</span>
         <span className="ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">
           {presetAddChip(preset)}
         </span>
@@ -1307,7 +1320,7 @@ function SceneTable({ providers, freeSet, onToggleFree, entries }: {
   }, [])
 
   return (
-    <div className="max-w-md rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3.5 py-0.5">
+    <div className="rounded-[10px] border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3">
       {SCENES.filter(sc => !sc.visionOnly && !sc.anchor).map(sc => (
         <SceneRow key={sc.key} sc={sc} providers={providers} freeSet={freeSet}
           onToggleFree={onToggleFree} visionSpecs={visionSpecs} entries={entries} />
@@ -1374,8 +1387,8 @@ function SceneRow({ sc, providers, freeSet, onToggleFree, visionSpecs, entries }
   }
 
   return (
-    <div className="kb-hoveronly-host flex items-center gap-2.5 py-[5px] border-t border-[var(--border-color)] first:border-t-0">
-      <span className="w-[116px] shrink-0 flex items-center gap-1 text-[12px] text-[var(--text-primary)]">
+    <div className="kb-hoveronly-host flex flex-wrap items-center gap-x-2.5 gap-y-1 py-1.5 border-t border-[var(--border-color)] first:border-t-0">
+      <span className="w-[132px] shrink-0 flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
         <span className="truncate">{sc.label}</span>
         <HelpHint text={sc.desc} />
       </span>

@@ -23,7 +23,7 @@ import type {
 /** 内置能力表适配器（`modelCapabilityTable.lookupCapability`）；表外一律返回 null */
 export type CapabilityLookup = (modelId: string, key: CapabilityKey) => CapabilityState | null
 
-const CAPABILITY_KEYS: CapabilityKey[] = ['tools', 'vision', 'json', 'imageGeneration', 'imageEdit']
+const CAPABILITY_KEYS: CapabilityKey[] = ['tools', 'vision', 'json', 'imageGeneration', 'imageEdit', 'reasoning']
 const REASONING_LEVELS: ReasoningLevel[] = ['off', 'low', 'medium', 'high']
 
 /* ============================== 小工具 ============================== */
@@ -53,7 +53,16 @@ function isCapabilityKey(v: unknown): v is CapabilityKey {
  * 代价远大于猜错支持（后者由真实 API 报错兜底）。权威的已知模型表在
  * `modelCapabilityTable.ts`（由调用方以 `table` 传入）；这里只是没有表时的粗粒度线索。
  */
+/**
+ * 思考能力名称兜底：与主进程 `llmProtocolPure.REASONING_MODEL_RE` **同口径**。
+ * 本文件零依赖（契约脚本直接 strip 后 import），所以只能镜像一份 ——
+ * `.AGENT/scripts/ai-teaching/verify-model-catalog.mjs` 会比对两处源串，改动请同步。
+ */
+export const REASONING_NAME_RE =
+  /(reasoner|r1|qwq|qwen3|o[134]-|o[134]$|thinking|research|smart|deepthink)/i
+
 const NAME_HINTS: Array<{ re: RegExp; caps: Partial<Record<CapabilityKey, CapabilityState>> }> = [
+  { re: REASONING_NAME_RE, caps: { reasoning: 'yes' } },
   { re: /(?:^|[^a-z0-9])(?:vision|vl)(?:[^a-z0-9]|$)/i, caps: { vision: 'yes' } },
   { re: /gpt-4o|gpt-4\.1|gpt-4-turbo|omni/i, caps: { vision: 'yes' } },
   { re: /gemini(?![-._]?embed)/i, caps: { vision: 'yes' } },

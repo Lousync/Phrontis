@@ -147,32 +147,40 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
   return (
     <div className="space-y-6">
       {/* 页签 + 复位（复位只作用于**当前页签**；安全开关不参与，见 settings.ts 的 resetKeysForTab） */}
-      <div className="flex items-center gap-1 border-b border-[var(--border-color)] flex-wrap">
-        {AI_TABS.map(([id, label, icon]) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-[13px] border-b-2 -mb-px transition-colors ${
-              tab === id
-                ? 'border-[var(--accent)] text-[var(--text-primary)]'
-                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            {icon}
-            {label}
-          </button>
-        ))}
+      <div role="tablist" aria-label="AI 设置页签" className="flex items-center gap-0.5 border-b border-[var(--border-color)] flex-wrap">
+        {AI_TABS.map(([id, label, icon]) => {
+          const active = tab === id
+          return (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setTab(id)}
+              className={`flex items-center gap-1.5 h-[34px] px-2.5 text-[13px] border-b-2 -mb-px transition-colors ${
+                active
+                  ? 'border-[var(--accent)] text-[var(--text-primary)]'
+                  : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/60'
+              }`}
+            >
+              <span className={active ? 'text-[var(--accent)]' : ''}>{icon}</span>
+              {label}
+            </button>
+          )
+        })}
         <button
+          type="button"
           onClick={doReset}
           disabled={resetKeys.length === 0}
           data-tip={resetKeys.length === 0
             ? '本页只有安全开关（终端执行 / 模块权限 / 仓库文件权限），它们不参与复位'
-            : `把本页这 ${resetKeys.length} 项恢复为默认值（安全开关不参与）`} aria-label={resetKeys.length === 0
+            : `把本页这 ${resetKeys.length} 项恢复为默认值（安全开关不参与）`}
+          aria-label={resetKeys.length === 0
             ? '本页只有安全开关（终端执行 / 模块权限 / 仓库文件权限），它们不参与复位'
             : `把本页这 ${resetKeys.length} 项恢复为默认值（安全开关不参与）`}
-          className={`ml-auto mb-1 px-2.5 py-1 rounded-md text-[11.5px] border transition-colors ${
+          className={`ml-auto mb-1 h-[26px] px-2.5 rounded-[7px] text-[11.5px] border transition-colors ${
             confirmReset
-              ? 'border-red-500 text-red-400 hover:bg-red-500/10'
+              ? 'border-red-500/60 text-red-400 bg-red-500/[0.08] hover:bg-red-500/15'
               : 'border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
           } disabled:opacity-35 disabled:cursor-not-allowed`}>
           {confirmReset ? '再点一次：恢复默认' : '复位'}

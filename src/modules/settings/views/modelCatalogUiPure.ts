@@ -9,7 +9,7 @@
  * 运行时会拉进 react / ipc，纯模块不能依赖它 —— 因此此处**镜像一份**，由上面那个脚本
  * 逐条比对两份文案，漂移会直接变红。
  */
-import type { LlmCatalogSlotKey, LlmModelEntry } from '../../../types'
+import type { LlmCapabilityState, LlmCatalogSlotKey, LlmModelEntry } from '../../../types'
 
 /** 名称上限（与条目行就地改名的输入宽度同一口径） */
 export const MODEL_NAME_MAX = 60
@@ -210,4 +210,81 @@ export function planSlotRewrite(input: {
 export function rewriteSummary(plan: SlotRewritePlan[]): string {
   const n = Array.isArray(plan) ? plan.filter((p) => !!p && !!p.slot && !!p.to).length : 0
   return n === 0 ? '没有需要改写的槽位' : `改写 ${n} 个槽位`
+}
+
+/* ============================== 条目行展示口径（2026-11-20 重做） ============================== */
+
+/**
+ * 上下文窗口按**千 token** 展示（原型口径：128 = 128,000）。
+ *
+ * 为什么不四舍五入成整数：落盘的是 token 数，用户可能填过 100500。
+ * 显示成 100 再保存回去会**静默改值**。所以保留小数（100500 → '100.5'），
+ * 只有真正的整千才去掉小数点。
+ */
+export function contextWindowToK(tokens?: number | null): string {
+  const n = Number(tokens)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  return String(n / 1000)
+}
+
+/** 上下文窗口的悬停说明：未设置要说清「跟随全局判断」，不要只显示空白 */
+export function contextWindowTitle(tokens?: number | null): string {
+  const n = Number(tokens)
+  if (!Number.isFinite(n) || n <= 0) return '未设置 · 跟随全局判断'
+  return `${n.toLocaleString('en-US')} tokens`
+}
+
+export type ContextWindowParse =
+  | { ok: true; tokens: number | null }
+  | { ok: false; reason: string }
+
+/** 解析千 token 输入：空 = 显式清空（tokens: null）；非正数 / 非数字 = 拒绝 */
+export function parseContextWindowK(raw: string): ContextWindowParse {
+  const text = String(raw ?? '').trim()
+  if (!text) return { ok: true, tokens: null }
+  if (!/^\d+(\.\d+)?$/.test(text)) return { ok: false, reason: '上下文窗口必须是大于 0 的数字（单位：千 token）' }
+  const k = Number(text)
+  if (!Number.isFinite(k) || k <= 0) return { ok: false, reason: '上下文窗口必须是大于 0 的数字（单位：千 token）' }
+  // 千 token → token；保留整数（0.5K 这类小数在 token 尺度上没有意义，四舍五入到整数）
+  const tokens = Math.round(k * 1000)
+  if (tokens <= 0) return { ok: false, reason: '上下文窗口必须是大于 0 的数字（单位：千 token）' }
+  return { ok: true, tokens }
+}
+
+/** 能力三态循环：跟随 → 支持 → 不支持 → 跟随（与既有交互一致） */
+export function nextCapabilityState(cur: LlmCapabilityState): LlmCapabilityState {
+  return cur === 'auto' ? 'yes' : cur === 'yes' ? 'no' : 'auto'
+}
+
+export interface CatalogTestOutcome {
+  ok: boolean
+  latencyMs?: number
+  /** 失败原因（原样展示，不做二次包装） */
+  error?: string
+  /** 测完的时间点（ms）。结果只在本会话存在，不写回条目 */
+  at: number
+}
+
+/** 行尾胶囊文案：成功给延迟，失败只给「失败」（详情里才展开原始错误） */
+export function testPillLabel(outcome: CatalogTestOutcome | null): string {
+  if (!outcome) return ''
+  if (!outcome.ok) return '失败'
+  const ms = Number(outcome.latencyMs)
+  return Number.isFinite(ms) && ms >= 0 ? `${ms}ms` : '可用'
+}
+
+/** 「2 分钟前」——测试详情里的时间。纯函数，便于契约固定口径 */
+export function testTimeText(at: number, now: number): string {
+  const diff = Number(now) - Number(at)
+  if (!Number.isFinite(diff) || diff < 60_000) return '刚刚'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
+  return `${Math.floor(diff / 86_400_000)} 天前`
+}
+
+/** 本地搜索右侧计数：过滤中要同时给出「命中 / 总数」，否则用户不知道是过滤了还是真没有 */
+export function entriesCountText(shown: number, total: number, query: string): string {
+  const s = Number.isFinite(shown) ? Math.max(0, Math.floor(shown)) : 0
+  const t = Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0
+  return String(query ?? '').trim() ? `${s} / ${t} 条` : `${t} 条`
 }

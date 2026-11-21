@@ -201,6 +201,10 @@ export interface SaveEntryInput {
   modelId: string
   /** null / 0 / '' = 显式清空（否则沿用旧值） */
   contextWindow?: number | null
+  /**
+   * @deprecated 思考能力判定以 `capabilities.reasoning` 为准。
+   * 字段保留只为兼容旧调用点；保存时会被派生覆盖（= capabilities.reasoning === 'yes'）。
+   */
   reasoningSupported?: boolean
   reasoningDefault?: 'off' | 'low' | 'medium' | 'high'
   capabilities?: Record<string, 'auto' | 'yes' | 'no'>
@@ -224,6 +228,7 @@ export function saveEntry(input: SaveEntryInput): { ok: boolean; entry?: ModelEn
     const i = list.findIndex((e) => e.id === input.id)
     if (i < 0) return { ok: false, error: '条目不存在' }
     const prev = list[i]
+    const nextCaps = { ...prev.capabilities, ...(input.capabilities ?? {}) }
     list[i] = {
       ...prev,
       name: String(input.name ?? prev.name).trim() || prev.name,
@@ -236,10 +241,11 @@ export function saveEntry(input: SaveEntryInput): { ok: boolean; entry?: ModelEn
         ? numOrUndef(input.contextWindow)
         : prev.contextWindow,
       reasoning: {
-        supported: input.reasoningSupported ?? prev.reasoning.supported,
+        // 仅兼容旧数据：判定以 capabilities.reasoning 为准；写盘时同步派生，旧读取方不会看到矛盾值
+        supported: nextCaps.reasoning === 'yes',
         default: input.reasoningDefault ?? prev.reasoning.default,
       },
-      capabilities: { ...prev.capabilities, ...(input.capabilities ?? {}) },
+      capabilities: nextCaps,
       curated: input.curated ?? prev.curated,
       tags: input.tags ?? prev.tags,
       free: input.free ?? prev.free,
@@ -248,6 +254,7 @@ export function saveEntry(input: SaveEntryInput): { ok: boolean; entry?: ModelEn
     return writeCatalog(list) ? { ok: true, entry: list[i] } : { ok: false, error: '写入设置失败' }
   }
 
+  const caps = (input.capabilities ?? {}) as ModelEntry['capabilities']
   const entry: ModelEntry = {
     id: `m_${hash12(`${providerId}:${modelId}`)}`,
     name: String(input.name ?? '').trim() || prettyName(modelId),
@@ -256,10 +263,11 @@ export function saveEntry(input: SaveEntryInput): { ok: boolean; entry?: ModelEn
     modelId,
     contextWindow: numOrUndef(input.contextWindow),
     reasoning: {
-      supported: !!input.reasoningSupported,
+      // 仅兼容旧数据：判定以 capabilities.reasoning 为准（字段 deprecated，见 SaveEntryInput）
+      supported: caps.reasoning === 'yes',
       default: input.reasoningDefault ?? 'off',
     },
-    capabilities: (input.capabilities ?? {}) as ModelEntry['capabilities'],
+    capabilities: caps,
     curated: input.curated !== false,
     tags: input.tags,
     free: input.free,

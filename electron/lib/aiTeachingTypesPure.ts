@@ -212,7 +212,7 @@ export interface OutlineValidationIssue {
 
 export type CapabilityState = 'auto' | 'yes' | 'no'
 
-export type CapabilityKey = 'tools' | 'vision' | 'json' | 'imageGeneration' | 'imageEdit'
+export type CapabilityKey = 'tools' | 'vision' | 'json' | 'imageGeneration' | 'imageEdit' | 'reasoning'
 
 export type ReasoningLevel = 'off' | 'low' | 'medium' | 'high'
 
@@ -224,6 +224,11 @@ export interface ModelEntry {
   modelId: string
   contextWindow?: number
   maxOutputTokens?: number
+  /**
+   * 思考（推理）能力判定**以 `capabilities.reasoning` 为准**（三态链：条目显式 → 内置表 → 名称正则）。
+   * `supported` 仅兼容旧数据 / 旧读取方：保存条目时由 `capabilities.reasoning === 'yes'` 派生写入，
+   * 不要再把它当判定来源（`default` 仍记录用户选的默认档位）。
+   */
   reasoning: { supported: boolean; default: ReasoningLevel }
   capabilities: Partial<Record<CapabilityKey, CapabilityState>>
   curated: boolean

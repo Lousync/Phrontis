@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star, ListTree, Loader2, Sparkles } from 'lucide-react'
 import type { AgentSessionInfo, AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
+import { resolveCatalogEntry, useModelCatalog } from '../../lib/modelCatalog'
 import { showToast } from '../../lib/toast'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
@@ -156,12 +157,22 @@ export function AiAssistantModule({
     })
   }, [isActive])
 
-  // 思考强度门槛（与 AI 教学同口径）：所选模型不支持推理 → 强制回落关闭
-  const effModelBare = api.modelId.includes(':') ? api.modelId.slice(api.modelId.indexOf(':') + 1) : api.modelId
+  // 思考强度门槛（与 AI 教学同口径）：条目显式 yes/no 优先 → 未定再问主进程（内置表 → 名称正则）
+  const modelCatalog = useModelCatalog()
+  const capSpec = api.modelId || modelCatalog.snapshot?.defaultEntryId || ''
+  const capResolved = useMemo(
+    () => resolveCatalogEntry(capSpec, modelCatalog.entries),
+    [capSpec, modelCatalog.entries],
+  )
+  const explicitReasoning = capResolved?.entry?.capabilities?.reasoning
+  const effModelBare = capResolved?.modelId
+    || (capSpec.includes(':') ? capSpec.slice(capSpec.indexOf(':') + 1) : capSpec)
   useEffect(() => {
+    if (explicitReasoning === 'yes') { setModelCapable(true); return }
+    if (explicitReasoning === 'no') { setModelCapable(false); return }
     if (!effModelBare) { setModelCapable(false); return }
     void llmReasoningCapable(effModelBare).then(setModelCapable).catch(() => setModelCapable(false))
-  }, [effModelBare])
+  }, [explicitReasoning, effModelBare])
   useEffect(() => {
     if (!modelCapable && api.effort !== 'off') api.setEffort('off')
   }, [modelCapable, api.effort, api])

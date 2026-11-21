@@ -32,6 +32,11 @@
   /* 边框 / 分割 */
   --border-color: #3c3c3c;
   --warning-bg: #2a2a1e;
+  /* 输入控件框线（2026-11-20，设置 → AI → 模型重做）。
+     深色下 --input-bg 与 --border-color 同值（#3c3c3c）⇒ 输入框的框线等于不可见。
+     这里单独提一档「可见但弱」的线，只给挂 .kb-field-strong / .kb-field-input 的控件用；
+     ★ 全局铺开会把所有既有输入框的观感一起改掉，需另行确认。 */
+  --field-border: color-mix(in srgb, var(--border-color) 78%, var(--text-primary) 22%);
   /* 树形缩进层级参考线（编辑器/知识库/AI教学 左栏多层树，treeGuides.ts 消费） */
   --tree-guide: color-mix(in srgb, var(--border-color) 60%, transparent);
 
@@ -143,6 +148,8 @@ html.theme-light {
 
   --border-color: #e0e0e0;
   --warning-bg: #fff8e1;
+  /* 浅色底上 --border-color 本身就够清楚，直接沿用（不再混深，避免脏灰） */
+  --field-border: var(--border-color);
 
   /* 拖拽高亮 */
   --drop-bg: #D6EBFF;
@@ -182,6 +189,8 @@ html.theme-daycycle {
   --drop-bg: rgba(206, 223, 209, 1.000);
   --drop-border: rgba(62, 125, 82, 1.000);
   --border-color: rgba(51, 64, 46, 0.157);
+  /* 昼夜主题的 --border-color 带 alpha，混 --text-primary 会过淡 ⇒ 改混 --text-muted */
+  --field-border: color-mix(in srgb, var(--border-color) 55%, var(--text-muted) 45%);
   --glass-edge: rgba(255, 255, 255, 0.549);
   --shadow-card: 0 1px 2px rgba(58, 90, 58, 0.09), 0 12px 32px rgba(58, 90, 58, 0.036);
   --sky-top: rgba(63, 169, 232, 1.000);
@@ -398,6 +407,34 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--border-color);
   background: var(--input-bg);
   transition: border-color var(--dur-std) var(--ease-kb), box-shadow var(--dur-std) var(--ease-kb);
+}
+/* 只用一档更可见的框线：必须排在 :focus-within **之前** —— 同权重靠源序，
+   聚焦时仍要由 .kb-field:focus-within 的强调色覆盖。 */
+.kb-field.kb-field-strong { border-color: var(--field-border); }
+/* A 形态单控件（输入框自己画框）也走同一支令牌，聚焦由 input:focus 的元素级权重覆盖 */
+.kb-field-input { border-color: var(--field-border); }
+/* ★ 必须显式写聚焦（不能只靠 Tailwind 的 focus:border-*）：index.css 是未分层样式，
+   未分层的 .kb-field-input 会压过 @layer utilities 里的同名工具类。 */
+.kb-field-input:focus { border-color: var(--accent); }
+
+/* 「内容型」行内输入（模型条目名）：默认无框，hover 淡底，聚焦才出框。
+   同一原因必须写成未分层类 —— Tailwind 的 border-transparent / bg-transparent 压不过
+   全局 `input { border; background }` 的元素级规则（那两条也是未分层的）。 */
+.kb-inline-input {
+  background: transparent;
+  border-color: transparent;
+}
+.kb-inline-input:hover { background: var(--bg-hover); }
+.kb-inline-input:focus {
+  background: var(--input-bg);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+/* 紧凑档：上下文窗口这类「数字 + 单位」的组合框 */
+.kb-field-sm { height: 28px; padding: 0 8px; gap: 4px; border-radius: 7px; }
+.kb-field-sm .kb-field-control {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 .kb-field:focus-within {
   border-color: var(--accent);
@@ -1976,7 +2013,12 @@ input:focus, textarea:focus, select:focus {
        「重新生成」（用户截图里「重新/生成」那一形态）。今天时间戳的形态只要 327px，
        取最坏值以保证永不折行（口径同上方注释：宁可早一点隐）。
      · 隐掉消耗后（时间 + 三个钮文字）最坏 **242px** —— 再低「重新生成」折竖排。
-   故两级退化：l1 隐会话消耗（360，含 ~5px 余量），l2 隐按钮文字只留图标（245）。 */
+   故两级退化：l1 隐会话消耗（360，含 ~5px 余量），l2 隐按钮文字只留图标（245）。
+
+   ★ 2026-11-20：会话消耗已从动作行挪到消息块末尾的**常显行**（`UsageFooter.tsx`，
+     正文 / 工件卡之后、右下角），动作行不再含那 107px 消耗串，故 `.kb-l1` 在本容器内
+     已无消费者（规则保留，不动阈值）。新那行**不得**套 `.kb-l1` —— 它是要一直看得见的，
+     窄宿主靠组件自身 `truncate` 兜住（320px 不撑宽消息）。 */
 .kb-fit-aichat { container-name: kb-aichat; }
 @container kb-aichat (max-width: 360px) { .kb-l1 { display: none; } }  /* 会话消耗 ↑… ↓… tokens */
 @container kb-aichat (max-width: 245px) { .kb-l2 { display: none; } }  /* 复制 / 编辑 / 重新生成 / 删除（文字） */

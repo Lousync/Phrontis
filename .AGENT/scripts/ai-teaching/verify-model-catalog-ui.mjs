@@ -13,6 +13,8 @@
  *   5. sortEntries: curated first, sortOrder ordering, stable for equal keys;
  *   6. applyEntryPick: entry mode -> id, spec mode -> providerId:modelId;
  *   7. drift guard: slot labels here must equal SLOT_LABEL in src/lib/modelCatalog.ts.
+ *   8. 2026-11-20 重做新增的展示口径：千 token 往返（含小数 K / 拒绝 0 与非法）、能力三态循环、
+ *      测试胶囊文案与相对时间、本地搜索计数。
  *
  * Run (repo root): node .AGENT/scripts/ai-teaching/verify-model-catalog-ui.mjs [repo path]
  * Output is ASCII only (non-ASCII is escaped in failure details). Exit 0 = all pass.
@@ -51,6 +53,13 @@ const {
   sortEntries,
   applyEntryPick,
   MODEL_NAME_MAX,
+  contextWindowToK,
+  contextWindowTitle,
+  parseContextWindowK,
+  nextCapabilityState,
+  testPillLabel,
+  testTimeText,
+  entriesCountText,
 } = await import(pathToFileURL(tmpFile).href)
 
 const entry = (over = {}) => ({
@@ -177,6 +186,38 @@ const drift = slots.filter((k) => {
   return !expected || got !== `场景「${expected}」`
 })
 check('all 8 slot labels match modelCatalog.SLOT_LABEL', drift.length === 0, ascii(drift))
+
+/* ---------------------------------------------------------------- 8. rework helpers (2026-11-20) */
+console.log('\n=== 8. context window / capability / test pill / count ===')
+check('128000 tokens -> "128"', contextWindowToK(128000) === '128', ascii(contextWindowToK(128000)))
+check('1000000 tokens -> "1000"', contextWindowToK(1000000) === '1000', ascii(contextWindowToK(1000000)))
+check('100500 tokens keeps the fraction (never silently rewrite)', contextWindowToK(100500) === '100.5', ascii(contextWindowToK(100500)))
+check('unset / zero / NaN -> empty text', contextWindowToK(undefined) === '' && contextWindowToK(0) === '' && contextWindowToK(Number.NaN) === '', '')
+check('title states "follow global" when unset', /跟随全局判断/.test(contextWindowTitle(undefined)), ascii(contextWindowTitle(undefined)))
+check('title renders thousands separators for tokens', contextWindowTitle(128000) === '128,000 tokens', ascii(contextWindowTitle(128000)))
+
+const winRoundTrip = parseContextWindowK('128')
+check('parse 128K -> 128000 tokens', winRoundTrip.ok && winRoundTrip.tokens === 128000, ascii(winRoundTrip))
+const winEmpty = parseContextWindowK('   ')
+check('empty context window is an explicit clear (tokens: null)', winEmpty.ok && winEmpty.tokens === null, ascii(winEmpty))
+check('0 is rejected', parseContextWindowK('0').ok === false, ascii(parseContextWindowK('0')))
+check('negative / non-numeric is rejected', parseContextWindowK('-1').ok === false && parseContextWindowK('12k').ok === false, '')
+const winDecimal = parseContextWindowK('100.5')
+check('decimal K keeps token precision (100.5K -> 100500)', winDecimal.ok && winDecimal.tokens === 100500, ascii(winDecimal))
+
+check('capability cycle auto -> yes', nextCapabilityState('auto') === 'yes', '')
+check('capability cycle yes -> no', nextCapabilityState('yes') === 'no', '')
+check('capability cycle no -> auto', nextCapabilityState('no') === 'auto', '')
+
+check('test pill: success shows latency', testPillLabel({ ok: true, latencyMs: 812, at: 0 }) === '812ms', ascii(testPillLabel({ ok: true, latencyMs: 812, at: 0 })))
+check('test pill: failure shows a short label (error lives in the detail)', testPillLabel({ ok: false, error: '401 Unauthorized', at: 0 }) === '失败', ascii(testPillLabel({ ok: false, error: '401', at: 0 })))
+check('test pill: no outcome -> empty', testPillLabel(null) === '', '')
+check('test time: under a minute is 刚刚', testTimeText(0, 30_000) === '刚刚', ascii(testTimeText(0, 30_000)))
+check('test time: minutes / hours / days', testTimeText(0, 120_000) === '2 分钟前' && testTimeText(0, 7_200_000) === '2 小时前' && testTimeText(0, 172_800_000) === '2 天前', '')
+
+check('count text without query shows total', entriesCountText(5, 5, '') === '5 条', ascii(entriesCountText(5, 5, '')))
+check('count text while filtering shows hits / total', entriesCountText(2, 5, 'glm') === '2 / 5 条', ascii(entriesCountText(2, 5, 'glm')))
+check('count text treats whitespace query as empty', entriesCountText(2, 5, '   ') === '5 条', ascii(entriesCountText(2, 5, '   ')))
 
 /* ---------------------------------------------------------------- report */
 const failed = checks.filter((c) => !c.pass)

@@ -76,7 +76,7 @@ check('导入 normalizeTeachStyleMode', agent.includes('normalizeTeachStyleMode'
 check('读取 aiTeachLectureStyle', agent.includes("('aiTeachLectureStyle')"))
 check('只对 aiTeaching 注入', /const teachStyleHint = source === 'aiTeaching'/.test(agent))
 check('systemFull 拼入 teachStyleHint', agent.includes('+ courseHint + teachStyleHint +'))
-check('ruleChars 统计 teachStyleHint', agent.includes('teachStyleHint.length'))
+check('ruleChars 统计（protocols 聚合）含 teachStyleHint', agent.includes('+ teachStyleHint +'))
 check('旧硬编码长文案已下线（负向）', !agent.includes('讲知识点必须展开：问题/场景'))
 
 // ---------------------------------------------------------------- 3. 设置 schema

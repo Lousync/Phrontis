@@ -53,6 +53,7 @@ const {
   pickSlotCandidates,
   entryLabel,
   dedupeBySpec,
+  REASONING_NAME_RE,
 } = catalogMod
 const {
   CAPABILITY_TABLE_VERSION,
@@ -226,6 +227,52 @@ check(
 check(
   'unknown capability key -> auto + unresolved, no throw',
   (() => { const r = capabilityOf(entry(), 'notAKey'); return r.state === 'auto' && r.resolved === false })(),
+  ''
+)
+
+// ---- 思考（reasoning）三态链：显式 -> 表 -> 名称正则 -> 未定（2026-11-21）----
+const reasoningTable = (id, key) => (key === 'reasoning' ? tableLookup(id, key) : null)
+check(
+  'reasoning: explicit yes overrides table no',
+  (() => { const r = capabilityOf(entry({ modelId: 'acme-x', capabilities: { reasoning: 'yes' } }), 'reasoning', () => 'no'); return r.state === 'yes' && r.resolved === true })(),
+  JSON.stringify(capabilityOf(entry({ modelId: 'acme-x', capabilities: { reasoning: 'yes' } }), 'reasoning', () => 'no'))
+)
+check(
+  'reasoning: explicit no overrides table yes',
+  (() => { const r = capabilityOf(entry({ modelId: 'deepseek-v4.1-flash', capabilities: { reasoning: 'no' } }), 'reasoning', reasoningTable); return r.state === 'no' && r.resolved === true })(),
+  JSON.stringify(capabilityOf(entry({ modelId: 'deepseek-v4.1-flash', capabilities: { reasoning: 'no' } }), 'reasoning', reasoningTable))
+)
+check(
+  'reasoning: explicit auto + table hit (deepseek-v4.1-flash)',
+  (() => { const r = capabilityOf(entry({ modelId: 'deepseek-v4.1-flash', capabilities: { reasoning: 'auto' } }), 'reasoning', reasoningTable); return r.state === 'yes' && r.resolved === true })(),
+  JSON.stringify(capabilityOf(entry({ modelId: 'deepseek-v4.1-flash' }), 'reasoning', reasoningTable))
+)
+check(
+  'reasoning: table hit for gemini-3 / gpt-5 / kimi-k2-thinking / o4-mini',
+  ['gemini-3-pro', 'gpt-5.6-luna', 'kimi-k2-thinking', 'openai/o4-mini'].every((id) => tableLookup(id, 'reasoning') === 'yes'),
+  ['gemini-3-pro', 'gpt-5.6-luna', 'kimi-k2-thinking', 'openai/o4-mini'].map((id) => `${id}=${tableLookup(id, 'reasoning')}`).join(',')
+)
+check(
+  'reasoning: name regex fallback when table misses (qwen3 / deepthink)',
+  (() => {
+    const a = capabilityOf(entry({ modelId: 'qwen3-235b-a22b' }), 'reasoning')
+    const b = capabilityOf(entry({ modelId: 'acme-deepthink-1' }), 'reasoning')
+    return a.state === 'yes' && a.resolved === true && b.state === 'yes' && b.resolved === true
+  })(),
+  JSON.stringify([capabilityOf(entry({ modelId: 'qwen3-235b-a22b' }), 'reasoning'), capabilityOf(entry({ modelId: 'acme-deepthink-1' }), 'reasoning')])
+)
+check(
+  'reasoning: undetermined model stays auto + unresolved (not selectable)',
+  (() => { const r = capabilityOf(entry({ modelId: 'glm-5.3' }), 'reasoning', reasoningTable); return r.state === 'auto' && r.resolved === false })(),
+  JSON.stringify(capabilityOf(entry({ modelId: 'glm-5.3' }), 'reasoning', reasoningTable))
+)
+check(
+  'reasoning name hint mirrors llmProtocolPure.REASONING_MODEL_RE (no drift)',
+  (() => {
+    const proto = fs.readFileSync(path.join(ROOT, 'electron/lib/llmProtocolPure.ts'), 'utf8')
+    const hit = /export const REASONING_MODEL_RE =\s*\/(.+?)\/i/.exec(proto)
+    return !!hit && hit[1] === REASONING_NAME_RE.source
+  })(),
   ''
 )
 
@@ -407,8 +454,8 @@ check(
   ''
 )
 check(
-  'table registers 8 to 12 patterns',
-  CAPABILITY_PATTERNS.length >= 8 && CAPABILITY_PATTERNS.length <= 12,
+  'table registers 12 to 24 patterns',
+  CAPABILITY_PATTERNS.length >= 12 && CAPABILITY_PATTERNS.length <= 24,
   String(CAPABILITY_PATTERNS.length)
 )
 check('table vision hit: gpt-4o with provider prefix', tableLookup('openai/gpt-4o-mini', 'vision') === 'yes', String(tableLookup('openai/gpt-4o-mini', 'vision')))
@@ -445,6 +492,47 @@ check(
   JSON.stringify(lookupAll('gpt-4o'))
 )
 check('lookupAll on empty model -> {}', Object.keys(lookupAll('')).length === 0, '')
+
+// ---- 思考族登记（2026-11-21）：每个家族必须写明 note 来源 ----
+check(
+  'reasoning table: DeepSeek V3.2 / V4 registered',
+  tableLookup('deepseek-v4.1-flash', 'reasoning') === 'yes' && tableLookup('deepseek-v3.2-exp', 'reasoning') === 'yes',
+  String(tableLookup('deepseek-v4.1-flash', 'reasoning'))
+)
+check(
+  'reasoning table: gemini-3 / gpt-5 / kimi-k2-thinking registered',
+  tableLookup('gemini-3-pro', 'reasoning') === 'yes'
+    && tableLookup('gpt-5.6-luna', 'reasoning') === 'yes'
+    && tableLookup('kimi-k2-thinking', 'reasoning') === 'yes',
+  ''
+)
+check(
+  'reasoning table: o3 / o4-mini registered (with provider prefix and separators)',
+  tableLookup('o3', 'reasoning') === 'yes'
+    && tableLookup('openai/o3-mini', 'reasoning') === 'yes'
+    && tableLookup('o4-mini', 'reasoning') === 'yes',
+  String(tableLookup('openai/o3-mini', 'reasoning'))
+)
+check(
+  'deepseek-r1 keeps tools:no and is explicitly reasoning:yes',
+  (() => { const all = lookupAll('deepseek-reasoner'); return all.tools === 'no' && all.reasoning === 'yes' })(),
+  JSON.stringify(lookupAll('deepseek-reasoner'))
+)
+check(
+  'o1 negative tools entry stays before o3/o4 positives (no reasoning leak)',
+  (() => { const all = lookupAll('o1-mini'); return all.tools === 'no' && all.reasoning === undefined })(),
+  JSON.stringify(lookupAll('o1-mini'))
+)
+check(
+  'reasoning table: uncertain models stay null (glm-5.3)',
+  tableLookup('glm-5.3', 'reasoning') === null,
+  String(tableLookup('glm-5.3', 'reasoning'))
+)
+check(
+  'every reasoning pattern carries a note',
+  CAPABILITY_PATTERNS.filter((p) => p.caps && p.caps.reasoning).every((p) => typeof p.note === 'string' && p.note.length > 0),
+  ''
+)
 
 // ---------------------------------------------------------------- report
 const failed = checks.filter((c) => !c.pass)

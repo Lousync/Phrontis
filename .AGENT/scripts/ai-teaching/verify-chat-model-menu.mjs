@@ -201,6 +201,52 @@ check('ChatBody has no alert() call', !/\balert\s*\(/.test(chatBody), '')
 check('ChatBody has no confirm() call', !/\bconfirm\s*\(/.test(chatBody), '')
 check('ChatBody does not import ModelMenu', !/from\s+['"][^'"]*\bModelMenu\b['"]/.test(chatBody), '')
 
+// ---------------------------------------------------------------- 8. AI teaching composer menu (static wiring)
+// 2026-11-20 重做：AI 教学的模型菜单只列「设置里配置的条目」，不再叠供应商全量库存。
+// 这组断言锁的是那次拍板的形态，防止有人把 providerList 那段又搬回来。
+console.log('\n=== 8. AI teaching composer menu: entries only ===')
+const teachSrc = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/index.tsx'), 'utf8')
+// 菜单窗口：从浮层的 data-wb 锚点切到右侧用量面板之前（别用被删掉的标题行当锚点）
+const teachMenu = (() => {
+  const at = teachSrc.indexOf('data-wb="aiTeachModelMenu"')
+  if (at < 0) return ''
+  const end = teachSrc.indexOf("usageDetail !== 'off'", at)
+  return end > at ? teachSrc.slice(at, end) : teachSrc.slice(at)
+})()
+check('model menu consumes modelCatalog.entries', /modelCatalog\.entries/.test(teachSrc) && /menuModelEntries/.test(teachSrc), '')
+check('curated is only used for ordering, not a separate section', !/modelCatalog\.curated/.test(teachSrc) && /curated\)\s*-\s*Number\(a\.curated\)/.test(teachSrc), '')
+check('provider inventory is gone from the module', !/\bproviderList\b/.test(teachSrc), '')
+check('provider / vision inventory IPC calls are gone',
+  !/llmListProviders\s*\(/.test(teachSrc) && !/llmVisionModels\s*\(/.test(teachSrc), '')
+check('the raw providerId:modelId inventory loop is gone', !/\$\{p\.id\}:\$\{mm\}/.test(teachSrc), '')
+check('empty state copy exists', /设置里还没有配置模型/.test(teachSrc), '')
+check('empty state opens settings through the existing settings:open channel',
+  /openModelSettings/.test(teachSrc) && /settings:open/.test(teachSrc), '')
+check('menu is only the model picker: no vision section, no effort group',
+  !/视觉转写/.test(teachMenu) && !/思考强度/.test(teachMenu), '')
+check('menu carries no descriptive copy (header line / provider·model subtitle)',
+  !/回答模型 · 仅本对话生效/.test(teachMenu) && !/providerId\}\s*·\s*\$\{e\.modelId\}/.test(teachMenu), '')
+check('month usage rows are removed from the menu',
+  !/本月用量 · 回答/.test(teachSrc) && !/本月用量 · 视觉转写/.test(teachSrc), '')
+check('panel is 248px wide with a capped height', /w-\[248px\]/.test(teachMenu) && /max-h-\[min\(70vh,420px\)\]/.test(teachMenu), '')
+check('menu anchors to the clicked trigger through useAnchoredMenu (fixed + flip when no room)',
+  /useAnchoredMenu\(modelMenuTriggerRef, modelMenuRef/.test(teachSrc) &&
+    /fixed z-40/.test(teachMenu) && /modelMenu\.pos\.top/.test(teachMenu) &&
+    /openModelMenu\(e\.currentTarget\)/.test(teachSrc), '')
+check('menu no longer uses in-place absolute anchoring (gets clipped by the card)',
+  !/absolute bottom-full/.test(teachMenu) && !/right-0 mb-2/.test(teachMenu), '')
+check('menu rows fall back to modelId and expose tooltips', /e\.name \|\| e\.modelId/.test(teachMenu) && /data-tip=\{e\.modelId\}/.test(teachMenu), '')
+
+// ---- 思考能力三级链（2026-11-21）：条目显式 -> 主进程（内置表 -> 名称正则）----
+check('reasoning capability reads explicit entry capabilities first',
+  /capabilities\?\.reasoning/.test(teachSrc) && /explicitReasoning === 'yes'/.test(teachSrc) && /explicitReasoning === 'no'/.test(teachSrc), '')
+check('reasoning capability falls back to IPC only for auto/undetermined',
+  /llmReasoningCapable\s*\(\s*effModelRealId\s*\)/.test(teachSrc), '')
+check('capability spec resolves entry ids rather than feeding m_ ids to the IPC',
+  /resolveCatalogEntry\(capSpec, modelCatalog\.entries\)/.test(teachSrc) && /capResolved\?\.modelId/.test(teachSrc), '')
+check('per-conversation override falls back to the catalog default entry',
+  /effModel \|\| modelCatalog\.snapshot\?\.defaultEntryId/.test(teachSrc), '')
+
 // ---------------------------------------------------------------- report
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) {

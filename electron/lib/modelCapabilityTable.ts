@@ -21,7 +21,7 @@
 import type { CapabilityKey, CapabilityState } from './aiTeachingTypesPure'
 
 /** 表版本：改登记内容就抬日期，便于排查「为什么这个模型突然变了」 */
-export const CAPABILITY_TABLE_VERSION = '2026-11-19'
+export const CAPABILITY_TABLE_VERSION = '2026-11-21'
 
 export interface CapabilityPattern {
   /** 正则源串（内部 `new RegExp(pattern, 'i')`；不带 g，`.test` 无状态） */
@@ -32,7 +32,7 @@ export interface CapabilityPattern {
 }
 
 /**
- * 已知模型族登记表（12 条）。
+ * 已知模型族登记表（18 条）。
  *
  * 为什么显式写 `pattern` 字符串而不是字面量正则：契约脚本可以直接读出条目数 / 逐条核对，
  * 且避免正则字面量在 strip 模式下的转义歧义。
@@ -85,7 +85,7 @@ export const CAPABILITY_PATTERNS: CapabilityPattern[] = [
   // ---- 工具（负向：必须写明来源）----
   {
     pattern: 'deepseek-(?:r1|reasoner)',
-    note: '负向来源：DeepSeek 官方文档 —— deepseek-reasoner / R1 不支持 function calling',
+    note: '负向来源：DeepSeek 官方文档 —— deepseek-reasoner / R1 不支持 function calling；思考能力见下方同名正向条目',
     caps: { tools: 'no' },
   },
   {
@@ -99,6 +99,40 @@ export const CAPABILITY_PATTERNS: CapabilityPattern[] = [
     caps: { tools: 'yes' },
   },
 
+  // ---- 思考（推理）----
+  // 正向登记：名字确实带 thinking / 推理能力的模型族。来源写在各条 note 里；
+  // 不确定的**不要**登记（表外由 REASONING_MODEL_RE 兜底，再不确定即「不可选」）。
+  {
+    pattern: 'deepseek-(?:v3\\.2|v4)',
+    note: '来源：DeepSeek 官方文档 —— V3.2 / V4 系列支持 thinking 模式（对话可调思考强度）',
+    caps: { reasoning: 'yes' },
+  },
+  {
+    pattern: 'deepseek-(?:r1|reasoner)',
+    note: '来源：DeepSeek 官方文档 —— deepseek-reasoner / R1 为推理模型（始终思考，不支持 function calling）',
+    caps: { reasoning: 'yes' },
+  },
+  {
+    pattern: 'gemini-3',
+    note: '来源：Google Gemini 3 文档 —— Gemini 3 系列具备 thinking 能力',
+    caps: { reasoning: 'yes' },
+  },
+  {
+    pattern: 'kimi-k2-thinking',
+    note: '来源：Moonshot Kimi K2 Thinking 模型卡 —— 名称即表明始终思考',
+    caps: { reasoning: 'yes' },
+  },
+  {
+    pattern: 'gpt-5',
+    note: '来源：OpenAI GPT-5 文档 —— GPT-5 系列支持 reasoning.effort',
+    caps: { reasoning: 'yes' },
+  },
+  {
+    pattern: '(?:^|[/:_.\\-])o(?:3|4-mini)(?:$|[/:_.\\-])',
+    note: '来源：OpenAI o3 / o4-mini 文档 —— 支持 reasoning.effort（o1 负向条目在本组之前，互不冲突）',
+    caps: { reasoning: 'yes' },
+  },
+
   // ---- 生图 ----
   {
     pattern: '(?:dall-e|gpt-image|flux|stable-diffusion|seedream|imagen-[34])',
@@ -107,7 +141,7 @@ export const CAPABILITY_PATTERNS: CapabilityPattern[] = [
   },
 ]
 
-const CAPABILITY_KEYS: CapabilityKey[] = ['tools', 'vision', 'json', 'imageGeneration', 'imageEdit']
+const CAPABILITY_KEYS: CapabilityKey[] = ['tools', 'vision', 'json', 'imageGeneration', 'imageEdit', 'reasoning']
 
 const COMPILED: Array<{ re: RegExp; caps: Partial<Record<CapabilityKey, CapabilityState>> }> =
   CAPABILITY_PATTERNS.map((p) => ({ re: new RegExp(p.pattern, 'i'), caps: p.caps }))
