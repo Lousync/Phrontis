@@ -1225,6 +1225,52 @@ input:focus, textarea:focus, select:focus {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
 
+/* --- C3 输入区控件抽屉的抓手（AI 教学「整条收起」，2026-11-22）---
+   抽屉本体复用上面的 .kb-collapse（grid-template-rows 1fr ↔ 0fr）；抓手常驻折叠容器**外面**，
+   两态位置完全一致：视觉 36×4，hover / 键盘聚焦 scale(1.5)（54×6）+ 提亮，140ms。
+   命中区由 ::before 外扩到 128×24（4px 视觉也能一枪点中；向上只探进卡片 pb-2 的 6px，不盖 footer）。
+   ★ 只动 transform / background-color。别改成 Tailwind 的 scale-*：v4 的 scale 写的是 `scale`
+     属性，收不到 transition-transform（同 .kb-chevron 的理由，见计划文档 §二 ③）。 */
+.kb-tray-handle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;   /* 视觉 4px 抓手居中在这 96×8 的命中盒里，::before 再外扩到 128×24 */
+  height: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+.kb-tray-handle::before { content: ''; position: absolute; inset: -8px -16px; }
+.kb-tray-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+.kb-tray-grip {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--border-color);
+  transition: transform var(--dur-micro) var(--ease-kb), background-color var(--dur-micro) var(--ease-kb);
+}
+.kb-tray-handle:hover .kb-tray-grip,
+.kb-tray-handle:focus-visible .kb-tray-grip {
+  background: var(--text-disabled);
+  transform: scale(1.5);
+}
+/* 收起瞬间一次性加宽脉冲（760ms，只动 transform；类只由 JS 在「用户主动收起」时挂上） */
+@keyframes kb-tray-hint {
+  0%   { transform: scaleX(1); }
+  18%  { transform: scaleX(1.9); }
+  58%  { transform: scaleX(1.35); }
+  100% { transform: scaleX(1); }
+}
+.kb-tray-grip.kb-tray-hint { animation: kb-tray-hint 760ms var(--ease-kb); }
+
 /* --- C2 左栏分区贴底：四分区单 grid 驱动（AI 教学左栏「资源管理器」对标 VS Code，2026-10-16） ---
    形态：会话头 / 会话体 / 资源管理器头 / 资源管理器体 = 一个 grid 的四条轨。
    贴底原理：资源管理器收起时第 4 轨归 0，剩余高度由 align-content:stretch 全部分给
@@ -1496,6 +1542,8 @@ input:focus, textarea:focus, select:focus {
   .kb-collapse { transition: none; }
   .kb-collapse > * { transition: none; }
   .kb-chevron { transition: none; }
+  .kb-tray-grip { transition: none; }
+  .kb-tray-grip.kb-tray-hint { animation: none; }
   .kb-hoveronly { transition: none; }
   .kb-item-out { transition-duration: 1ms; transform: none; }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 1ms; }

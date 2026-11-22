@@ -201,6 +201,12 @@ const HERO_CHIPS: Array<{ label: string; prompt: string }> = [
   { label: '梳理脉络', prompt: '帮我梳理本段知识点之间的关系。' },
 ]
 
+/**
+ * 输入区控件抽屉的开合时长：与 `.kb-collapse` 的 `--dur-std`（220ms）同值。
+ * 贴底钉底循环与 dock 位移过渡的「动画窗口」都按它算 —— 改 CSS 时长时同步这一个数。
+ */
+const COMPOSER_TRAY_ANIM_MS = 220
+
 /** 名称归一（去书名号/引号/标点/空白，大小写不敏感）：让跳转 chip 容忍 AI 输出的写法差异（F3） */
 function normName(s: string): string {
   return String(s ?? '').replace(/[《》「」『』""''\s·・,，.。:：;；!！?？、\-—_]/g, '').toLowerCase()
@@ -2029,15 +2035,83 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     window.addEventListener('resize', measure)
     return () => { cancelAnimationFrame(raf); window.clearTimeout(late); ro.disconnect(); window.removeEventListener('resize', measure) }
   }, [emptyState])
-  /** 卡下控件托盘的展开态（原型 subdock）：默认展开，记忆到 localStorage */
+  /**
+   * 卡下控件抽屉的展开态（2026-11-22 二次拍板：**整条收起**，不再是「只折右半段」）：
+   * 默认展开，记忆到 localStorage（key 与取值含义不变：缺省 = 展开）。
+   * 收起后两枚 pill「画像 / 要求」也一起进抽屉 —— 要用就先展开（pill 是唯一文件入口，靠抓手 + tooltip 找回）。
+   */
   const [trayOpen, setTrayOpen] = useState(() => localStorage.getItem('aiTeach.composerTray') !== '0')
-  const toggleTray = useCallback(() => {
-    setTrayOpen((v) => {
-      const next = !v
-      try { localStorage.setItem('aiTeach.composerTray', next ? '1' : '0') } catch { /* ignore */ }
-      return next
-    })
+  /**
+   * 抽屉开合动画窗口（220ms + 余量）。空态下 dock 高度变 34px，`dockShift` 要跟着 +17；
+   * 那条 520ms 的位移过渡会让整组「先缩、再慢慢往下漂」→ 期间把 transition 换成 none，
+   * 让 ResizeObserver 逐帧直接写新值（PLAN §7）。
+   */
+  const [trayAnimating, setTrayAnimating] = useState(false)
+  const trayAnimTimer = useRef<number | null>(null)
+  const trayHintTimer = useRef<number | null>(null)
+  const trayPinRaf = useRef(0)
+  /** 折叠容器（.kb-collapse）：收起时若焦点还在里面，先把它挪到抓手 */
+  const trayBodyRef = useRef<HTMLDivElement>(null)
+  const trayHandleRef = useRef<HTMLButtonElement>(null)
+  /**
+   * 贴底跟随（PLAN §6）：抽屉是 220ms 的 grid-template-rows 动画，高度逐帧变；
+   * 滚动容器挂着 `[overflow-anchor:none]`（原生锚定已关），所以贴底时必须在动画期间**每帧**把
+   * `scrollTop` 钉到 `scrollHeight`，否则收起结束那一刻最后一条消息会被拉起 34px（看着像内容被拔起来）。
+   * 未贴底（用户往上翻了）时整个循环不启动：scrollTop 与上方内容都不动，只是视口下沿长出来。
+   */
+  const pinTrayBottom = useCallback((): void => {
+    if (!stickRef.current) return
+    if (trayPinRaf.current) cancelAnimationFrame(trayPinRaf.current)
+    const until = performance.now() + COMPOSER_TRAY_ANIM_MS + 80
+    const step = (): void => {
+      const c = scrollRef.current
+      if (c) {
+        c.scrollTop = c.scrollHeight
+        if (activeIdRef.current) convScroll.current.set(activeIdRef.current, c.scrollTop)
+      }
+      trayPinRaf.current = performance.now() < until ? requestAnimationFrame(step) : 0
+    }
+    trayPinRaf.current = requestAnimationFrame(step)
   }, [])
+  /** 收起瞬间的一次性加宽脉冲：只在**用户主动收起**时播（首屏挂载不播）；reduced-motion 由 CSS 关掉 */
+  const pulseTrayHandle = useCallback((): void => {
+    const grip = trayHandleRef.current?.firstElementChild as HTMLElement | null
+    if (!grip) return
+    grip.classList.remove('kb-tray-hint')
+    void grip.offsetWidth // 强制回流：连着两次收起也能重放同一条动画
+    grip.classList.add('kb-tray-hint')
+    if (trayHintTimer.current !== null) window.clearTimeout(trayHintTimer.current)
+    trayHintTimer.current = window.setTimeout(() => {
+      trayHintTimer.current = null
+      grip.classList.remove('kb-tray-hint')
+    }, 900)
+  }, [])
+  useEffect(() => () => {
+    if (trayAnimTimer.current !== null) window.clearTimeout(trayAnimTimer.current)
+    if (trayHintTimer.current !== null) window.clearTimeout(trayHintTimer.current)
+    if (trayPinRaf.current) cancelAnimationFrame(trayPinRaf.current)
+  }, [])
+  const toggleTray = useCallback(() => {
+    const next = !trayOpen
+    // 模型菜单是 fixed 浮层：锚点按钮进折叠区后 visibility:hidden，菜单会变成浮在空处的孤儿
+    modelMenu.close()
+    if (!next) {
+      // 收起前先挪焦点（折叠子树 220ms 后 visibility:hidden，焦点会掉到 body）
+      const body = trayBodyRef.current
+      const ae = document.activeElement as HTMLElement | null
+      if (body && ae && body.contains(ae)) trayHandleRef.current?.focus()
+      pulseTrayHandle()
+    }
+    try { localStorage.setItem('aiTeach.composerTray', next ? '1' : '0') } catch { /* ignore */ }
+    setTrayOpen(next)
+    setTrayAnimating(true)
+    if (trayAnimTimer.current !== null) window.clearTimeout(trayAnimTimer.current)
+    trayAnimTimer.current = window.setTimeout(() => {
+      trayAnimTimer.current = null
+      setTrayAnimating(false)
+    }, COMPOSER_TRAY_ANIM_MS + 40)
+    pinTrayBottom()
+  }, [trayOpen, modelMenu, pulseTrayHandle, pinTrayBottom])
   /** 条目9：提问卡收起二态（不丢 askPending 与点选状态；换 ask 重置） */
   const [askCollapsed, setAskCollapsed] = useState(false)
   useEffect(() => { setAskPicks({}); setAskPage(0); setAskCustomDrafts({}); setAskCustomOpen({}); setAskCustomPicks({}); setAskCollapsed(false) }, [askPending?.id]) // 换 ask 重置整卷点选/翻页/补充/收起
@@ -2832,7 +2906,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       ? 'border-[var(--accent)]/55 bg-[var(--accent)]/10 text-[var(--accent)]'
       : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
   }`
-  /** 两枚 pill：折叠（trayOpen=false）时**仍然可见可点** —— 只折叠 思考 / 引用 / 模型（乙方案） */
+  /** 两枚 pill：2026-11-22 二次拍板后**收进同一个抽屉** —— 抽屉收起时它们一起不可见，展开才可用（不再是「只折右半段」） */
   const docPills = (
     <>
       <button type="button" onClick={() => void openSessionDoc('profile')} aria-pressed={docPressed('profile')}
@@ -3769,7 +3843,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   // 发出第一条后沉回底部。位移按 section 与 dock 的实测 rect 求差（推导见 dockShift 那一段：
                   // 居中的是整组、口径是整个中栏），不拍死像素 —— 拍死值在矮窗口会抬过头、在高窗口又不够。
                   transform: dockShift ? `translateY(${dockShift}px)` : 'none',
-                  transition: 'transform 520ms cubic-bezier(.32,.72,0,1)',
+                  // 抽屉开合期间（trayAnimating）：空态整组居中要逐帧跟住 dock 高（34px 差），
+                  // 520ms 曲线会把「高度变化 + 位移」拖成错位漂移，故这一段临时去掉过渡。
+                  transition: emptyState && trayAnimating ? 'none' : 'transform 520ms cubic-bezier(.32,.72,0,1)',
                 }}
               >
                 {/* 卡上方 56px 渐隐：消息在卡后淡出，而不是被一条硬边切掉（对齐原型 dock::before） */}
@@ -4111,55 +4187,63 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     {composerFooter}
                   </div>
                 )}
-                {/* 卡下控件托盘（2026-11-20 对齐原型 subdock；2026-11-22 改「乙」折叠形态）：
-                    负 margin 叠进卡底、只动 transform/opacity；收起后高度不变（不推挤上方对话区），
-                    只在卡下缘留一条 4px 抓手。
-                    折叠形态**乙**（用户拍板）：两枚文字 pill「画像 / 要求」固定在折叠区外，
-                    折叠时仍可见可点；只有「思考 / 引用 / 模型」这一段收进抽屉。
-                    甲（折叠成两枚图标行）不采用 —— pill 是唯一的本会话文件入口，识别成本优先。 */}
+                {/* 卡下控件抽屉（2026-11-20 对齐原型 subdock；2026-11-22 二次拍板 = **整条收起**）：
+                    几何：卡下 2px 间距 + 8px 抓手条 + 34px 抽屉 → 展开 44px / 收起 10px（释放 34px）。
+                    收起机制复用 `.kb-collapse`（`grid-template-rows` 1fr ↔ 0fr，--dur-std 220ms）+ 内层
+                    `overflow:hidden`；托盘条自己 200ms 淡出，避免圆角被直角裁切时「像切了一刀」。
+                    抓手在折叠容器**外面**：两态位置完全一致，不跟着开合位移。
+                    ★ 两枚 pill「画像 / 要求」和「思考 / 引用 / 模型」一起收起（收起后要展开才能用）——
+                      不再是「只折右半段」。pill 仍是唯一文件入口，靠抓手 + data-tip 找回。 */}
                 {!askVisible && (
-                  <div className="relative z-0 -mt-2.5">
+                  <div className="relative z-0 mt-0.5 pt-2">
                     <button
+                      ref={trayHandleRef}
                       type="button"
                       onClick={toggleTray}
                       aria-expanded={trayOpen}
+                      aria-controls="aiTeachComposerTray"
                       data-tip={trayOpen ? '收起控件条' : '展开控件条'}
                       aria-label={trayOpen ? '收起控件条' : '展开控件条'}
-                      className="absolute -top-[6px] left-1/2 -translate-x-1/2 z-[2] h-[4px] w-9 rounded-full bg-[var(--border-color)] hover:bg-[var(--text-disabled)] transition-colors"
-                    />
-                    <div
-                      className="w-full h-[34px] flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] px-1.5"
-                      style={{ background: 'color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary))' }}
+                      className="kb-tray-handle"
                     >
-                      {docPills}
-                      <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
-                      <div
-                        className={`flex min-w-0 flex-1 items-center gap-1.5 transition-[transform,opacity] duration-[380ms] motion-reduce:transition-none ${trayOpen ? 'translate-y-0 opacity-100' : 'translate-y-[12px] opacity-0 pointer-events-none'}`}
-                        style={{ transitionTimingFunction: 'cubic-bezier(.34,1.56,.64,1)' }}
-                      >
-                        {/* 段已收尾 / 课程已结课：只压暗并禁点（pill 仍可点，文件只读查看）；压暗挂内层，
-                            避免与上面折叠动画的 opacity-100/0 抢同一个属性 */}
-                        <div className={`flex min-w-0 flex-1 items-center gap-1.5 ${courseReadonly || courseEnded ? 'opacity-45 pointer-events-none select-none' : ''}`}>
-                          <span className="shrink-0 pl-0.5 text-[10.5px] text-[var(--text-muted)]">思考</span>
-                          {(['off', 'low', 'medium', 'high'] as Effort[]).map((e) => (
-                            <button key={e} type="button" disabled={!modelCapable} onClick={() => pickEffort(e)}
-                              aria-pressed={convoEffort === e}
-                              className={`h-[24px] px-2 rounded-full text-[11px] transition-colors disabled:opacity-35 ${convoEffort === e ? 'bg-[var(--bg-primary)] text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-                              {EFFORT_LABEL[e]}
-                            </button>
-                          ))}
+                      <span className="kb-tray-grip" aria-hidden />
+                    </button>
+                    <div
+                      ref={trayBodyRef}
+                      id="aiTeachComposerTray"
+                      className={`kb-collapse${trayOpen ? ' open' : ''}`}
+                    >
+                      <div>
+                        <div
+                          className={`w-full h-[34px] flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] px-1.5 transition-opacity duration-[200ms] motion-reduce:transition-none ${trayOpen ? 'opacity-100' : 'opacity-0'}`}
+                          style={{ background: 'color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary))' }}
+                        >
+                          {docPills}
                           <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
-                          <button type="button" disabled={quotes.length === 0} onClick={() => setQuotesOpen(v => !v)}
-                            aria-pressed={quotesOpen && quotes.length > 0}
-                            data-tip={quotes.length ? '查看/管理本轮引用' : '本轮还没有引用'}
-                            className="h-[24px] px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35 transition-colors">
-                            {quotes.length > 0 ? `引用 ${quotes.length}` : '引用'}
-                          </button>
-                          <span className="flex-1" />
-                          <button type="button" onClick={(e) => openModelMenu(e.currentTarget)} data-tip="切换本对话模型"
-                            className="h-[24px] max-w-[180px] truncate px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                            {effModel ? effModelBare : '默认模型'}
-                          </button>
+                          {/* 段已收尾 / 课程已结课：只压暗并禁点右侧控制（pill 不压暗、仍可点，打开右栏笔记页签）；
+                              抽屉本身**不自动收起**、抓手不禁用 —— 收尾态最可能想回看画像 / 要求。 */}
+                          <div className={`flex min-w-0 flex-1 items-center gap-1.5 ${courseReadonly || courseEnded ? 'opacity-45 pointer-events-none select-none' : ''}`}>
+                            <span className="shrink-0 pl-0.5 text-[10.5px] text-[var(--text-muted)]">思考</span>
+                            {(['off', 'low', 'medium', 'high'] as Effort[]).map((e) => (
+                              <button key={e} type="button" disabled={!modelCapable} onClick={() => pickEffort(e)}
+                                aria-pressed={convoEffort === e}
+                                className={`h-[24px] px-2 rounded-full text-[11px] transition-colors disabled:opacity-35 ${convoEffort === e ? 'bg-[var(--bg-primary)] text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                                {EFFORT_LABEL[e]}
+                              </button>
+                            ))}
+                            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+                            <button type="button" disabled={quotes.length === 0} onClick={() => setQuotesOpen(v => !v)}
+                              aria-pressed={quotesOpen && quotes.length > 0}
+                              data-tip={quotes.length ? '查看/管理本轮引用' : '本轮还没有引用'}
+                              className="h-[24px] px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35 transition-colors">
+                              {quotes.length > 0 ? `引用 ${quotes.length}` : '引用'}
+                            </button>
+                            <span className="flex-1" />
+                            <button type="button" onClick={(e) => openModelMenu(e.currentTarget)} data-tip="切换本对话模型"
+                              className="h-[24px] max-w-[180px] truncate px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                              {effModel ? effModelBare : '默认模型'}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>

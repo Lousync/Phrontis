@@ -4,7 +4,9 @@
  *
  * 锁住四条结构性不变量（方案 `tmp/ai-teach-toolbar/PLAN.md` §2 / §3 / §4 / §6）：
  *   1. 顶栏右侧**只有一枚**「打开右侧栏」图标（其余入口全部退役，右栏打开时不渲染）；
- *   2. 输入区「画像 / 要求」两枚 pill 常驻 —— 折叠只收「思考 / 引用 / 模型」（乙形态），pill 仍可达；
+ *   2. 输入区「画像 / 要求」两枚 pill 与「思考 / 引用 / 模型」同处**一条抽屉**（整条收起，
+ *      `grid-template-rows` 0fr ↔ 1fr 复用 `.kb-collapse`）；抓手在折叠容器**之外**，
+ *      带 `aria-expanded` / `aria-controls` 接线，无 `transition-all`；
  *   3. 段上下文条 / 章末复习条「要求」/ 本会话要求行内条 / 560px 模态 / 要求抽屉**零残留**；
  *   4. ```endcourse 围栏全对话**只渲染一张**卡，且结课后不渲染。
  *
@@ -50,10 +52,11 @@ for (const gone of ['收尾本段', '课程进度', '工件分栏', '本会话�
 }
 check('不再用 lucide PanelRightOpen', !mod.includes('PanelRightOpen'))
 
-/* ───────────────────────── 2. 工具条：pill 常驻 + 乙折叠 ───────────────────────── */
-console.log('\n[工具条] 画像 / 要求 pill 常驻，只折叠 思考 / 引用 / 模型')
+/* ───────────────────────── 2. 工具条：整条抽屉（.kb-collapse）+ 抓手 ───────────────────────── */
+console.log('\n[工具条] 画像 / 要求与思考 / 引用 / 模型同处一条抽屉；抓手在折叠容器之外')
 const pills = slice(mod, '输入区「画像 / 要求」pill（2026-11-22 A 线', 'const composerFooter', 'pills')
-const tray = slice(mod, '{/* 卡下控件托盘（2026-11-20', '{heroMode && (', 'tray')
+const tray = slice(mod, '{/* 卡下控件抽屉（2026-11-20', '{heroMode && (', 'tray')
+const css = read('src/styles/index.css')
 check('docPills 定义可定位', pills.length > 200)
 check('pill 文案 = 画像 / 要求', pills.includes('画像') && pills.includes('要求'))
 check('两枚 pill 都是 button', count(pills, /<button/g) === 2)
@@ -68,14 +71,25 @@ check('没有层选择 UI（无 ReqLayer / 层 chip）', !pills.includes('ReqLay
 check('托盘片段可定位', tray.length > 300, `len=${tray.length}`)
 check('折叠状态仍用 trayOpen（不新造状态）', tray.includes('trayOpen'))
 check('折叠记忆键 aiTeach.composerTray 仍在', mod.includes("localStorage.getItem('aiTeach.composerTray')"))
-check('pills 在折叠区之外（先 pills 后折叠组）', (() => {
-  const atPill = tray.indexOf('{docPills}')
-  const atFold = tray.indexOf("'translate-y-[12px] opacity-0 pointer-events-none'")
-  return atPill >= 0 && atFold > atPill
-})(), 'pills 必须挂在折叠 div 之前')
-check('折叠只作用于 rest（思考/引用/模型）', /trayOpen \? 'translate-y-0 opacity-100' : 'translate-y-\[12px\] opacity-0 pointer-events-none'/.test(tray))
-check('折叠是 transform + opacity（不用 grid-rows / 高度）', /transition-\[transform,opacity\]/.test(tray) && !tray.includes('grid-rows'))
+const foldAt = tray.indexOf('kb-collapse${trayOpen')
+const handleAt = tray.indexOf('className="kb-tray-handle"')
+check('抽屉整体（含两枚 pill）收在一个 .kb-collapse 容器内', foldAt >= 0 && tray.indexOf('{docPills}') > foldAt, `fold@${foldAt}`)
+check('折叠容器带 id = aiTeachComposerTray（aria-controls 的落点）', tray.includes('id="aiTeachComposerTray"'))
+check('抓手在折叠容器之外（DOM 里先抓手、后折叠组）', handleAt >= 0 && foldAt > handleAt, `handle@${handleAt} / fold@${foldAt}`)
+check('抓手是原生 button + aria-expanded 随 trayOpen', /<button[\s\S]{0,400}aria-expanded=\{trayOpen\}/.test(tray))
+check('抓手 aria-controls 指向折叠容器 id', tray.includes('aria-controls="aiTeachComposerTray"'))
+check('抓手有中文 aria-label / data-tip（两态各一句）', tray.includes("data-tip={trayOpen ? '收起控件条' : '展开控件条'}")
+  && tray.includes("aria-label={trayOpen ? '收起控件条' : '展开控件条'}"))
+check('折叠只走 .kb-collapse 令牌（不写内联 height / max-height 过渡）',
+  !/transition-\[[^\]]*(?:height|max-height)/.test(tray) && !/max-h-\[34/.test(tray))
 check('工具条无 transition-all', !tray.includes('transition-all'))
+check('托盘条淡出走 opacity（不再用 translate-y 位移折叠）', tray.includes('transition-opacity') && !/translate-y-\[12px\]/.test(tray))
+check('抓手脉冲 .kb-tray-hint 落在 index.css（只动 transform）',
+  /\.kb-tray-grip\.kb-tray-hint \{ animation: kb-tray-hint/.test(css)
+  && !/@keyframes kb-tray-hint[\s\S]{0,300}(?:height|width)\s*:/.test(css))
+check('reduced-motion 关闭抓手过渡与脉冲',
+  /prefers-reduced-motion: reduce[\s\S]{0,900}\.kb-tray-grip \{ transition: none; \}/.test(css)
+  && /prefers-reduced-motion: reduce[\s\S]{0,900}\.kb-tray-grip\.kb-tray-hint \{ animation: none; \}/.test(css))
 check('思考四档带 aria-pressed', count(tray, /aria-pressed=\{convoEffort === e\}/g) === 1)
 check('引用按钮带 aria-pressed', count(tray, /aria-pressed=\{quotesOpen && quotes\.length > 0\}/g) === 1)
 check('模型仍在最右（flex-1 占位后）', /<span className="flex-1" \/>[\s\S]{0,400}openModelMenu/.test(tray))

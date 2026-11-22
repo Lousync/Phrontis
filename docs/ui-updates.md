@@ -3019,3 +3019,23 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **新增文件**：`.AGENT/scripts/ai-teaching/verify-teach-toolbar-ui.mjs`（69 条结构断言：顶栏单图标 / pill 折叠后可达 / 段条与行内要求条零残留 / endcourse 单卡）。
 
 **验收**：`tsc --noEmit -p tsconfig.web.json` 0 错；`verify-teach-toolbar-ui.mjs` 69 PASS / 0 FAIL。
+
+## 2026-11-22 · AI 教学 · 输入区控件抽屉改为「整体收起」
+
+**现状 / 用户反馈**：上一轮把工具条折成「乙形态」——右半段位移淡出、高度不变，两枚 pill 常驻；实际点下来觉得「收起跟没收起一样」：34px 地盘照旧占着，而且托盘上沿 10px 用负 margin 压在卡片底边上，卡片的底边框 / 圆角 / 阴影一直是被遮住的。
+
+**根因**：旧实现用 `-mt-2.5` 把托盘叠进卡底（视觉上「卡片 + 托盘」算一个盒子），高度不变所以「收起」只能位移右半段；而负 margin 没法随手风琴一起归零 —— 真收起必须先把这层叠压拆掉。
+
+**改动点**（方案 `tmp/ai-teach-composer-tray/PLAN.md`；原型 `tmp/ai-teach-composer-tray/index.html`）：
+- **整条收起**：托盘条外包 `.kb-collapse`（`grid-template-rows 1fr ↔ 0fr`，220ms `--ease-kb`）+ 内层 `overflow:hidden`；两枚 pill「画像 / 要求」与「思考 / 引用 / 模型」一起收，收起后要展开才能用。`aiTeach.composerTray` 键与默认值不变（缺省 = 展开），语义从「折右半段」变成「收起整条」，不需要迁移。
+- **几何**：拆掉 `-mt-2.5`，改成卡下 2px 间距 + 8px 抓手条 + 34px 抽屉 —— 展开 44px / 收起 10px（释放 34px）；卡片底边、圆角、阴影在两种状态下都完整。
+- **抓手**：在折叠容器**外面**，两态位置不动；视觉 36×4 / `--border-color`，hover 与 `:focus-visible` 放大到 54×6 + `--text-disabled`（140ms），命中区 `::before` 外扩到 128×24；`button` + `aria-expanded` + `aria-controls="aiTeachComposerTray"` + 中文 `aria-label` / `data-tip`；收起瞬间播一次 760ms 加宽脉冲（只动 transform，只在用户主动收起时播，reduced-motion 不播）；收起时焦点若在抽屉内，先挪到抓手。
+- **贴底跟随**：抽屉是 220ms 的高度动画，贴底（`stickRef`）时动画期间**每帧**把 `scrollTop` 钉到 `scrollHeight`（未贴底时整个循环不启动，滚动位置与上方内容都不动），否则结尾会裂出 34px 空隙。
+- **空态居中不慢半拍**：开合期间 `trayAnimating` → dock 的 520ms 位移过渡临时换成 `none`，让 `ResizeObserver` 逐帧跟住 34px 的高度差。
+- **收尾 / 结课态**：抽屉仍可展开、抓手不禁用、两枚 pill 仍可点（右栏笔记页签），右侧控制照旧压暗禁点，**不自动收起**；抽屉收起时若「引用」面板开着，不动它（面板在卡片内、自带 ✕）。
+
+**刻意不动**：输入卡本体、`docPills` 打开路径（ensure → 右栏笔记页签）、段收尾 / 结课入口、会话记忆 key。
+
+**动效口径**：新增 `.kb-tray-handle` / `.kb-tray-grip` / `.kb-tray-hint`（`src/styles/index.css` C 段，reduced-motion 统一关断），只动 `transform` / `opacity`；无 `transition-all`、无高度过渡（`.kb-collapse` 的 grid-rows 是既有例外）。`docs/ui-animation-plan.md` 对应行已同步改写。
+
+**验收**：`tsc --noEmit -p tsconfig.web.json` 0 错；`verify-teach-toolbar-ui.mjs` 76 PASS / 0 FAIL（原「pill 在折叠区外」那条按新结构改写为「抽屉整体在 `.kb-collapse` 内 / 抓手在折叠容器外 / `aria-expanded` + `aria-controls` 接线 / 无 `transition-all`」）。
