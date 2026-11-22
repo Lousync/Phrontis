@@ -38,6 +38,7 @@ const SCRIPTS = [
   'verify-model-slot-migrate.mjs',
   'verify-teach-ledger.mjs',
   'verify-quiz-quality.mjs',
+  'verify-quiz-quality-wiring.mjs',
   'verify-context-compiler.mjs',
   'verify-viewer-tabs.mjs',
   'verify-side-scope.mjs',

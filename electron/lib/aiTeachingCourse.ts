@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
+import { readQuizRecords } from 'phrontis-core/kbStore/quizVaultRepo'
 import { getWorkspaceOfSession, getWorkspaceEndedAt, workspaceFolderRel, assignSession } from './aiTeachingWorkspaces'
 import { COURSE_ENDED_ERROR, assertWorkspaceEditable, assertCourseEditableBySession, isCourseEnded } from './aiTeachingCourseEndGuard'
 import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver, resolveWriteOwnerRel, sanitizeTitle, isCourseAssistantSession } from './aiTeachingFolders'
@@ -12,6 +13,7 @@ import { createAgentSession, getAgentMessages, getAgentMessagesAll, getAgentSess
 import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { ensureQuizDocFrontmatter, forceFrontmatterId, hasQuizFence, readFrontmatterId } from './quizDocPure'
+import { applyQuizQualityGate, normalizeQuizQualityMode, QUIZ_GATE_MAX_REWRITE, type QuizGateWarning } from './quizGatePure'
 import {
   normalizeOutline,
   resolveOutlineRequires,
@@ -1686,10 +1688,58 @@ export function moveCourseUnit(wsId: string, unitId: string, targetChapterId: st
   return { ok: true }
 }
 
+/* ===== 题单质量门（`aiTeachQuizQuality`，见 quizGatePure.ts 头注）=====
+ * 重试次数按「会话 + 标题」记：strict 档结构不合法 / 长度暗示命中时第一次退回改写，
+ * 第二次进来必须放行（结构不合法仍然不写盘，只换成终止提示），绝不无限循环。
+ * 15 分钟没再调用同一标题即视为新一轮（防止隔了很久的陈旧计数误放行）。 */
+const QUIZ_GATE_ATTEMPT_TTL_MS = 15 * 60 * 1000
+const quizGateAttempts = new Map<string, { n: number; at: number }>()
+
+function quizGateKey(sessionId: string, title: unknown): string {
+  return `${sessionId}\u0000${String(title ?? '').replace(/\.md$/i, '').trim().toLowerCase()}`
+}
+
+function quizGateAttemptsUsed(key: string, now: number): number {
+  if (quizGateAttempts.size > 128) {
+    for (const [k, v] of quizGateAttempts) if (now - v.at > QUIZ_GATE_ATTEMPT_TTL_MS) quizGateAttempts.delete(k)
+  }
+  const hit = quizGateAttempts.get(key)
+  if (!hit) return 0
+  if (now - hit.at > QUIZ_GATE_ATTEMPT_TTL_MS) {
+    quizGateAttempts.delete(key)
+    return 0
+  }
+  return hit.n
+}
+
+/** records.json 里已有作答记录的题号 → 记录答案 key（rebalanceAnswers 命中即不重排）。
+ *  口径：页面 id 相同（题单已有 frontmatter id 时）或页面标题相同（同标题重出）都算已作答。
+ *  新题单没有记录 → 空表，不影响均衡；读失败一律当「无作答」，不阻断落盘。 */
+function quizAnsweredKeys(title: unknown, docId: string | null): Record<string, string> {
+  const out: Record<string, string> = {}
+  try {
+    const rows = readQuizRecords()
+    if (!rows.length) return out
+    const titleKey = String(title ?? '').replace(/\.md$/i, '').trim()
+    for (const row of rows) {
+      const sameDoc = !!docId && row.page_id === docId
+      const sameTitle = !!titleKey && String(row.page_title ?? '').replace(/\.md$/i, '').trim() === titleKey
+      if (!sameDoc && !sameTitle) continue
+      let answer = ''
+      try {
+        const snap = JSON.parse(String(row.snapshot_json ?? '')) as { answer?: unknown }
+        answer = typeof snap?.answer === 'string' ? snap.answer : ''
+      } catch { /* 旧快照读不到：只当作「已作答」标记 */ }
+      out[String(row.quiz_no)] = answer
+    }
+  } catch { /* 记录读不到 = 视为无作答 */ }
+  return out
+}
+
 /** 整理页归档：写入 target（仓库相对目录）或默认本会话目录；返回相对路径与**绝对路径**。
  *  段会话只允许写本段目录（防止模型猜路径，把产物写到章根 / 错误知识点下）；
  *  课程助手保留自由 target，以便维护 `教材/` 等课程级资料。 */
-export function archiveOrganizedPage(sessionId: string, title: unknown, content: unknown, target: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
+export function archiveOrganizedPage(sessionId: string, title: unknown, content: unknown, target: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string; needsRewrite?: boolean; warnings?: QuizGateWarning[] } {
   try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
@@ -1710,17 +1760,42 @@ export function archiveOrganizedPage(sessionId: string, title: unknown, content:
     return { ok: false, error: `本段产物只能写入本段目录（${owner}/），不要指定其他 target；教材 / 知识库正文请用 vault.write 写到用户指定路径（.md 带 ensureId:true）` }
   }
   try {
+    const text = String(content ?? '').replace(/\r\n/g, '\n')
+    const isQuiz = hasQuizFence(text)
+    // 题单质量门：**主进程写盘前**这一处拦截（渲染层只展示，拦不住已写进文件的坏题）。
+    // strict 不合格 → 不写盘、把重写提示当错误回给模型；warn 只收集 warnings；off 直通旧路径。
+    let quizContent = text
+    let quizWarnings: QuizGateWarning[] | undefined
+    if (isQuiz) {
+      const mode = normalizeQuizQualityMode(getSetting('aiTeachQuizQuality'))
+      if (mode !== 'off') {
+        const gateKey = quizGateKey(sid, title)
+        const now = Date.now()
+        const used = quizGateAttemptsUsed(gateKey, now)
+        const gate = applyQuizQualityGate({
+          content: text,
+          mode,
+          recentKeys: quizAnsweredKeys(title, readFrontmatterId(text)),
+          allowRetry: used < QUIZ_GATE_MAX_REWRITE,
+        })
+        if (!gate.ok) {
+          quizGateAttempts.set(gateKey, { n: used + 1, at: now })
+          return { ok: false, error: gate.retryPrompt ?? '题单未通过质量门', needsRewrite: gate.needsRewrite, warnings: gate.warnings }
+        }
+        quizGateAttempts.delete(gateKey)
+        quizContent = gate.content
+        quizWarnings = gate.warnings.length ? gate.warnings : undefined
+      }
+    }
     const dirAbs = join(vault.rootPath, rel)
     mkdirSync(dirAbs, { recursive: true })
     const base = sanitizeTitle(String(title ?? '整理'))
     const want = base.endsWith('.md') ? base : `${base}.md`
-    const text = String(content ?? '').replace(/\r\n/g, '\n')
     // 2026-11-17：讲义 / 总结**同名覆盖**（AI 改稿不再另建 v2）；题单例外 —— 题号一旦重排，
     // 旧作答与错题记录会对不上题（铁律 19），所以仍走版本递增。
-    const isQuiz = hasQuizFence(text)
     const fname = isQuiz ? uniqueFileName(dirAbs, want) : want
     // 题单落盘即写 frontmatter id（同 organizeDoc；非 quiz 文档原样返回）
-    let body = ensureQuizDocFrontmatter(String(title ?? '整理'), text)
+    let body = ensureQuizDocFrontmatter(String(title ?? '整理'), quizContent)
     if (!isQuiz) {
       // 覆盖写必须沿用旧文档 id，否则知识页换身份，讲义/题单的关联会断。
       const target = join(dirAbs, fname)
@@ -1733,7 +1808,7 @@ export function archiveOrganizedPage(sessionId: string, title: unknown, content:
     }
     writeFileSync(join(dirAbs, fname), body, 'utf-8')
     broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: rel })
-    return { ok: true, relPath: `${rel}/${fname}`, absPath: join(dirAbs, fname) }
+    return { ok: true, relPath: `${rel}/${fname}`, absPath: join(dirAbs, fname), warnings: quizWarnings }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
