@@ -1629,8 +1629,27 @@ export interface AiTeachEndState {
 
 /** AI教学·课程模式（主进程 aiTeachingCourse.ts 同构；3.14 段模型） */
 export type AiTeachCourseUnitStatus = 'todo' | 'learning' | 'check' | 'mastered' | 'review'
-export interface AiTeachCourseUnit { id: string; name: string; goal: string; source: string }
-export interface AiTeachCourseChapter { id: string; name: string; units: AiTeachCourseUnit[] }
+/** 知识点类型（与主进程 aiTeachingTypesPure.UnitType 同一联合；缺省 = concept） */
+export type AiTeachCourseUnitType = 'memory' | 'concept' | 'procedure' | 'design'
+export interface AiTeachCourseUnit {
+  id: string
+  name: string
+  goal: string
+  source: string
+  /** v2 第 5 列：知识点类型。只做读写保真，本批不参与排序 / 讲解 / 展示。 */
+  type?: AiTeachCourseUnitType
+  /** v2 第 6 列：先修知识点 id。只做读写保真，本批不参与排序 / 讲解 / 展示。 */
+  requires?: string[]
+  /** v2 第 7 列及以后的原样文本：仅读写保真，UI 不展示。 */
+  extra?: string[]
+}
+export interface AiTeachCourseChapter {
+  id: string
+  name: string
+  /** 「- 章目标: ...」行（v2 才有）：读写保真用，缺省 = 未写。 */
+  objective?: string
+  units: AiTeachCourseUnit[]
+}
 export interface AiTeachCourseOutline { title: string; goal: string; anchor: string; chapters: AiTeachCourseChapter[] }
 export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; mastery: number; lastCheckedAt: string | null; finished?: boolean; summaryRel?: string | null }
 /** 一段（历史键名 lesson）：覆盖同章 1..N 个知识点 */

@@ -37,7 +37,7 @@ function load(rel) {
 }
 
 const layout = await load('electron/lib/aiTeachingLayoutPure.ts')
-const coursePure = await load('electron/lib/aiTeachingCoursePure.ts')
+const outlinePure = await load('electron/lib/courseOutlinePure.ts')
 const migration = await load('electron/lib/aiTeachingLayoutMigrationPure.ts')
 
 const courseFile = path.join(wsAbs, '课程.md')
@@ -45,7 +45,7 @@ if (!fs.existsSync(courseFile)) {
   console.error(`[FAIL] 找不到课程大纲：${courseFile}`)
   process.exit(2)
 }
-const outline = coursePure.parseCourseMd(fs.readFileSync(courseFile, 'utf8'))
+const outline = outlinePure.parseCourseMd(fs.readFileSync(courseFile, 'utf8'))
 const wsName = path.basename(wsRel)
 const workspacesFile = path.join(vaultAbs, '.knowbase/modules/aiTeaching/workspaces.json')
 const workspaces = JSON.parse(fs.readFileSync(workspacesFile, 'utf8'))

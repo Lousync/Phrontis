@@ -13,8 +13,6 @@ import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { ensureQuizDocFrontmatter, forceFrontmatterId, hasQuizFence, readFrontmatterId } from './quizDocPure'
 import {
-  parseCourseMd,
-  rewriteCourseMd,
   normalizeOutline,
   cleanField,
   mergeOutlineAdditions,
@@ -29,6 +27,8 @@ import {
   type CourseWsV2,
   type OutlineAdditions,
 } from './aiTeachingCoursePure'
+// `课程.md` 的读写唯一口径（v2 六列 + 旧 4 列兼容）—— 不要再在本文件手搓行格式
+import { parseCourseMd, rewriteCourseMd } from './courseOutlinePure'
 import {
   getSources,
   getSourceSummary,
@@ -74,7 +74,8 @@ import type { SegmentSource } from '../../src/lib/aiTeachingSourcesPure'
  * - 课程助手 / 复习课 / 段 = 三类 aiTeaching 会话；零散会话不再进入左栏。
  */
 
-export { parseCourseMd, rewriteCourseMd, parseOutlineJson } from './aiTeachingCoursePure'
+export { parseCourseMd, rewriteCourseMd } from './courseOutlinePure'
+export { parseOutlineJson } from './aiTeachingCoursePure'
 export type { CourseChapter, CourseOutline, CourseUnit, CourseUnitProgress, CourseUnitStatus } from './aiTeachingCoursePure'
 
 /** 一段（历史键名 lesson）：一条会话 + 一个产物夹，覆盖同章 1..N 个知识点 */

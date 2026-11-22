@@ -7,6 +7,10 @@
  * 断言口径（全部跑真实实现，strip 类型后直接 import）：
  *   · 4 列旧格式可读且**逐字原样重写**（不补 `concept` / 空 requires 列、无章 id 也保留）；
  *   · 6 列 v2：type / requires（中英文逗号）/ 第 7 列起 extra 往返；
+ *   · 结构化克隆（IPC / JSON，丢解析期 Symbol）后重写仍不丢 type / requires / 章目标；
+ *   · 运行时形状（无 type / requires 字段）写 4 列，不产生 `undefined` / 无端 `concept` 列；
+ *   · 非法先修（缺失 / 自引用 / 环）**不阻断读取**，只由 validateOutline 报告，重写不改数据；
+ *   · 单列 `- ` 手写说明行不当知识点（与旧 4 列实现同口径）；
  *   · `- 章目标:` 归章、绝不当知识点；
  *   · 负向：空名称 / 非法 type / 先修缺失 / 自引用 / 环 / 重复 id；
  *   · diff 五种最小变更各自只产出对应的 op（不多造）；
@@ -201,6 +205,51 @@ check('跨章先修不触发重排（章顺序由大纲决定）', (() => {
   const r = topoOrderUnits(o)
   return JSON.stringify(r.chapters[0].units.map((u) => u.id)) === JSON.stringify(['u2', 'u3'])
 })(), '')
+
+console.log('\n=== 7. 运行时读写保真（结构化克隆 / 缺省字段） ===')
+/** JSON 克隆 ≈ IPC 结构化克隆：解析期 Symbol（列形态）全部丢失，字段本身保留 */
+const handV2 = parseCourseMd(V2)
+const clonedV2 = clone(handV2)
+const clonedText = rewriteCourseMd(clonedV2)
+const reparsedV2 = parseCourseMd(clonedText)
+const unitsOf = (o) => o.chapters.flatMap((c) => c.units)
+const semantic = (o) => unitsOf(o).map((u) => [u.id, u.type ?? 'concept', (u.requires ?? []).join('>'), (u.extra ?? []).join('>')])
+check('克隆后重写再解析：type / requires / extra 语义不变', JSON.stringify(semantic(reparsedV2)) === JSON.stringify(semantic(handV2)), JSON.stringify(semantic(reparsedV2)))
+check('克隆后重写：章目标（真实字段）也留住', reparsedV2.chapters[0].objective === handV2.chapters[0].objective && reparsedV2.chapters[0].objective !== '', reparsedV2.chapters[0].objective)
+check('克隆后重写不出现 undefined 列', !clonedText.includes('undefined'), clonedText.split('\n').slice(3, 6).join(' / '))
+
+const legacyClone = clone(parseCourseMd(LEGACY))
+check('★ 4 列旧文件经结构化克隆后重写仍逐字一致（最小列，不补 concept）', rewriteCourseMd(legacyClone) === LEGACY && !rewriteCourseMd(legacyClone).includes('concept'), JSON.stringify(rewriteCourseMd(legacyClone)))
+
+/** 运行时新建的知识点（normalizeOutline 产物：只有 id/name/goal/source） */
+const runtimePlain = { title: 'T', goal: '', anchor: '', chapters: [{ id: 'c1', name: '甲', units: [{ id: 'u1', name: 'a', goal: 'b', source: 'c' }] }] }
+check('运行时无 type / requires 的知识点写 4 列', rewriteCourseMd(runtimePlain) === ['# 课程：T', '', '## [c1] 甲', '- u1 | a | b | c', ''].join('\n'), JSON.stringify(rewriteCourseMd(runtimePlain)))
+
+/** 运行时里手工带上 type / requires（模型给了就写进第 5 / 6 列） */
+const runtimeTyped = { title: 'T', goal: '', anchor: '', chapters: [{ id: 'c1', name: '甲', units: [{ id: 'u1', name: 'a', goal: 'b', source: 'c', type: 'memory', requires: ['u0'] }] }] }
+check('运行时 type / requires 真的落到第 5 / 6 列', rewriteCourseMd(runtimeTyped).includes('- u1 | a | b | c | memory | u0'), JSON.stringify(rewriteCourseMd(runtimeTyped)))
+
+console.log('\n=== 8. 非法先修不阻断读取 / 单列说明行 ===')
+const BROKEN = [
+  '# 课程：坏先修',
+  '',
+  '## [c1] 甲',
+  '- u1 | a | b | c | concept | uX, u2',
+  '- u2 | d | e | f | concept | u1',
+  '',
+].join('\n')
+const broken = parseCourseMd(BROKEN)
+check('先修缺失 / 成环也照常解析出全部知识点', broken.chapters.length === 1 && broken.chapters[0].units.length === 2, String(broken.chapters[0]?.units?.length))
+check('先修原文照常落到字段（uX / u2）', JSON.stringify(broken.chapters[0].units[0].requires) === JSON.stringify(['uX', 'u2']), JSON.stringify(broken.chapters[0].units[0].requires))
+check('非法先修只由 validateOutline 报告（missing + cycle）', (() => {
+  const cs = codes(validateOutline(broken))
+  return cs.includes('requires-missing') && cs.includes('requires-cycle')
+})(), JSON.stringify(codes(validateOutline(broken))))
+check('含非法先修的文件重写逐字一致（不静默改数据）', rewriteCourseMd(broken) === BROKEN, JSON.stringify(rewriteCourseMd(broken)))
+
+const PROSE = ['# 课程：手写', '', '## [c1] 甲', '- 本章要点见教材第 3 章', '- u1 | a | b | c', ''].join('\n')
+const prose = parseCourseMd(PROSE)
+check('单列手写说明行不当知识点（与旧 4 列实现同口径）', prose.chapters[0].units.length === 1 && prose.chapters[0].units[0].id === 'u1', JSON.stringify(prose.chapters[0].units.map((u) => u.id)))
 
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)

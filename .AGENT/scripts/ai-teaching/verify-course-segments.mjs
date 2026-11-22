@@ -19,13 +19,16 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ai314-'))
 async function load(rel, name) {
   const src = read(rel)
-  check(`${rel} 零 import`, !/^\s*import\s/m.test(src), '')
+  // 只允许 `import type`（strip 后为空行，不会产生运行时依赖）；运行时 import 一律不许
+  check(`${rel} 零运行时 import`, !/^\s*import\s+(?!type\b)/m.test(src), '')
   const file = path.join(tmp, `${name}.mjs`)
   fs.writeFileSync(file, stripTypeScriptTypes(src, { mode: 'strip' }))
   return import(pathToFileURL(file).href)
 }
 
 const coursePure = await load('electron/lib/aiTeachingCoursePure.ts', 'coursePure')
+// `课程.md` 读写唯一口径（v2 六列 + 旧 4 列兼容）
+const outlinePure = await load('electron/lib/courseOutlinePure.ts', 'outlinePure')
 const progressPure = await load('src/lib/aiTeachingProgressPure.ts', 'progressPure')
 const sourcesPure = await load('src/lib/aiTeachingSourcesPure.ts', 'sourcesPure')
 const rail = await load('src/modules/ai-teaching/courseRailPure.ts', 'courseRailPure')
@@ -33,13 +36,32 @@ const rail = await load('src/modules/ai-teaching/courseRailPure.ts', 'courseRail
 // ---------------------------------------------------------------- 1. 课程.md 章 ID
 console.log('\n=== 1. 课程.md 稳定章 ID ===')
 const md = '# 课程：测试\n- 目标: 跑通\n\n## [c7] 第七章 进程\n- u1 | 进程 | 理解进程 | 教材\n\n## 第八章 内存\n- u2 | 分页 | 理解分页 | 教材\n'
-const outline = coursePure.parseCourseMd(md)
+const outline = outlinePure.parseCourseMd(md)
 check('显式 [c7] 被保留', outline.chapters[0].id === 'c7', outline.chapters[0].id)
 check('旧格式无 ID 按位置补 c2', outline.chapters[1].id === 'c2', outline.chapters[1].id)
-const rewritten = coursePure.rewriteCourseMd(outline)
+const rewritten = outlinePure.rewriteCourseMd(outline)
 check('重写写回 [c7]', rewritten.includes('## [c7] 第七章 进程'), rewritten.split('\n')[3] || '')
-const round = coursePure.parseCourseMd(rewritten)
+const round = outlinePure.parseCourseMd(rewritten)
 check('重写往返章 ID / 名称 / 知识点不丢', JSON.stringify(round) === JSON.stringify(outline), JSON.stringify(round))
+
+// 产线路径 = 主进程 readCourseOutline → 纯函数改 → writeCourseOutline（rewriteCourseMd）。
+// 两个模块必须共用同一套行格式，否则「老文件被补 concept 列」「先修被丢」都在这里露馅。
+const legacyMd = ['# 课程：旧课', '', '## [c1] 甲', '- u1 | a | b | c', '- u2 | d | e | f', ''].join('\n')
+const legacyOut = outlinePure.parseCourseMd(legacyMd)
+const movedRes = coursePure.moveUnitInOutline(legacyOut, 'u2', 'c1', 'u1')
+const expectedMoved = ['# 课程：旧课', '', '## [c1] 甲', '- u2 | d | e | f', '- u1 | a | b | c', ''].join('\n')
+check('产线路径：4 列旧文件（解析 → 拖拽重排 → 重写）不补 concept 列', movedRes.ok && outlinePure.rewriteCourseMd(movedRes.outline) === expectedMoved, JSON.stringify(outlinePure.rewriteCourseMd(movedRes.outline)))
+const mergedRes = coursePure.mergeOutlineAdditions(legacyOut, { toExisting: [{ chapterId: 'c1', name: '新点', goal: 'g' }], newChapters: [] })
+const mergedText = outlinePure.rewriteCourseMd(mergedRes.outline)
+check('产线路径：增补后旧行不变、新行也走 4 列', mergedText.includes('- u1 | a | b | c') && mergedText.includes('- u3 | 新点 | g | AI 增补'), JSON.stringify(mergedText))
+
+const sixMd = ['# 课程：新', '', '## [c1] 甲', '- u1 | a | b | c | memory |', '- u2 | d | e | f | procedure | u1', ''].join('\n')
+const sixOut = outlinePure.parseCourseMd(sixMd)
+const sixMoved = coursePure.moveUnitInOutline(sixOut, 'u2', 'c1', 'u1')
+check('产线路径：重排 / 增补不丢 type 与 requires', (() => {
+  const t = outlinePure.rewriteCourseMd(sixMoved.outline)
+  return t.includes('| memory') && t.includes('| procedure | u1')
+})(), JSON.stringify(outlinePure.rewriteCourseMd(sixMoved.outline)))
 
 // ---------------------------------------------------------------- 1.5 交接标题闸门
 console.log('\n=== 1.5 交接标题闸门 ===')

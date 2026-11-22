@@ -1,9 +1,14 @@
 /**
- * AI教学·课程模式 —— 纯函数与类型（**零依赖，专为让契约脚本 import**）
+ * AI教学·课程模式 —— 纯函数与类型（**除类型外零运行时依赖，专为让契约脚本 import**）
  *
  * 主进程实现（含 fs / electron / IPC）在 `aiTeachingCourse.ts`，从本文件 import 这些纯函数后复用。
  * 契约脚本 `.AGENT/scripts/ai-teaching/verify-course-mode.mjs` 直接 strip-types 后 import 本文件做用例表。
+ *
+ * ★ `课程.md` 的**读写不在这里**：解析 / 重写统一走 `courseOutlinePure.ts`（v2 六列 + 旧 4 列兼容，
+ *   第 5 列 type / 第 6 列 requires），本文件只保留运行时形状与其余纯函数。
  */
+
+import type { UnitType } from './aiTeachingTypesPure'
 
 export type CourseUnitStatus = 'todo' | 'learning' | 'check' | 'mastered' | 'review'
 
@@ -12,11 +17,22 @@ export interface CourseUnit {
   name: string
   goal: string
   source: string
+  /**
+   * 知识点类型（v2 第 5 列）：缺省 = concept。写法与 `aiTeachingTypesPure.UnitType` 同一联合，
+   * 这里用 import type 复用，不另立一份。运行时**只读不判定**（排序 / 讲解不依赖它）。
+   */
+  type?: UnitType
+  /** 先修知识点 id（v2 第 6 列）：缺省 / 空数组 = 无先修。本批只保证读写不丢，不参与排序。 */
+  requires?: string[]
+  /** v2 第 7 列及以后的原样文本：仅为读写保真，UI 不展示。 */
+  extra?: string[]
 }
 
 export interface CourseChapter {
   id: string
   name: string
+  /** 「- 章目标: ...」行（v2 才有）：读写保真用，缺省 = 未写。 */
+  objective?: string
   units: CourseUnit[]
 }
 
@@ -63,55 +79,6 @@ export function cleanField(v: unknown): string {
   return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\|/g, '／').trim()
 }
 
-/** 解析 `课程.md` → CourseOutline（宽容：缺字段回退空串） */
-export function parseCourseMd(text: string): CourseOutline {
-  const out: CourseOutline = { title: '', goal: '', anchor: '', chapters: [] }
-  let cur: CourseChapter | null = null
-  for (const raw of String(text ?? '').replace(/\r\n/g, '\n').split('\n')) {
-    const line = raw.trim()
-    if (!line) continue
-    const title = /^#\s*课程\s*[：:]\s*(.+)$/.exec(line)
-    if (title) { out.title = title[1].trim(); continue }
-    const goal = /^[-*]?\s*目标\s*[：:]\s*(.+)$/.exec(line)
-    if (goal) { out.goal = goal[1].trim(); continue }
-    const anchor = /^[-*]?\s*依据\s*[：:]\s*(.+)$/.exec(line)
-    if (anchor) { out.anchor = anchor[1].trim(); continue }
-    // 章行：`## 章名`（旧）或 `## [c3] 章名`（3.14 起稳定章 ID）
-    const ch = /^#{2,6}\s+(?:\[([A-Za-z0-9_-]+)\]\s*)?(.+)$/.exec(line)
-    if (ch) {
-      const id = (ch[1] ?? '').trim() || `c${out.chapters.length + 1}`
-      cur = { id, name: (ch[2] ?? '').trim(), units: [] }
-      out.chapters.push(cur)
-      continue
-    }
-    const unit = /^[-*]\s*(.+)$/.exec(line)
-    if (unit && cur) {
-      const parts = unit[1].split('|').map((s) => s.trim())
-      if (parts.length >= 2 && parts[0]) {
-        cur.units.push({ id: parts[0], name: parts[1] || parts[0], goal: parts[2] ?? '', source: parts[3] ?? '' })
-      }
-    }
-  }
-  return out
-}
-
-/** 重写 `课程.md`（大纲唯一写入口径） */
-export function rewriteCourseMd(o: CourseOutline): string {
-  const lines: string[] = [`# 课程：${cleanField(o.title) || '未命名课程'}`]
-  if (o.goal) lines.push(`- 目标: ${cleanField(o.goal)}`)
-  if (o.anchor) lines.push(`- 依据: ${cleanField(o.anchor)}`)
-  lines.push('')
-  o.chapters.forEach((c, ci) => {
-    const cid = cleanField(c.id) || `c${ci + 1}`
-    lines.push(`## [${cid}] ${cleanField(c.name) || `第${ci + 1}章`}`)
-    c.units.forEach((u) => {
-      lines.push(`- ${cleanField(u.id)} | ${cleanField(u.name)} | ${cleanField(u.goal)} | ${cleanField(u.source)}`)
-    })
-    lines.push('')
-  })
-  return lines.join('\n')
-}
-
 /** 扫描文本里所有**配对平衡**的顶层 `{...}` 片段（跳过字符串内的大括号）。
  *  思考型模型常先输出推理文本（含零散 `{}`）再给答案，用配对扫描而非「首个 { 到末个 }」才不会跨段截断。 */
 export function balancedJsonObjects(text: string): string[] {
@@ -136,7 +103,22 @@ export function balancedJsonObjects(text: string): string[] {
   return out
 }
 
-/** 把候选对象归一化成 CourseOutline（非大纲形状返回 null） */
+/** 先修列归一化：接受数组或 `a,b` / `a，b` 字符串，去空、去重 */
+function normalizeRequires(raw: unknown): string[] {
+  const list = Array.isArray(raw)
+    ? raw.map((x) => String(x ?? '').trim())
+    : String(raw ?? '').split(/[,，]/).map((x) => x.trim())
+  const out: string[] = []
+  for (const s of list) if (s && !out.includes(s)) out.push(s)
+  return out
+}
+
+/**
+ * 把候选对象归一化成 CourseOutline（非大纲形状返回 null）。
+ *
+ * ★ `type` / `requires` / `extra` **不得在这一步丢弃**：模型（或任何调用方）给了就原样带下去，
+ *   写盘走 `courseOutlinePure.rewriteCourseMd` 落到第 5/6/7 列；没给就不补字段（= 4 列输出）。
+ */
 export function normalizeOutline(raw: unknown): CourseOutline | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as { title?: unknown; goal?: unknown; anchor?: unknown; chapters?: unknown }
@@ -146,17 +128,30 @@ export function normalizeOutline(raw: unknown): CourseOutline | null {
   const chapters: CourseChapter[] = []
   let n = 0
   chaptersSrc.forEach((c, ci) => {
-    const cObj = (c ?? {}) as { name?: unknown; units?: unknown }
+    const cObj = (c ?? {}) as { name?: unknown; objective?: unknown; units?: unknown }
     const unitsRaw = Array.isArray(cObj.units) ? cObj.units : []
     const units: CourseUnit[] = []
     unitsRaw.forEach((u) => {
-      const uObj = (u ?? {}) as { name?: unknown; goal?: unknown; source?: unknown }
+      const uObj = (u ?? {}) as { name?: unknown; goal?: unknown; source?: unknown; type?: unknown; requires?: unknown; extra?: unknown }
       const name = String(uObj?.name ?? '').trim()
       if (!name) return
       n += 1
-      units.push({ id: `u${n}`, name, goal: String(uObj?.goal ?? '').trim(), source: String(uObj?.source ?? '').trim() })
+      const unit: CourseUnit = { id: `u${n}`, name, goal: String(uObj?.goal ?? '').trim(), source: String(uObj?.source ?? '').trim() }
+      // 非法 type 原样保留（写回后由 validateOutline 报 bad-type），空串 = 未给
+      const type = String(uObj?.type ?? '').trim()
+      if (type) unit.type = type as UnitType
+      const requires = normalizeRequires(uObj?.requires)
+      if (requires.length) unit.requires = requires
+      if (Array.isArray(uObj?.extra)) {
+        const extra = uObj.extra.map((s) => String(s ?? '').trim())
+        if (extra.length) unit.extra = extra
+      }
+      units.push(unit)
     })
-    if (units.length) chapters.push({ id: `c${ci + 1}`, name: String(cObj?.name ?? `第${ci + 1}章`).trim(), units })
+    const chapter: CourseChapter = { id: `c${ci + 1}`, name: String(cObj?.name ?? `第${ci + 1}章`).trim(), units }
+    const objective = String(cObj?.objective ?? '').trim()
+    if (objective) chapter.objective = objective
+    if (units.length) chapters.push(chapter)
   })
   if (!chapters.length) return null
   return {

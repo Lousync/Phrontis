@@ -35,7 +35,7 @@ check('草稿卡含「正式生成」，「继续修改」已删', mod.includes(
 check('落盘后转「已落盘 · 课程.md」+「打开课程」', mod.includes('已落盘 · 课程.md') && mod.includes('打开课程') && mod.includes('outlineCommitted'))
 check('打开课程跳编辑区（kb-open-note 带 from aiTeaching）', /const openCourseOutline[\s\S]{0,400}kb-open-note[\s\S]{0,120}from: 'aiTeaching'/.test(mod))
 check('未展开章显示锁定提示', mod.includes('未展开'))
-check('正文剥离 outline 围栏', mod.includes('(profile|plan|ask|outline)'))
+check('正文剥离 outline 围栏', mod.includes('(profile|plan|ask|outline'))
 
 // 2026-10-14：草稿卡从「输入区带子」挪进**产生它的那条回复**里（docs/ai-outline-inline-plan.md）
 console.log('\n[草稿卡内联] index.tsx')

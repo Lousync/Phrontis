@@ -10,11 +10,11 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import {
   normalizeProgressFile,
-  parseCourseMd,
   type CourseOutline,
   type CourseWsV2,
   type ProgressFileV2,
 } from './aiTeachingCoursePure'
+import { parseCourseMd } from './courseOutlinePure'
 import { courseProgressSummary, unitLearned } from '../../src/lib/aiTeachingProgressPure'
 
 export interface CourseSummary {

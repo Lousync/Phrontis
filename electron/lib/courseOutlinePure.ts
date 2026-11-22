@@ -30,8 +30,13 @@
  *   而非报错；写盘侧（`rewriteCourseMd`）把字段内的 `|` 换成全角 `／`，保证不再产生歧义。
  * - 旧 4 列行不补 `concept` / 空 requires 列：列数由模块内 Symbol 记录（不污染共享类型、
  *   不进 JSON），只有语义真的变化（type 改了 / 有先修 / 有 extra）才扩列。
- *   Symbol 随结构化克隆丢失时退化为标准 6 列输出（语义不变）。
+ * - Symbol 随结构化克隆丢失（IPC / JSON）时按**最小列**输出：类型仍是 concept 且无先修的走 4 列，
+ *   语义真变了才扩列 —— 老文件经一次读写在文本上看不出差别。
+ * - **重写输入是 `OutlineInput`**（`type` / `requires` / `extra` / 章目标都可缺省）：运行时的
+ *   `CourseOutline`（`aiTeachingCoursePure`）可以直接传进来写盘，不必先补齐字段。
  * - `requires` 兼容中文逗号；重写优先复用源列原文（空格 / 逗号风格不变）。
+ * - 没有 `|` 的单列 `- ` 行（手写说明）不是知识点，解析时跳过；**重写也不会保留它**
+ *   （与旧 4 列实现同口径）。要留文本请写正文段落，别写在 `- ` 行里。
  *
  * 纯函数、零运行时依赖（只允许 `import type`）；可被 stripTypeScriptTypes 后直接 import。
  */
@@ -47,6 +52,35 @@ import type {
 
 /** 合法知识点类型（顺序即 `UnitType` 联合顺序） */
 const UNIT_TYPES: readonly UnitType[] = ['memory', 'concept', 'procedure', 'design']
+
+/**
+ * 重写入参的宽松形状：`type` / `requires` / `extra` / 章目标都可缺省。
+ * 运行时的 `CourseOutline`（`aiTeachingCoursePure`）与模型新生成的知识点都长这样；
+ * `CourseOutlineV2` 是它的加强版（字段必填），可直接传入。
+ */
+export interface OutlineUnitInput {
+  id: string
+  name: string
+  goal: string
+  source: string
+  type?: UnitType
+  requires?: string[]
+  extra?: string[]
+}
+
+export interface OutlineChapterInput {
+  id: string
+  name: string
+  objective?: string
+  units: OutlineUnitInput[]
+}
+
+export interface OutlineInput {
+  title: string
+  goal: string
+  anchor: string
+  chapters: OutlineChapterInput[]
+}
 
 /** 解析期列形态（`cols` = 源行有几列，最多记到 6 列；第 7 列起进 extra） */
 interface UnitShape {
@@ -150,7 +184,8 @@ export function parseCourseMd(text: string): CourseOutlineV2 {
     // 按 `|` 切列：多余段按列位落位（≥7 进 extra），不抛错、不丢文本
     const parts = bullet[1].split('|')
     const id = (parts[0] ?? '').trim()
-    if (!id) continue
+    // 单列行（手写说明，如 `- 本章要点见教材`）不是知识点：至少要 id + 名称两列
+    if (!id || parts.length < 2) continue
 
     const cols = Math.min(parts.length, 6)
     const typeRaw = parts.length >= 5 ? (parts[4] ?? '').trim() : undefined
@@ -173,17 +208,24 @@ export function parseCourseMd(text: string): CourseOutlineV2 {
   return out
 }
 
-/** 单条知识点行（列数由解析期 Symbol 决定；语义变化时自动扩列） */
-function unitLine(u: UnitRow): string {
+/**
+ * 单条知识点行。
+ * - 有解析期 Symbol → 沿用源列数（旧 4 列 / 带空 requires 列都原样）；
+ * - 没有 Symbol（结构化克隆 / 模型新建）→ **最小列**：type 仍是 concept 且无先修时只写 4 列，
+ *   语义真的变了才扩列，避免老文件被无端补上 `| concept |`。
+ */
+function unitLine(u: OutlineUnitInput): string {
   const shape = (u as UnitRowInternal)[UNIT_SHAPE]
-  const cols = shape?.cols ?? 6
+  const cols = shape?.cols ?? 4
   const extra = (u.extra ?? []).map((s) => String(s ?? '').trim())
+  const requires = u.requires ?? []
+  const type = u.type ?? 'concept'
 
   const typeRaw = shape?.typeRaw
-  const typeOut = typeRaw !== undefined && (typeRaw || 'concept') === u.type ? typeRaw : u.type
-  const reqOut = shape?.reqRaw !== undefined && sameRequires(shape.reqRaw, u.requires)
+  const typeOut = typeRaw !== undefined && (typeRaw || 'concept') === type ? typeRaw : type
+  const reqOut = shape?.reqRaw !== undefined && sameRequires(shape.reqRaw, requires)
     ? shape.reqRaw
-    : (u.requires ?? []).map((s) => cleanField(s)).filter(Boolean).join(', ')
+    : requires.map((s) => cleanField(s)).filter(Boolean).join(', ')
 
   const needType = cols >= 5 || typeOut !== 'concept' || reqOut !== '' || extra.length > 0
   const needRequires = cols >= 6 || reqOut !== '' || extra.length > 0
@@ -200,8 +242,9 @@ function unitLine(u: UnitRow): string {
 /**
  * 重写 `课程.md`。对 `parseCourseMd` 的结果幂等：
  * 旧 4 列 / 无章 id / requires 列原文风格都原样保留（行尾空白统一，末尾恒一个 `\n`）。
+ * 入参允许字段缺省（`OutlineInput`），运行时结构可直接传入。
  */
-export function rewriteCourseMd(o: CourseOutlineV2): string {
+export function rewriteCourseMd(o: OutlineInput): string {
   const lines: string[] = [`# 课程：${cleanField(o.title) || '未命名课程'}`]
   if (cleanField(o.goal)) lines.push(`- 目标: ${cleanField(o.goal)}`)
   if (cleanField(o.anchor)) lines.push(`- 依据: ${cleanField(o.anchor)}`)
@@ -254,7 +297,8 @@ export function validateOutline(o: CourseOutlineV2): OutlineValidationIssue[] {
       if (!String(u.name ?? '').trim()) {
         issues.push({ code: 'unit-empty-name', chapterId: c.id, unitId: id })
       }
-      if (!UNIT_TYPES.includes(u.type)) {
+      // 缺省 type（运行时新建的知识点）按 concept 算，不算非法
+      if (u.type !== undefined && !UNIT_TYPES.includes(u.type)) {
         issues.push({ code: 'bad-type', chapterId: c.id, unitId: id, detail: String(u.type ?? '') })
       }
       for (const d of requires) {
@@ -344,8 +388,8 @@ export function diffOutlines(a: CourseOutlineV2, b: CourseOutlineV2): OutlineDif
       if (prev.unit.name !== u.name) {
         ops.push({ op: 'rename-unit', unitId: u.id, from: prev.unit.name, to: u.name })
       }
-      if (prev.unit.type !== u.type) {
-        ops.push({ op: 'retype-unit', unitId: u.id, from: prev.unit.type, to: u.type })
+      if ((prev.unit.type ?? 'concept') !== (u.type ?? 'concept')) {
+        ops.push({ op: 'retype-unit', unitId: u.id, from: prev.unit.type ?? 'concept', to: u.type ?? 'concept' })
       }
       if (!sameList(prev.unit.requires ?? [], u.requires ?? [])) {
         ops.push({ op: 'requires-change', unitId: u.id, from: [...(prev.unit.requires ?? [])], to: [...(u.requires ?? [])] })
