@@ -7,25 +7,25 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
-import { pathToFileURL } from 'node:url'
-import { stripTypeScriptTypes } from 'node:module'
+import { makeStager } from './strip-load.mjs'
 
 const ROOT = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(new URL('../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
 const checks = []
 const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'longmat-'))
-async function load(rel, name) {
+// 纯函数层允许相对 import（共享纯函数）；裸包一律不许。
+const stager = makeStager(ROOT)
+async function load(rel) {
   const src = read(rel)
-  check(`${rel} 零 import`, !/^\s*import\s/m.test(src), '')
-  const file = path.join(tmp, `${name}.mjs`)
-  fs.writeFileSync(file, stripTypeScriptTypes(src, { mode: 'strip' }))
-  return import(pathToFileURL(file).href)
+  const bare = [...src.matchAll(/^\s*import\s+[^\n]*?from\s*['"]([^'"]+)['"]/gm)]
+    .map((m) => m[1])
+    .filter((s) => !s.startsWith('.'))
+  check(`${rel} 运行时 import 只用仓库内相对纯函数模块`, bare.length === 0, bare.join(','))
+  return stager.load(rel)
 }
 
-const pure = await load('src/lib/aiTeachingSourcesPure.ts', 'sourcesPure')
+const pure = await load('src/lib/aiTeachingSourcesPure.ts')
 
 // ---------------------------------------------------------------- 1. anchorKey
 console.log('\n=== 1. anchorKey 区间键 ===')
@@ -142,4 +142,5 @@ check('docsReader 区间分块（章区间可超 200 页）', docsReaderSrc.incl
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  [${c.detail}]` : ''}`)
 console.log(`\n${checks.length - failed.length}/${checks.length} PASS`)
+stager.cleanup()
 process.exit(failed.length ? 1 : 0)

@@ -1,11 +1,17 @@
 /**
- * AI教学 · 素材/段预检 —— 纯函数与类型（**零依赖**，主进程与渲染层共用，契约脚本直接 import）。
+ * AI教学 · 素材/段预检 —— 纯函数与类型（**除 `src/lib/courseOutlineTopo` 外零依赖**，
+ * 主进程与渲染层共用，契约脚本直接 import）。
  *
  * 3.14.0 简化口径（docs/ai-teaching-simplify-plan.md）：
  *   · 一份 sources.json：登记（文件） / 章级分配（anchor） / 段级确认（快照）三分离；
  *   · 开段预检默认 B（按目录 / 文件名 / 标题缩窄），匹配失败回退 A（整章分配）；
  *   · 段快照只读，后续改章级分配不影响已开的段。
+ *
+ * 默认选点（`defaultUnitSelection`）按章内**先修拓扑序**推进：无 `requires` 的课程
+ * 与改造前逐字一致（拓扑序退化为原行序）。
  */
+
+import { stableTopo } from './courseOutlineTopo'
 
 export type SourceType =
   | 'md'
@@ -118,6 +124,8 @@ export interface PreflightUnit {
   id: string
   name: string
   learned?: boolean
+  /** v2 第 6 列先修知识点 id（章内）：只参与默认选点的拓扑序，不参与匹配。 */
+  requires?: string[]
 }
 
 export interface PreflightCandidate {
@@ -179,14 +187,35 @@ export function anchorLabel(a: SourceAnchor | null | undefined): string {
   }
 }
 
-/** 默认选点：从被点的知识点开始，连续选最多 max 个未学点；遇到已学即停。 */
-export function defaultUnitSelection(units: ReadonlyArray<PreflightUnit>, clickedUnitId: string, max = 3): string[] {
+/** 旧口径（改造前实现，逐字保留）：纯按大纲行序从被点知识点起连续取未学点。 */
+function legacyUnitSelection(units: ReadonlyArray<PreflightUnit>, clickedUnitId: string, max = 3): string[] {
   const idx = units.findIndex((u) => u.id === clickedUnitId)
   if (idx < 0 || units[idx]?.learned) return []
   const out: string[] = []
   for (let i = idx; i < units.length && out.length < Math.max(1, max); i++) {
     if (units[i].learned) break
     out.push(units[i].id)
+  }
+  return out
+}
+
+/**
+ * 默认选点：从被点的知识点开始，连续选最多 max 个未学点；遇到已学即停。
+ *
+ * 章内先按**先修拓扑序**（`stableTopo`）排列再取：
+ *   · 无 `requires` / 有环 / 先修缺失 → 拓扑序即原行序，输出与改造前逐字一致；
+ *   · 被点知识点不在本章（找不到）或以已学态命中 → 完全退化为旧逻辑（返回 [] 或按行序）。
+ * 「连续」语义不变：只沿排序后的相邻知识点向后推进，遇已学就停。
+ */
+export function defaultUnitSelection(units: ReadonlyArray<PreflightUnit>, clickedUnitId: string, max = 3): string[] {
+  const ordered = stableTopo(units)
+  const idx = ordered.findIndex((u) => u.id === clickedUnitId)
+  if (idx < 0) return legacyUnitSelection(units, clickedUnitId, max)
+  if (ordered[idx]?.learned) return []
+  const out: string[] = []
+  for (let i = idx; i < ordered.length && out.length < Math.max(1, max); i++) {
+    if (ordered[i].learned) break
+    out.push(ordered[i].id)
   }
   return out
 }

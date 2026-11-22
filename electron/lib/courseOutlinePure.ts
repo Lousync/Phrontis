@@ -38,7 +38,8 @@
  * - 没有 `|` 的单列 `- ` 行（手写说明）不是知识点，解析时跳过；**重写也不会保留它**
  *   （与旧 4 列实现同口径）。要留文本请写正文段落，别写在 `- ` 行里。
  *
- * 纯函数、零运行时依赖（只允许 `import type`）；可被 stripTypeScriptTypes 后直接 import。
+ * 纯函数；运行时依赖只允许纯函数模块（`src/lib/courseOutlineTopo`），其余一律 `import type`；
+ * 可被 stripTypeScriptTypes 后直接 import（契约脚本会递归 stage 相对依赖）。
  */
 
 import type {
@@ -49,6 +50,10 @@ import type {
   UnitRow,
   UnitType,
 } from './aiTeachingTypesPure'
+// 章内拓扑序的唯一实现在 src/lib（渲染层也要用，不能 import electron/lib）；这里只 re-export
+import { stableTopo } from '../../src/lib/courseOutlineTopo'
+
+export { stableTopo } from '../../src/lib/courseOutlineTopo'
 
 /** 合法知识点类型（顺序即 `UnitType` 联合顺序） */
 const UNIT_TYPES: readonly UnitType[] = ['memory', 'concept', 'procedure', 'design']
@@ -453,25 +458,8 @@ function hasRequiresCycle(units: UnitRow[]): boolean {
   return false
 }
 
-/** 章内稳定拓扑排序：每次取「先修都已就位」的最靠前一条（Kahn + 原序优先） */
-function stableTopo(units: UnitRow[]): UnitRow[] {
-  const local = new Set(units.map((u) => u.id))
-  const picked = new Set<string>()
-  const pending = units.slice()
-  const out: UnitRow[] = []
-  while (pending.length) {
-    const i = pending.findIndex((u) => (u.requires ?? []).every((r) => !local.has(r) || picked.has(r)))
-    if (i < 0) return units.slice()
-    const [u] = pending.splice(i, 1)
-    picked.add(u.id)
-    out.push(u)
-  }
-  return out
-}
-
-/**
- * 章内按先修重排。仅在「无环且 requires 全部存在」时生效，否则原样返回入参（不抛错）。
- * 只动章内顺序：跨章先修不参与本章排序（章顺序由大纲决定）。
+/** 章内按先修重排。仅在「无环且 requires 全部存在」时生效，否则原样返回入参（不抛错）。
+ *  只动章内顺序：跨章先修不参与本章排序（章顺序由大纲决定）。排序算法见 `src/lib/courseOutlineTopo`。
  */
 export function topoOrderUnits(o: CourseOutlineV2): CourseOutlineV2 {
   const all: UnitRow[] = []

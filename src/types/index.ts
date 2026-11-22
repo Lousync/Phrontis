@@ -1636,9 +1636,9 @@ export interface AiTeachCourseUnit {
   name: string
   goal: string
   source: string
-  /** v2 第 5 列：知识点类型。只做读写保真，本批不参与排序 / 讲解 / 展示。 */
+  /** v2 第 5 列：知识点类型（memory / concept / procedure / design）。参与大纲校验与合并，不参与大纲重排。 */
   type?: AiTeachCourseUnitType
-  /** v2 第 6 列：先修知识点 id。只做读写保真，本批不参与排序 / 讲解 / 展示。 */
+  /** v2 第 6 列：同章先修知识点 id。参与「开段预检默认选点」的章内拓扑序（无先修/有环/缺先修时完全退化为原行序）；不参与大纲重排与 UI 展示。 */
   requires?: string[]
   /** v2 第 7 列及以后的原样文本：仅读写保真，UI 不展示。 */
   extra?: string[]

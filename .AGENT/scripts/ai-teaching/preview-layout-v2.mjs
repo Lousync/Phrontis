@@ -9,9 +9,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
-import { pathToFileURL } from 'node:url'
-import { stripTypeScriptTypes } from 'node:module'
+import { makeStager } from './strip-load.mjs'
 
 const ROOT = path.resolve(new URL('../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
 const vaultRoot = process.argv[2]
@@ -27,14 +25,8 @@ if (!fs.existsSync(wsAbs)) {
   process.exit(2)
 }
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-layout-preview-'))
-function load(rel) {
-  let out = stripTypeScriptTypes(fs.readFileSync(path.join(ROOT, rel), 'utf8'), { mode: 'strip' })
-  out = out.replace(/from '\.\/([^']+)'/g, "from './$1.mjs'")
-  const file = path.join(tmp, `${path.basename(rel, '.ts')}.mjs`)
-  fs.writeFileSync(file, out)
-  return import(pathToFileURL(file).href)
-}
+const stager = makeStager(ROOT)
+const load = (rel) => stager.load(rel)
 
 const layout = await load('electron/lib/aiTeachingLayoutPure.ts')
 const outlinePure = await load('electron/lib/courseOutlinePure.ts')

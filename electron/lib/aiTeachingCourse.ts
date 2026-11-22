@@ -14,6 +14,7 @@ import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { ensureQuizDocFrontmatter, forceFrontmatterId, hasQuizFence, readFrontmatterId } from './quizDocPure'
 import {
   normalizeOutline,
+  resolveOutlineRequires,
   cleanField,
   mergeOutlineAdditions,
   moveUnitInOutline,
@@ -21,6 +22,7 @@ import {
   isHandoffTitle,
   pickReusableHandoff,
   type CourseOutline,
+  type CourseUnit,
   type CourseUnitProgress,
   type CourseUnitStatus,
   type CourseLessonInfoV2,
@@ -1500,15 +1502,15 @@ export async function makeUnitQuiz(wsId: string, unitId: string, getSetting: (ke
 // ===== 大纲增补（只增补合并）：助手工具 course.outline.write(append=true) 的落盘口径 =====
 
 /** 写入增补（只增补合并，保留现有 id/进度） */
-export function applyOutlineAdditions(wsId: string, additions: OutlineAdditions, getSetting: (key: string) => unknown): { ok: boolean; added?: number; error?: string } {
+export function applyOutlineAdditions(wsId: string, additions: OutlineAdditions, getSetting: (key: string) => unknown): { ok: boolean; added?: number; droppedRequires?: number; error?: string } {
   try { assertWorkspaceEditable(wsId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const outline = readCourseOutline(wsId, getSetting)
   if (!outline) return { ok: false, error: '该工作区还没有课程大纲' }
-  const { outline: merged, added } = mergeOutlineAdditions(outline, additions ?? { toExisting: [], newChapters: [] })
+  const { outline: merged, added, droppedRequires } = mergeOutlineAdditions(outline, additions ?? { toExisting: [], newChapters: [] })
   if (added === 0) return { ok: false, error: '没有可写入的增补（可能都是重复项）' }
   const w = writeCourseOutline(wsId, merged, getSetting)
   if (!w.ok) return { ok: false, error: w.error }
-  return { ok: true, added }
+  return { ok: true, added, droppedRequires }
 }
 
 // ===== 对话驱动建课（Phase 2）：教学助手通过工具调用的业务函数 =====
@@ -1555,7 +1557,7 @@ export interface OutlineDraft {
   title?: string
   goal?: string
   anchor?: string
-  chapters?: { name?: string; units?: { name?: string; goal?: string; source?: string }[] }[]
+  chapters?: { name?: string; units?: { name?: string; goal?: string; source?: string; type?: CourseUnit['type']; requires?: string[] }[] }[]
   /** true=追加进现大纲（展开新章/补知识点）；缺省/false=首次生成（覆盖） */
   append?: boolean
 }
@@ -1564,7 +1566,7 @@ export interface OutlineDraft {
 const OUTLINE_NEXT_STEP = '大纲已落盘。下一步只引导用户去左栏点知识点开段（会先做素材预检）；不要问是否开讲，也不要在课程助手会话里直接开讲。'
 
 /** 助手写入/展开课程大纲：append=false 首次生成（覆盖）；append=true 按章名合并增补（保留既有 id/进度）。 */
-export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, getSetting: (key: string) => unknown): { ok: boolean; mode?: 'create' | 'append'; added?: number; chapters?: number; relPath?: string; nextStep?: string; error?: string } {
+export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, getSetting: (key: string) => unknown): { ok: boolean; mode?: 'create' | 'append'; added?: number; droppedRequires?: number; chapters?: number; relPath?: string; nextStep?: string; error?: string } {
   const id = String(wsId ?? '')
   if (!id) return { ok: false, error: '缺少工作区' }
   if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
@@ -1574,27 +1576,30 @@ export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, get
   const existing = readCourseOutline(id, getSetting)
   const hasExisting = !!existing && existing.chapters.length > 0 && draft?.append !== false
   if (!hasExisting) {
+    // 首次生成：requires 里的名称按本章转成刚分配的 id（解析不到 / 自引用只丢弃该条并计数）
+    const resolved = resolveOutlineRequires(norm)
     const outline: CourseOutline = {
       title: norm.title || existing?.title || '',
       goal: norm.goal || existing?.goal || '',
       anchor: norm.anchor || existing?.anchor || '',
-      chapters: norm.chapters,
+      chapters: resolved.outline.chapters,
     }
     const w = writeCourseOutline(id, outline, getSetting)
-    return w.ok ? { ok: true, mode: 'create', chapters: outline.chapters.length, relPath: w.relPath, nextStep: OUTLINE_NEXT_STEP } : { ok: false, error: w.error }
+    return w.ok ? { ok: true, mode: 'create', droppedRequires: resolved.droppedRequires, chapters: outline.chapters.length, relPath: w.relPath, nextStep: OUTLINE_NEXT_STEP } : { ok: false, error: w.error }
   }
   // 增补：章名对齐现有章 → 追加其知识点；否则整章新增
+  // type / requires 一并带过去；requires 里的名称由 mergeOutlineAdditions 在本章范围内转 id
   const additions: OutlineAdditions = { toExisting: [], newChapters: [] }
   for (const ch of norm.chapters) {
     const ex = existing!.chapters.find((c) => cleanField(c.name) === cleanField(ch.name))
-    if (ex) for (const u of ch.units) additions.toExisting.push({ chapterId: ex.id, name: u.name, goal: u.goal, source: u.source })
-    else additions.newChapters.push({ name: ch.name, units: ch.units.map((u) => ({ name: u.name, goal: u.goal, source: u.source })) })
+    if (ex) for (const u of ch.units) additions.toExisting.push({ chapterId: ex.id, name: u.name, goal: u.goal, source: u.source, type: u.type, requires: u.requires })
+    else additions.newChapters.push({ name: ch.name, units: ch.units.map((u) => ({ name: u.name, goal: u.goal, source: u.source, type: u.type, requires: u.requires })) })
   }
   const r = applyOutlineAdditions(id, additions, getSetting)
   // 落盘路径**两条分支都要给**：草稿卡的「打开课程」靠它跳编辑区打开 课程.md。
   // append 分支此前只回 added（2026-10-14 补）—— 否则「展开下一章」后落盘的卡拿不到路径。
   const rel = outlineRel(id, getSetting)?.rel
-  return r.ok ? { ok: true, mode: 'append', added: r.added, relPath: rel, nextStep: OUTLINE_NEXT_STEP } : { ok: false, error: r.error }
+  return r.ok ? { ok: true, mode: 'append', added: r.added, droppedRequires: r.droppedRequires, relPath: rel, nextStep: OUTLINE_NEXT_STEP } : { ok: false, error: r.error }
 }
 
 /** 删除知识点：未学习(todo/无进度) 直接删；已学/学一半 → 拒绝并要求先「整理对话并归档」。 */

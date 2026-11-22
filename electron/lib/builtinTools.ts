@@ -3739,7 +3739,31 @@ export function registerBuiltinTools(): void {
         title: { type: 'string', description: '课程名（首次可给）' },
         goal: { type: 'string', description: '一句话学习目标（首次可给）' },
         append: { type: 'boolean', description: 'true=追加进现大纲；缺省/false=首次覆盖生成' },
-        chapters: { type: 'array', items: { type: 'object' }, description: '[{ name, units:[{ name, goal, source }] }]' },
+        chapters: {
+          type: 'array',
+          description: '全量章节',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '章名' },
+              units: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', description: '知识点名' },
+                    goal: { type: 'string', description: '学习目标' },
+                    source: { type: 'string', description: '出处' },
+                    type: { type: 'string', enum: ['memory', 'concept', 'procedure', 'design'], description: '可选' },
+                    requires: { type: 'array', items: { type: 'string' }, description: '同章先修（id/名称），有真实前置才填' },
+                  },
+                  required: ['name'],
+                },
+              },
+            },
+            required: ['name'],
+          },
+        },
       },
       required: ['chapters'],
     },

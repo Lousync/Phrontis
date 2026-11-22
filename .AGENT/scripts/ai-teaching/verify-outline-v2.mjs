@@ -15,16 +15,14 @@
  *   · 负向：空名称 / 非法 type / 先修缺失 / 自引用 / 环 / 重复 id；
  *   · diff 五种最小变更各自只产出对应的 op（不多造）；
  *   · `protectLearned` 拦删除 / 改名已学点；
- *   · `topoOrderUnits` 合法输入按先修排序，非法输入原样返回不抛错。
+ *   · `topoOrderUnits` 合法输入按先修排序，非法输入原样返回不抛错
+ *     （`stableTopo` 算法已在 `src/lib/courseOutlineTopo.ts`，本模块 import + re-export）。
  *
  * 运行（项目根目录）：node .AGENT/scripts/ai-teaching/verify-outline-v2.mjs [仓库路径]
  * 输出纯 ASCII（禁 emoji，AGENTS.md）；期望全部 PASS 且 exit=0。
  */
-import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
-import { pathToFileURL } from 'node:url'
-import { stripTypeScriptTypes } from 'node:module'
+import { makeStager } from './strip-load.mjs'
 
 const ROOT = process.argv[2]
   ? path.resolve(process.argv[2])
@@ -34,10 +32,9 @@ const checks = []
 const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
 
 const REL = 'electron/lib/courseOutlinePure.ts'
-const src = fs.readFileSync(path.join(ROOT, REL), 'utf8')
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'outline-v2-'))
-const tmpFile = path.join(tmpDir, 'courseOutlinePure.mjs')
-fs.writeFileSync(tmpFile, stripTypeScriptTypes(src, { mode: 'strip' }))
+// 大纲纯函数现在从 src/lib/courseOutlineTopo.ts 取 stableTopo（单一真相源），
+// 装载器递归 stage 相对 import；stableTopo 仍经本模块 re-export 验证。
+const stager = makeStager(ROOT)
 const {
   parseCourseMd,
   rewriteCourseMd,
@@ -45,7 +42,11 @@ const {
   diffOutlines,
   protectLearned,
   topoOrderUnits,
-} = await import(pathToFileURL(tmpFile).href)
+  stableTopo,
+} = await stager.load(REL)
+
+// 增补合并（append 路径）也在这里验：纯函数同源，经共享 stager 装载
+const { mergeOutlineAdditions, resolveOutlineRequires } = await stager.load('electron/lib/aiTeachingCoursePure.ts')
 
 /** 构造 CourseOutlineV2 测试对象（字段缺省 filler，保持共享类型形状） */
 const mk = (chapters) => ({
@@ -205,6 +206,11 @@ check('跨章先修不触发重排（章顺序由大纲决定）', (() => {
   const r = topoOrderUnits(o)
   return JSON.stringify(r.chapters[0].units.map((u) => u.id)) === JSON.stringify(['u2', 'u3'])
 })(), '')
+// stableTopo 的唯一实现在 src/lib/courseOutlineTopo.ts；本模块只 import + re-export
+check('stableTopo 经 courseOutlinePure re-export（单一真相源）',
+  typeof stableTopo === 'function' &&
+    stableTopo([{ id: 'u2', requires: ['u1'] }, { id: 'u1' }]).map((u) => u.id).join(',') === 'u1,u2',
+  typeof stableTopo)
 
 console.log('\n=== 7. 运行时读写保真（结构化克隆 / 缺省字段） ===')
 /** JSON 克隆 ≈ IPC 结构化克隆：解析期 Symbol（列形态）全部丢失，字段本身保留 */
@@ -251,10 +257,59 @@ const PROSE = ['# 课程：手写', '', '## [c1] 甲', '- 本章要点见教材�
 const prose = parseCourseMd(PROSE)
 check('单列手写说明行不当知识点（与旧 4 列实现同口径）', prose.chapters[0].units.length === 1 && prose.chapters[0].units[0].id === 'u1', JSON.stringify(prose.chapters[0].units.map((u) => u.id)))
 
+console.log('\n=== 9. append 增补：type / requires（名称->id / 本章范围 / 失败只丢该条） ===')
+const appendBase = mk([
+  { id: 'c1', name: '甲章', units: [{ id: 'u1', name: '基础' }, { id: 'u2', name: '进阶' }] },
+  { id: 'c2', name: '乙章', units: [{ id: 'u3', name: '别章点' }] },
+])
+const mergedRes = mergeOutlineAdditions(appendBase, {
+  toExisting: [
+    { chapterId: 'c1', name: '应用', type: 'memory', requires: ['基础', 'u2', '不存在'] },
+    { chapterId: 'c1', name: '前向引用', type: 'concept', requires: ['后置点'] },
+    { chapterId: 'c1', name: '后置点', type: 'procedure' },
+    { chapterId: 'c2', name: '跨章', requires: ['基础'] },
+    { chapterId: 'c1', name: '自引用', requires: ['自引用'] },
+  ],
+  newChapters: [{ name: '丙章', units: [{ name: '新点', type: 'design', requires: ['新点2'] }, { name: '新点2' }] }],
+})
+const mergedUnits = mergedRes.outline.chapters.flatMap((c) => c.units)
+const unitNamed = (n) => mergedUnits.find((u) => u.name === n)
+check('toExisting 带上 type（memory）', unitNamed('应用')?.type === 'memory', JSON.stringify(unitNamed('应用')))
+check('requires 名称 -> 本章 id，id 原样保留', JSON.stringify(unitNamed('应用')?.requires) === JSON.stringify(['u1', 'u2']), JSON.stringify(unitNamed('应用')?.requires))
+check('同一批增补里的前向名称引用也能解析（后置点 -> u6）', JSON.stringify(unitNamed('前向引用')?.requires) === JSON.stringify(['u6']), JSON.stringify(unitNamed('前向引用')?.requires))
+check('跨章名称不解析（只认本章）', unitNamed('跨章')?.requires === undefined, JSON.stringify(unitNamed('跨章')?.requires))
+check('自引用被丢弃', unitNamed('自引用')?.requires === undefined, JSON.stringify(unitNamed('自引用')?.requires))
+check('新章内名称 -> 新 id（新点2 -> u10）', JSON.stringify(unitNamed('新点')?.requires) === JSON.stringify(['u10']) && unitNamed('新点')?.type === 'design', JSON.stringify(unitNamed('新点')))
+check('丢弃条数被计数（3 条：不存在 / 跨章 / 自引用）', mergedRes.droppedRequires === 3, String(mergedRes.droppedRequires))
+check('不整批失败：7 条增补全部落位', mergedRes.added === 7 && mergedRes.outline.chapters.length === 3, `${mergedRes.added}/${mergedRes.outline.chapters.length}`)
+check('原有知识点 id / 字段不动', (() => {
+  const u1 = mergedRes.outline.chapters[0].units[0]
+  return u1.id === 'u1' && u1.name === '基础' && u1.type === 'concept' && u1.requires.length === 0
+})(), '')
+const badTypeAdd = mergeOutlineAdditions(appendBase, { toExisting: [{ chapterId: 'c1', name: '错类型', type: 'skill' }], newChapters: [] })
+check('非法 type 被丢弃（不写坏数据，缺省 concept）', (() => {
+  const u = badTypeAdd.outline.chapters[0].units.find((x) => x.name === '错类型')
+  return !!u && u.type === undefined && badTypeAdd.added === 1
+})(), JSON.stringify(badTypeAdd.outline.chapters[0].units.find((x) => x.name === '错类型')))
+
+// 首次生成（create 分支）：normalizeOutline 已分配 id，requires 里的名称也要转 id
+const createdRes = resolveOutlineRequires(mk([{
+  id: 'c1',
+  units: [
+    { id: 'u1', name: '基础' },
+    { id: 'u2', name: '应用', type: 'memory', requires: ['基础', '不存在', 'u1'] },
+    { id: 'u3', name: '自引用', requires: ['自引用'] },
+  ],
+}]))
+const createdUnits = createdRes.outline.chapters[0].units
+check('首次生成：名称 -> 本章 id', JSON.stringify(createdUnits[1].requires) === JSON.stringify(['u1']), JSON.stringify(createdUnits[1]))
+check('首次生成：自引用 / 不存在丢弃并计数（2 条）', createdUnits[2].requires.length === 0 && createdRes.droppedRequires === 2, String(createdRes.droppedRequires))
+check('首次生成：type 原样保留', createdUnits[1].type === 'memory', JSON.stringify(createdUnits[1]))
+
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) console.log(`  ${c.pass ? '[OK]' : '[FAIL]'} ${c.name}${c.detail && !c.pass ? '  -> ' + c.detail : ''}`)
 console.log(`\n${failed.length === 0 ? 'PASS' : 'FAIL'} -- ${checks.length - failed.length}/${checks.length} assertions passed`)
 
-try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
+stager.cleanup()
 process.exit(failed.length === 0 ? 0 : 1)

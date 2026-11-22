@@ -889,7 +889,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const activeSegment = activeSegmentSid ? courseState?.lessons[activeSegmentSid] ?? null : null
   const preflightChapter = preflight ? courseState?.outline?.chapters.find((c) => c.id === preflight.chapterId) ?? null : null
   const preflightUnits = useMemo(() => (preflightChapter?.units ?? []).map((u) => ({
-    id: u.id, name: u.name, learned: unitLearned(u.id, courseState?.progress, courseState?.lessons),
+    id: u.id,
+    name: u.name,
+    learned: unitLearned(u.id, courseState?.progress, courseState?.lessons),
+    // 默认选点按章内先修拓扑序：requires 必须随 unit 一起进预检，丢了就退化成纯行序
+    requires: u.requires,
   })), [preflightChapter, courseState])
   const preflightAssignments = preflight ? sourcePayload?.assignments[preflight.chapterId] ?? [] : []
   const preflightSources = sourcePayload?.sources ?? []

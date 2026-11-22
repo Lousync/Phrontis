@@ -7,31 +7,30 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
-import { pathToFileURL } from 'node:url'
-import { stripTypeScriptTypes } from 'node:module'
+import { makeStager } from './strip-load.mjs'
 
 const ROOT = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(new URL('../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
 const checks = []
 const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ai314-'))
-async function load(rel, name) {
+// 纯函数层允许相对 import（共享纯函数，如 src/lib/courseOutlineTopo.ts）；裸包仍一律不许。
+const stager = makeStager(ROOT)
+async function load(rel) {
   const src = read(rel)
-  // 只允许 `import type`（strip 后为空行，不会产生运行时依赖）；运行时 import 一律不许
-  check(`${rel} 零运行时 import`, !/^\s*import\s+(?!type\b)/m.test(src), '')
-  const file = path.join(tmp, `${name}.mjs`)
-  fs.writeFileSync(file, stripTypeScriptTypes(src, { mode: 'strip' }))
-  return import(pathToFileURL(file).href)
+  const bare = [...src.matchAll(/^\s*import\s+[^\n]*?from\s*['"]([^'"]+)['"]/gm)]
+    .map((m) => m[1])
+    .filter((s) => !s.startsWith('.'))
+  check(`${rel} 运行时 import 只用仓库内相对纯函数模块`, bare.length === 0, bare.join(','))
+  return stager.load(rel)
 }
 
-const coursePure = await load('electron/lib/aiTeachingCoursePure.ts', 'coursePure')
+const coursePure = await load('electron/lib/aiTeachingCoursePure.ts')
 // `课程.md` 读写唯一口径（v2 六列 + 旧 4 列兼容）
-const outlinePure = await load('electron/lib/courseOutlinePure.ts', 'outlinePure')
-const progressPure = await load('src/lib/aiTeachingProgressPure.ts', 'progressPure')
-const sourcesPure = await load('src/lib/aiTeachingSourcesPure.ts', 'sourcesPure')
-const rail = await load('src/modules/ai-teaching/courseRailPure.ts', 'courseRailPure')
+const outlinePure = await load('electron/lib/courseOutlinePure.ts')
+const progressPure = await load('src/lib/aiTeachingProgressPure.ts')
+const sourcesPure = await load('src/lib/aiTeachingSourcesPure.ts')
+const rail = await load('src/modules/ai-teaching/courseRailPure.ts')
 
 // ---------------------------------------------------------------- 1. 课程.md 章 ID
 console.log('\n=== 1. 课程.md 稳定章 ID ===')
@@ -187,4 +186,5 @@ check('搜索过滤后段头保留且只含命中 unit', filteredRows[0]?.kind =
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.detail ? `  [${c.detail}]` : ''}`)
 console.log(`\n${checks.length - failed.length}/${checks.length} PASS`)
+stager.cleanup()
 process.exit(failed.length ? 1 : 0)

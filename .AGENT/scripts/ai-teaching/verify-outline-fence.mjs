@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 const agent = read('electron/lib/agentService.ts')
+const tools = read('electron/lib/builtinTools.ts')
 const mod = read('src/modules/ai-teaching/index.tsx')
 const preload = read('electron/preload/index.ts')
 const ipc = read('src/lib/ipc.ts')
@@ -26,6 +27,53 @@ console.log('\n[协议注入] agentService.ts')
 check('新增 outlineRuleHint（```outline 草稿协议）', agent.includes('outlineRuleHint') && agent.includes('大纲草稿协议'))
 check('并入 system 拼接', /baseSystem[\s\S]{0,400}outlineRuleHint/.test(agent))
 check('并入 ruleChars 统计（protocols 聚合）', agent.includes('+ outlineRuleHint +'))
+
+// 2026-11-22 批次 2：新生成的大纲要能带 type / requires
+const outlineHint = (() => {
+  const at = agent.indexOf('const outlineRuleHint')
+  const end = agent.indexOf('\n  const ', at + 10)
+  return agent.slice(at, end > 0 ? end : at + 4000)
+})()
+console.log('\n[大纲 v2 产出规则] agentService.ts · outlineRuleHint')
+check('提示词说明 type 取值（memory/concept/procedure/design）',
+  ['memory', 'concept', 'procedure', 'design'].every((t) => outlineHint.includes(t)), '')
+check('提示词说明 requires 为同章先修、无依赖可省略',
+  outlineHint.includes('requires') && outlineHint.includes('本章内') && outlineHint.includes('省略'), '')
+check('提示词写明先修不改章顺序 / 不产生环 / 不引用不存在',
+  outlineHint.includes('不改变章的顺序') && outlineHint.includes('不要产生环') && outlineHint.includes('本章不存在'), '')
+check('草稿 JSON 示例带上 type / requires',
+  /"units":\[\{[^}]*"type"[^}]*"requires"/.test(outlineHint), '')
+
+const toolAt = tools.indexOf("name: 'course.outline.write'")
+const toolEnd = tools.indexOf('registerTool({', toolAt)
+const toolBlock = tools.slice(toolAt, toolEnd > 0 ? toolEnd : toolAt + 4000)
+const schemaChars = (text) => {
+  const at = text.indexOf('inputSchema:')
+  if (at < 0) return 0
+  const start = text.indexOf('{', at)
+  let depth = 0
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '{') depth++
+    else if (text[i] === '}') {
+      depth--
+      if (depth === 0) {
+        return text.slice(start, i + 1).split(/\r?\n/).filter((l) => !/^\s*\/\//.test(l)).map((l) => l.trim()).join('').length
+      }
+    }
+  }
+  return 0
+}
+console.log('\n[工具 schema] builtinTools.ts · course.outline.write')
+check('units[] 有 type（enum 四值）与 requires（string[]）',
+  toolBlock.includes("enum: ['memory', 'concept', 'procedure', 'design']")
+  && /requires:\s*\{\s*type:\s*'array',\s*items:\s*\{\s*type:\s*'string'\s*\},\s*description:\s*'[^']*同章先修/.test(toolBlock), '')
+const outlineSchemaChars = schemaChars(toolBlock)
+check(`单工具 schema ${outlineSchemaChars} 字符 <= 800（铁律 16）`, outlineSchemaChars > 0 && outlineSchemaChars <= 800, String(outlineSchemaChars))
+
+console.log('\n[append 映射] aiTeachingCourse.ts · writeOutlineFromAssistant')
+check('toExisting / newChapters 都带 type 与 requires',
+  (course.match(/type: u\.type, requires: u\.requires/g) || []).length === 2, '')
+check('create 分支也把 requires 名称转 id（resolveOutlineRequires）', course.includes('resolveOutlineRequires(norm)'), '')
 
 console.log('\n[渲染层] index.tsx')
 check('解析 ```outline 围栏', mod.includes('/```outline') && mod.includes('outlineFence'))
@@ -51,7 +99,7 @@ check('preload 暴露', preload.includes('aiTeachCourseWriteOutlineDraft'))
 check('types 声明', types.includes('aiTeachCourseWriteOutlineDraft'))
 check('ipc.ts 封装', ipc.includes('export const aiTeachCourseWriteOutlineDraft'))
 // 「打开课程」需要落盘路径：append 分支此前只回 added（2026-10-14 补 relPath）
-check('writeOutlineFromAssistant 两条分支都回 relPath', course.includes("mode: 'append', added: r.added, relPath: rel"))
+check('writeOutlineFromAssistant 两条分支都回 relPath', /mode: 'append', added: r\.added, droppedRequires: r\.droppedRequires, relPath: rel/.test(course))
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)
