@@ -8,7 +8,7 @@ import { COURSE_ENDED_ERROR, assertWorkspaceEditable, assertCourseEditableBySess
 import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver, resolveWriteOwnerRel, sanitizeTitle, isCourseAssistantSession } from './aiTeachingFolders'
 import { writeInventoryIndex, todayLocal } from './aiTeachingInventory'
 import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
-import { createAgentSession, getAgentMessages, getAgentSession, sessionExists } from './agentSessionRepo'
+import { createAgentSession, getAgentMessages, getAgentMessagesAll, getAgentSession, sessionExists } from './agentSessionRepo'
 import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { ensureQuizDocFrontmatter, forceFrontmatterId, hasQuizFence, readFrontmatterId } from './quizDocPure'
@@ -44,7 +44,12 @@ import {
   type SourceSummary,
 } from './aiTeachingSourceRegistry'
 import { detectLongMaterial } from '../../src/lib/aiTeachingSourcesPure'
-import { lastTeachPatchOf, renderSegmentLedger } from './teachLedgerPure'
+import {
+  foldTeachFences,
+  ledgerToPatch,
+  renderSegmentLedgerRequestBlock,
+  renderSegmentProgressLine,
+} from './teachLedgerPure'
 import { rewriteFavoritePrefixes } from './aiTeachingFavorites'
 import {
   buildCourseLayoutPlan,
@@ -1297,7 +1302,21 @@ function nextOpenSegmentBrief(
   return { order: Number(next.lesson.order) || 0, cover }
 }
 
-export function buildCourseInjection(sessionId: string, getSetting: (key: string) => unknown): string {
+/**
+ * AI 教学会话的 **system 层**注入（课程 / 复习 / 段）。
+ *
+ * ★ `requestOut`（可选出参）：【本段台账】这类**逐轮变化**的内容不并入返回值 ——
+ *   返回值进 `systemFull`，而 system + tools 是 prompt cache 前缀（见 `agentService.ts` 顶部口径）；
+ *   逐字会变的台账由调用方拼进**首条 user 消息层**。无围栏 / 已收尾时 `block` 保持空串，
+ *   行为与台账并入 system 时期逐字一致。
+ */
+export function buildCourseInjection(
+  sessionId: string,
+  getSetting: (key: string) => unknown,
+  requestOut?: { block: string },
+): string {
+  // 出参先清空：调用方可能复用同一个对象（旧块不能残留到本轮）
+  if (requestOut) requestOut.block = ''
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return ''
   /** 长资料读取纪律（长资料方案 §8.2）：素材过线时追加；非长资料返回空串，注入逐字不变。 */
@@ -1395,29 +1414,29 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     const mark = u.id === active?.id ? '【当前聚焦】' : ''
     lines.push(`- ${mark}[${u.id}] ${u.name}（出自「${u.chapter}」，来源：${u.source || '未标注'}）${u.goal ? ` · 目标：${u.goal}` : ''}`)
   }
-  // B-47 ①本段进度：当前聚焦第几个（可得的真状态）；有台账时以台账为准（见下）
+  // B-47 ①本段进度：当前聚焦第几个（界面真状态）。
+  // ★ 这句**只依赖段的静态状态**，与台账无关 —— 它进 system，同一段内必须逐字稳定，
+  //   逐轮变化的台账改走请求级（下面的 requestOut），不再打散 prompt cache 前缀。
   const activeIdx = active ? ids.indexOf(active.id) + 1 : 0
-  // 段内教学台账（2026-11-22）：取本段**最后一条**带 ```teach 围栏的 assistant 回答。
-  // 台账 > 「当前聚焦第 X/N」推断：有台账时把那句推断降级为界面状态，进度以台账为准；
-  // 无围栏 → 空串，下面的原句逐字保持不变（verify-segment-wrapup A1/A2 锁定）。
-  const ledgerBlock = curLesson.status === 'ended'
-    ? ''
-    : (() => {
-        try {
-          const patch = lastTeachPatchOf(getAgentMessages(sessionId))
-          if (!patch) return ''
-          return renderSegmentLedger({
-            patch,
-            units: unitRows.map((u) => ({ id: u.id, name: u.name })),
-            focusId: active?.id,
-          }).text
-        } catch { return '' }
-      })()
-  if (ledgerBlock) {
-    lines.push(`本段进度：界面当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。实际讲到哪以下方【本段台账】为准，冲突时以台账为准。`)
-    lines.push(ledgerBlock)
-  } else {
-    lines.push(`本段进度：当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。已讲到哪、还有哪些没讲，结合本段对话自行判断。`)
+  lines.push(renderSegmentProgressLine({ activeIdx, total: ids.length, activeName: active?.name }))
+  // 段内教学台账（2026-11-22）：**全量合并**本会话所有有效 ` ```teach ` 围栏（单趟正序扫描，
+  // O(消息数)），得到程序级单调台账 —— step 只增、术语去重、已覆盖只增（模型写回旧 unitId 不生效）。
+  // 取全量消息（getAgentMessagesAll）：getAgentMessages 只给最早 500 条，长段会漏掉最近的围栏。
+  // ★ 台账逐轮变化：**不进 system**，经 requestOut 交给 agentService 拼进首条 user 消息层。
+  //   已收尾段不注入（只读）；无围栏 → 不产出任何块，system 与原句逐字一致。
+  if (curLesson.status !== 'ended') {
+    try {
+      const ledger = foldTeachFences(getAgentMessagesAll(sessionId), { unitOrder: ids })
+      const requestBlock = renderSegmentLedgerRequestBlock({
+        patch: ledgerToPatch(ledger),
+        units: unitRows.map((u) => ({ id: u.id, name: u.name })),
+        focusId: active?.id,
+        activeIdx,
+        total: ids.length,
+        activeName: active?.name,
+      })
+      if (requestBlock && requestOut) requestOut.block = requestBlock
+    } catch { /* 台账读取失败不影响 system 注入（请求级只是少一块上下文） */ }
   }
   const handoff = readPrevHandoff(sessionId, getSetting)
   if (handoff) lines.push(`\n【上一段交接（同章）】\n${handoff}`)

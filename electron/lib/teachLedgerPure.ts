@@ -8,9 +8,15 @@
  *   · `parseTeachFence` —— 抓回答尾部 ` ```teach ` 围栏里的增量 JSON（对象）；容错见下；
  *   · `stripTeachFence` —— 渲染层去掉该围栏，**不碰** quiz / plan / ask / outline 等其它围栏；
  *   · `mergeLedger`     —— 程序累加进 `progress.json` 的 ledger：幂等、step 只增不减、术语去重；
+ *     给了 `unitOrder` 时再做**单调前沿**：unitId 退回旧知识点 = 旧消息，已覆盖只增不减；
+ *   · `foldTeachFences` —— 段会话接线：**全量合并**本会话所有有效围栏（单趟正序扫描，O(消息数)）；
+ *   · `ledgerToPatch`   —— 合并结果 → `renderSegmentLedger` 的输入（注入格式不变）；
  *   · `renderLedgerForPrompt` —— 下轮注入的中文台账块（≤ 800 字符）；
  *   · `lastTeachPatchOf` / `renderSegmentLedger` —— 段会话接线：取最后一条围栏、
  *     渲染「已讲到 / 已覆盖 / 未覆盖 / 下一步 / 最近术语」（≤ 800 字符，台账优先于当前聚焦）；
+ *   · `renderSegmentProgressLine` / `renderSegmentLedgerRequestBlock` —— 段会话注入的分层：
+ *     「当前聚焦第 X/N」句进 **system**（与台账无关 → 同段内逐字稳定），台账块进**请求级**
+ *     （首条 user 消息层，逐轮变化不打散 prompt cache 前缀，见 `agentService.ts` 顶部口径）；
  *   · `ledgerFromHeadings`    —— 模型漏写围栏时，用回答里最后一个 `### 标题` 兜底。
  *
  * 容错口径（parseTeachFence）：
@@ -281,16 +287,44 @@ function emptyLedger(now: string): TeachLedger {
   return { terms: [], updatedAt: now }
 }
 
+export interface MergeLedgerOptions {
+  /**
+   * 本段知识点 id 顺序（大纲顺序）。提供时启用**单调前沿**：
+   *   · unitId 退回到更早的知识点 = 模型写回了旧值 → 整段 current 不动（已覆盖只增）；
+   *   · unitId 前进 = 换知识点 → step 从本 patch 重计（协议「换 unitId 时从 1 重计」）。
+   * 不提供时退回旧口径（step 全局只增不减），保证老调用方行为不变。
+   */
+  unitOrder?: string[]
+}
+
+/** 知识点在前沿顺序里的位置；-1 = 未知（清单里没有 / 未提供顺序） */
+function unitRank(order: string[] | undefined, id: string): number {
+  if (!order || order.length === 0 || !id) return -1
+  return order.indexOf(id)
+}
+
+/** patch 是否声明了「换知识点」（无 unitId 时沿用当前，不算换） */
+function unitChanged(hasUnit: boolean, nextUnit: string, prevUnit: string): boolean {
+  return hasUnit && nextUnit !== prevUnit
+}
+
 /**
  * 把模型给的增量合并进已有台账（纯函数，不改 `prev`）。
  *
  * 不变量：
  *   · **幂等**：同一 patch 连续合并两次结果相同；
- *   · **step 只增不减**：`patch.step` 小于当前 step 视为旧消息，整段 current 不动；
+ *   · **step 只增不减**（同一知识点内）：`patch.step` 小于当前 step 视为旧消息，整段 current 不动；
+ *   · **单调前沿**（给了 `unitOrder`）：unitId 回退不生效 —— 已覆盖只增不减；
+ *     前进换知识点时 step 重计（不再把上一个知识点的步数带过来）；
  *   · **terms 去重**（大小写不敏感、忽略首尾空白），保留首次 `definedAt`；
  *   · `newTerms` 为空数组时不动 terms；patch 全空时原样返回 `prev`。
  */
-export function mergeLedger(prev: TeachLedger | null, patch: TeachPatch, now: string): TeachLedger {
+export function mergeLedger(
+  prev: TeachLedger | null,
+  patch: TeachPatch,
+  now: string,
+  opts: MergeLedgerOptions = {},
+): TeachLedger {
   const p: TeachPatch = patch ?? {}
   if (!hasContent(p)) return prev ? prev : emptyLedger(now)
 
@@ -312,17 +346,29 @@ export function mergeLedger(prev: TeachLedger | null, patch: TeachPatch, now: st
       ? Math.max(0, Math.floor(p.step))
       : undefined
   const prevStep = base.current?.step ?? 0
+  const prevUnit = base.current?.unitId ?? ''
+  const nextUnit = hasUnit ? (p.unitId as string).trim() : prevUnit
+  const order = Array.isArray(opts.unitOrder) ? opts.unitOrder : []
+  const prevRank = unitRank(order, prevUnit)
+  const nextRank = unitRank(order, nextUnit)
+  const rankKnown = prevRank >= 0 && nextRank >= 0
+  // 前进 = 新版清单里更靠后的知识点；无顺序信息时按「给了 step 且不小于当前步」保守推断
+  const regression = rankKnown && nextRank < prevRank
+  const forward = rankKnown
+    ? nextRank > prevRank
+    : unitChanged(hasUnit, nextUnit, prevUnit) && (requested === undefined || requested >= prevStep)
 
-  // 旧消息（step 回退）整段 current 不动 —— 保证「只增不减」
-  const stale = requested !== undefined && requested < prevStep
+  // 旧消息：unitId 回退，或同一知识点内 step 回退（换知识点后的 step 重计不算回退）
+  const stale = regression || (requested !== undefined && requested < prevStep && !forward)
   if (!stale && (hasUnit || hasLabel || requested !== undefined)) {
-    const prevUnit = base.current?.unitId ?? ''
-    const nextUnit = hasUnit ? (p.unitId as string).trim() : prevUnit
-    const nextStep = requested !== undefined ? Math.max(prevStep, requested) : prevStep
+    const changedUnit = forward && hasUnit && nextUnit !== prevUnit
+    const nextStep = requested !== undefined
+      ? (changedUnit ? Math.max(1, requested) : Math.max(prevStep, requested))
+      : (changedUnit ? 0 : prevStep)
     // 换 unit 且本 patch 没给 label：清空旧 label（否则会显示上一 unit 的台阶名）
     const nextLabel = hasLabel
       ? (p.label as string).trim()
-      : nextUnit !== prevUnit
+      : changedUnit
         ? ''
         : (base.current?.label ?? '')
     const nextCurrent = { unitId: nextUnit, step: nextStep, label: nextLabel }
@@ -420,7 +466,7 @@ export function renderLedgerForPrompt(
 const SEGMENT_LEDGER_TERMS_MAX = 8
 
 export interface SegmentLedgerInput {
-  /** 最后一条 ` ```teach ` 围栏解析出的增量（null = 本段还没有围栏） */
+  /** 台账增量：`foldTeachFences` 全量合并后用 `ledgerToPatch` 转成的输入（null = 本段还没有围栏） */
   patch: TeachPatch | null
   /** 本段知识点（按大纲顺序）—— 用来把 unitId 换成名字、并推导已覆盖 / 未覆盖 */
   units: Array<{ id: string; name: string }>
@@ -442,6 +488,9 @@ export interface SegmentLedgerBlock {
  *
  * 口径：整段消息从新往旧扫，跳过 user 消息与没有有效围栏的 assistant 回答；
  * 一条都找不到返回 null。只读，不落盘、不改消息。
+ *
+ * @deprecated 段会话注入已改「全量合并」（`foldTeachFences`）—— 只看最后一条会让
+ *   模型写回旧 unitId 时「已覆盖」看起来变小。保留此函数仅供只读诊断 / 老调用方。
  */
 export function lastTeachPatchOf(
   messages: Array<{ role?: string; content?: string }>,
@@ -455,6 +504,108 @@ export function lastTeachPatchOf(
   }
   return null
 }
+
+export interface FoldTeachOptions {
+  /** 本段知识点 id 顺序（大纲顺序）—— 提供时启用单调前沿（已覆盖只增 / 换点 step 重计） */
+  unitOrder?: string[]
+}
+
+/**
+ * **全量合并**本会话所有有效 ` ```teach ` 围栏 → 程序级单调台账。
+ *
+ * 口径：
+ *   · 正序（旧 → 新）单趟扫描，每条消息最多一次围栏解析 + 一次 `mergeLedger` ——
+ *     O(消息数)，不会随轮次变成 O(n²)（`getAgentMessages` 上限 500 条，规模有界）；
+ *   · 只认 assistant 消息；坏围栏 / 解析失败 / 数组围栏由 `parseTeachFence` 丢成 null 直接跳过；
+ *   · `now` 取该条消息的 `created_at`（缺省沿用上一条的时间，保证 terms 的 definedAt 稳定）；
+ *   · 给了 `unitOrder` 时 unitId 回退视为旧消息（已覆盖只增），前进换点则 step 从 1 重计。
+ *
+ * 没有有效围栏返回 null（调用方据此保持原注入逐字不变）。
+ */
+export function foldTeachFences(
+  messages: Array<{ role?: string; content?: string; created_at?: string }>,
+  opts: FoldTeachOptions = {},
+): TeachLedger | null {
+  const rows = Array.isArray(messages) ? messages : []
+  if (rows.length === 0) return null
+  const unitOrder = Array.isArray(opts.unitOrder) ? opts.unitOrder : []
+  let ledger: TeachLedger | null = null
+  for (let i = 0; i < rows.length; i++) {
+    const m = rows[i]
+    if (!m || m.role !== 'assistant') continue
+    const patch = parseTeachFence(String(m.content ?? ''))
+    if (!patch) continue
+    const ts = typeof m.created_at === 'string' && m.created_at ? m.created_at : (ledger?.updatedAt ?? '')
+    ledger = mergeLedger(ledger, patch, ts, { unitOrder })
+  }
+  return ledger
+}
+
+/**
+ * 合并后的台账 → `renderSegmentLedger` 的输入增量（注入格式与「最后一条围栏」时期保持一致）。
+ * 术语按**首次定义顺序**给出，渲染时自取最后 N 个 = 最近引入的术语。
+ */
+export function ledgerToPatch(ledger: TeachLedger | null): TeachPatch | null {
+  if (!ledger) return null
+  const patch: TeachPatch = {}
+  let any = false
+  const cur = ledger.current
+  if (cur) {
+    if (cur.unitId) { patch.unitId = cur.unitId; any = true }
+    if (typeof cur.step === 'number' && Number.isFinite(cur.step)) { patch.step = cur.step; any = true }
+    if (cur.label) { patch.label = cur.label; any = true }
+  }
+  const terms = (ledger.terms ?? []).map((t) => String(t?.term ?? '').trim()).filter(Boolean)
+  if (terms.length) { patch.newTerms = terms; any = true }
+  if (typeof ledger.next === 'string' && ledger.next.trim()) { patch.next = ledger.next.trim(); any = true }
+  return any ? patch : null
+}
+
+/* ------------------------------------------------------------------ 段内注入 · 分层 */
+
+/** 「当前聚焦第 X/N」句的入参（system 层，必须与台账无关才能逐字稳定） */
+export interface SegmentProgressInput {
+  /** 当前聚焦知识点在段内的序号（1-based；0 = 无聚焦） */
+  activeIdx: number
+  /** 本段知识点总数 */
+  total: number
+  /** 当前聚焦知识点名（无聚焦时省略括号） */
+  activeName?: string | null
+}
+
+/**
+ * **system 层**的「本段进度」句。
+ *
+ * ★ 口径（勿改）：只依赖段的静态状态（聚焦位置 / 名称），**绝不随台账变化** ——
+ *   它进 systemFull，而 system + tools 是 prompt cache 前缀；台账逐轮变化，
+ *   一旦拼进来就会让同一段内每轮都 miss（台账走 `renderSegmentLedgerRequestBlock`）。
+ */
+export function renderSegmentProgressLine(input: SegmentProgressInput): string {
+  const activeIdx = Number.isFinite(Number(input?.activeIdx)) ? Math.max(0, Math.floor(Number(input.activeIdx))) : 0
+  const total = Number.isFinite(Number(input?.total)) ? Math.max(0, Math.floor(Number(input.total))) : 0
+  const name = String(input?.activeName ?? '').trim()
+  return `本段进度：当前聚焦第 ${activeIdx}/${total} 个知识点${name ? `（${name}）` : ''}。已讲到哪、还有哪些没讲，结合本段对话自行判断。`
+}
+
+export interface SegmentLedgerRequestInput extends SegmentLedgerInput, SegmentProgressInput {}
+
+/**
+ * **请求级**台账块（首条 user 消息层，随轮次变化也只影响本次请求）。
+ *
+ * 形状 = 「界面当前聚焦第 X/N」降级句 + `renderSegmentLedger` 的台账块，逐字继承
+ * 台账并入 system 时期的措辞；无围栏 / 无进度字段 → 空串（调用方据此不加任何注入）。
+ */
+export function renderSegmentLedgerRequestBlock(input: SegmentLedgerRequestInput): string {
+  if (!input?.patch) return ''
+  const block = renderSegmentLedger(input).text
+  if (!block) return ''
+  const activeIdx = Number.isFinite(Number(input.activeIdx)) ? Math.max(0, Math.floor(Number(input.activeIdx))) : 0
+  const total = Number.isFinite(Number(input.total)) ? Math.max(0, Math.floor(Number(input.total))) : 0
+  const name = String(input.activeName ?? '').trim()
+  const focusLine = `本段进度：界面当前聚焦第 ${activeIdx}/${total} 个知识点${name ? `（${name}）` : ''}。实际讲到哪以下方【本段台账】为准，冲突时以台账为准。`
+  return `${focusLine}\n${block}`
+}
+
 
 /**
  * 段内台账注入块（已讲到 / 已覆盖 / 未覆盖 / 下一步 / 最近术语）。

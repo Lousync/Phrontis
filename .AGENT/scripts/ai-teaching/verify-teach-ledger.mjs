@@ -42,7 +42,11 @@ const {
   mergeLedger,
   renderLedgerForPrompt,
   lastTeachPatchOf,
+  foldTeachFences,
+  ledgerToPatch,
   renderSegmentLedger,
+  renderSegmentProgressLine,
+  renderSegmentLedgerRequestBlock,
   ledgerFromHeadings,
   TEACH_LEDGER_PROMPT_MAX_CHARS,
   TEACH_LEDGER_HEADER,
@@ -182,6 +186,97 @@ const huge = renderSegmentLedger({
 })
 check('★ 注入块 ≤ 800 字符且带截断标记', huge.text.length <= 800 && huge.text.endsWith(TEACH_LEDGER_TRUNCATED_MARK), String(huge.text.length))
 
+console.log('\n=== 7b. 分层：进度句进 system（与台账无关）/ 台账进请求级 ===')
+const PLAIN_LINE = '本段进度：当前聚焦第 2/3 个知识点（安全序列）。已讲到哪、还有哪些没讲，结合本段对话自行判断。'
+const progressLine = renderSegmentProgressLine({ activeIdx: 2, total: 3, activeName: '安全序列' })
+check('★ 无围栏时原「本段进度」句逐字保留', progressLine === PLAIN_LINE, JSON.stringify(progressLine))
+check('★ 进度句不含台账 / 台账抬头（system 前缀逐字稳定）',
+  !progressLine.includes(TEACH_LEDGER_HEADER) && !progressLine.includes('台账'), JSON.stringify(progressLine))
+check('无聚焦知识点时不带括号（负向）',
+  renderSegmentProgressLine({ activeIdx: 0, total: 3 }) === '本段进度：当前聚焦第 0/3 个知识点。已讲到哪、还有哪些没讲，结合本段对话自行判断。', '')
+const reqSeg = renderSegmentLedgerRequestBlock({
+  patch: { unitId: 'u2', step: 1, label: '安全序列判定' },
+  units: UNITS,
+  focusId: 'u2',
+  activeIdx: 2,
+  total: 3,
+  activeName: '安全序列',
+})
+check('请求级块 = 降级句 + 台账块（以台账为准）',
+  reqSeg.startsWith('本段进度：界面当前聚焦第 2/3 个知识点（安全序列）。实际讲到哪以下方【本段台账】为准，冲突时以台账为准。\n' + TEACH_LEDGER_HEADER),
+  JSON.stringify(reqSeg))
+check('无围栏 → 请求级块空串（调用方不加任何注入）',
+  renderSegmentLedgerRequestBlock({ patch: null, units: UNITS, focusId: 'u2', activeIdx: 2, total: 3 }) === '', '')
+
+console.log('\n=== 7c. foldTeachFences：全量合并 / 单调前沿 / 坏围栏 ===')
+const ORDER = ['u1', 'u2', 'u3']
+const FOLD_MSGS = [
+  { role: 'user', content: '开始', created_at: '2026-11-22T10:00:00.000Z' },
+  { role: 'assistant', content: '第一轮\n```teach\n{"unitId":"u1","step":1,"label":"定义","newTerms":["资源分配图"]}\n```', created_at: '2026-11-22T10:01:00.000Z' },
+  { role: 'assistant', content: '第二轮\n```teach\n{"unitId":"u2","step":1,"label":"安全序列","newTerms":["安全序列"]}\n```', created_at: '2026-11-22T10:02:00.000Z' },
+  { role: 'assistant', content: '坏围栏\n```teach\n{"unitId": }\n```', created_at: '2026-11-22T10:03:00.000Z' },
+  { role: 'assistant', content: '第三轮\n```teach\n{"unitId":"u3","step":2,"label":"银行家算法","newTerms":["死锁"],"next":"讲反例"}\n```', created_at: '2026-11-22T10:04:00.000Z' },
+]
+const folded = foldTeachFences(FOLD_MSGS, { unitOrder: ORDER })
+check('★ 全量合并取到最新知识点与台阶', folded?.current?.unitId === 'u3' && folded?.current?.step === 2, JSON.stringify(folded?.current))
+check('★ terms 全量累加并去重（按首次定义顺序）',
+  eqJson(folded?.terms.map((t) => t.term), ['资源分配图', '安全序列', '死锁']), JSON.stringify(folded?.terms))
+check('terms 保留各条消息的 createdAt（不是最后一条时间）',
+  folded?.terms[0]?.definedAt === '2026-11-22T10:01:00.000Z' && folded?.terms[2]?.definedAt === '2026-11-22T10:04:00.000Z', JSON.stringify(folded?.terms))
+check('next 取最新一条', folded?.next === '讲反例', String(folded?.next))
+
+// 后一条围栏写回旧 unitId：全量合并后已覆盖不减少（旧实现只看最后一条 → 归零）
+const REGRESS_MSGS = [
+  ...FOLD_MSGS,
+  { role: 'assistant', content: '写回旧点\n```teach\n{"unitId":"u1","step":2,"label":"回看定义","newTerms":["资源分配图"]}\n```', created_at: '2026-11-22T10:05:00.000Z' },
+]
+const regressedFold = foldTeachFences(REGRESS_MSGS, { unitOrder: ORDER })
+const regressedBlock = renderSegmentLedgerRequestBlock({
+  patch: ledgerToPatch(regressedFold),
+  units: UNITS,
+  focusId: 'u3',
+  activeIdx: 3,
+  total: 3,
+  activeName: '银行家算法',
+})
+const oldLast = lastTeachPatchOf(REGRESS_MSGS)
+const oldBlock = renderSegmentLedger({ patch: oldLast, units: UNITS, focusId: 'u3' }).text
+check('★ unitId 回退不生效：合并后仍停在前沿知识点', regressedFold?.current?.unitId === 'u3' && regressedFold?.current?.step === 2, JSON.stringify(regressedFold?.current))
+check('★ 后一条围栏 unitId 回退时「已覆盖」不减少',
+  regressedBlock.includes('已覆盖：资源分配图、安全序列') && regressedBlock.includes('已讲到：银行家算法'),
+  JSON.stringify(regressedBlock))
+check('（对照）旧「只读最后一条」口径下已覆盖确实消失了', !oldBlock.includes('已覆盖：') && oldLast?.unitId === 'u1', JSON.stringify(oldBlock))
+check('回退围栏里的 newTerms 仍然去重累加（不重复记同一术语）',
+  regressedFold?.terms.filter((t) => t.term === '资源分配图').length === 1, JSON.stringify(regressedFold?.terms))
+
+// step 只增不减（同一知识点内）
+const stepBack = foldTeachFences([
+  { role: 'assistant', content: '```teach\n{"unitId":"u2","step":3,"label":"第三步"}\n```', created_at: '2026-11-22T11:00:00.000Z' },
+  { role: 'assistant', content: '```teach\n{"unitId":"u2","step":1,"label":"旧第一步"}\n```', created_at: '2026-11-22T11:01:00.000Z' },
+], { unitOrder: ORDER })
+check('★ 同一知识点内 step 不倒退（旧消息跳过）', stepBack?.current?.step === 3 && stepBack?.current?.label === '第三步', JSON.stringify(stepBack?.current))
+
+// 换知识点前进：step 从 1 重计（不带上一个知识点的步数）
+const switchFwd = foldTeachFences([
+  { role: 'assistant', content: '```teach\n{"unitId":"u1","step":3,"label":"第三步"}\n```', created_at: '2026-11-22T12:00:00.000Z' },
+  { role: 'assistant', content: '```teach\n{"unitId":"u2","step":1,"label":"新知识点第一步"}\n```', created_at: '2026-11-22T12:01:00.000Z' },
+], { unitOrder: ORDER })
+check('★ 换知识点（前进）时 step 从 1 重计', switchFwd?.current?.unitId === 'u2' && switchFwd?.current?.step === 1, JSON.stringify(switchFwd?.current))
+
+// 乱序 / 坏围栏：非 assistant、数组围栏、坏 JSON、无围栏全部跳过
+const skipFold = foldTeachFences([
+  { role: 'user', content: '```teach\n{"unitId":"u9","step":9,"newTerms":["用户写的"]}\n```', created_at: '2026-11-22T13:00:00.000Z' },
+  { role: 'assistant', content: '```teach\n[{"unitId":"u9"}]\n```', created_at: '2026-11-22T13:01:00.000Z' },
+  { role: 'assistant', content: '```teach\n{"unitId": }\n```', created_at: '2026-11-22T13:02:00.000Z' },
+  { role: 'assistant', content: '只有正文，没有围栏', created_at: '2026-11-22T13:03:00.000Z' },
+], { unitOrder: ORDER })
+check('乱序 / 坏围栏 / 用户消息围栏全部跳过（返回 null）', skipFold === null, JSON.stringify(skipFold))
+check('没有任何围栏 → null（调用方保持原注入）', foldTeachFences([{ role: 'assistant', content: '正文' }], { unitOrder: ORDER }) === null, '')
+check('空消息列表 → null（负向）', foldTeachFences([], { unitOrder: ORDER }) === null, '')
+// 无 unitOrder 时退回旧口径：step 全局只增（已有用例覆盖），此处只锁「不抛错」
+check('无 unitOrder 也能合并（退回旧口径不抛错）',
+  foldTeachFences([{ role: 'assistant', content: '```teach\n{"unitId":"u2","step":2}\n```' }])?.current?.step === 2, '')
+
 console.log('\n=== 8. 接线：提示词 / 段会话注入 / 渲染层剥离 ===')
 const agentSrc = stripComments(fs.readFileSync(path.join(ROOT, 'electron/lib/agentService.ts'), 'utf8'))
 const courseSrc = stripComments(fs.readFileSync(path.join(ROOT, 'electron/lib/aiTeachingCourse.ts'), 'utf8'))
@@ -196,15 +291,18 @@ check('★ 只对段会话注入（课程助手 / 复习课 / 零散会话不注
 check('已收尾段不注入台账协议（负向）', /getSessionLessonBrief\(sessionId\)[\s\S]{0,120}!brief\.ended/.test(agentSrc), '')
 check('teachLedgerRuleHint 拼进 systemFull', /\+ endcourseRuleHint \+ teachLedgerRuleHint \+ visualHint/.test(agentSrc), '')
 check('台账协议计入 protocols 分区（与其它协议同区）', /outlineRuleHint \+ endcourseRuleHint \+ teachLedgerRuleHint \+ teachStyleHint/.test(agentSrc), '')
-check('段会话取最后一条围栏（复用 lastTeachPatchOf + getAgentMessages）',
-  /const patch = lastTeachPatchOf\(getAgentMessages\(sessionId\)\)/.test(courseSrc), '')
-check('注入块走 renderSegmentLedger 且带上当前聚焦',
-  courseSrc.includes('renderSegmentLedger({') && courseSrc.includes('focusId: active?.id'), '')
-check('★ 无围栏时原「本段进度」句逐字保留',
-  courseSrc.includes("本段进度：当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。已讲到哪、还有哪些没讲，结合本段对话自行判断。"), '')
-check('有台账时把推断行降级并点明以台账为准',
-  /本段进度：界面当前聚焦第[\s\S]{0,200}以台账为准/.test(courseSrc), '')
-check('已收尾段不注入台账块（负向）', /const ledgerBlock = curLesson\.status === 'ended'/.test(courseSrc), '')
+check('★ 段会话全量合并本会话所有围栏（foldTeachFences + 全量消息 + unitOrder）',
+  /const ledger = foldTeachFences\(getAgentMessagesAll\(sessionId\), \{ unitOrder: ids \}\)/.test(courseSrc), '')
+check('★ 不用只给最早 500 条的 getAgentMessages（长段会漏最近围栏，负向）',
+  !/foldTeachFences\(getAgentMessages\(sessionId\)/.test(courseSrc), '')
+check('★ 合并结果经 ledgerToPatch 作为 renderSegmentLedgerRequestBlock 的输入',
+  courseSrc.includes('patch: ledgerToPatch(ledger)') && courseSrc.includes('renderSegmentLedgerRequestBlock({') && courseSrc.includes('focusId: active?.id'), '')
+check('★ system 层进度句只走纯函数且参数不含台账',
+  /lines\.push\(renderSegmentProgressLine\(\{ activeIdx, total: ids\.length, activeName: active\?\.name \}\)\)/.test(courseSrc), '')
+check('★ 台账经 requestOut 出参交给请求级层（不 push 进 system 行）',
+  courseSrc.includes('requestOut.block = requestBlock') && !courseSrc.includes('lines.push(ledgerBlock)') && !courseSrc.includes('lines.push(requestBlock)'), '')
+check('★ 不再只读最后一条围栏（负向）', !courseSrc.includes('lastTeachPatchOf('), '')
+check('已收尾段不注入台账块（负向）', /if \(curLesson\.status !== 'ended'\) \{[\s\S]{0,120}foldTeachFences/.test(courseSrc), '')
 check('渲染层剥离 teach 围栏（不进正文）', panelSrc.includes('(profile|plan|ask|outline|endcourse|teach)'), '')
 
 // ---------------------------------------------------------------- 报告

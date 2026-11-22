@@ -15,14 +15,26 @@
 //   node .AGENT/scripts/ai-teaching/verify-segment-wrapup.mjs
 // 期望：[OK] 全部通过 且 exit=0
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { stripTypeScriptTypes } from 'node:module'
 import { stripComments } from '../shared/strip-comments.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../../..')
 const src = stripComments(readFileSync(join(repo, 'electron/lib/aiTeachingCourse.ts'), 'utf8').replace(/\r\n/g, '\n'))
+
+// 「本段进度」句已抽成零依赖纯函数（ts 源经 strip 后直接跑真实实现）——白盒锁文案逐字不变
+const tmpDir = mkdtempSync(join(tmpdir(), 'segment-wrapup-'))
+const tmpFile = join(tmpDir, 'teachLedgerPure.mjs')
+writeFileSync(tmpFile, stripTypeScriptTypes(
+  readFileSync(join(repo, 'electron/lib/teachLedgerPure.ts'), 'utf8'),
+  { mode: 'strip' },
+))
+const { renderSegmentProgressLine } = await import(pathToFileURL(tmpFile).href)
+const plainLine = renderSegmentProgressLine({ activeIdx: 2, total: 3, activeName: '安全序列' })
 
 let pass = 0
 const fails = []
@@ -33,10 +45,12 @@ function ok(cond, label, detail = '') {
 }
 
 console.log('=== A. 本段进度注入（B-47 ①） ===')
-ok(/本段进度：当前聚焦第 \$\{activeIdx\}\/\$\{ids\.length\} 个知识点/.test(src),
-  'A1 注入「当前聚焦第 X/N 个知识点」')
-ok(/已讲到哪、还有哪些没讲，结合本段对话自行判断/.test(src),
-  'A2 已讲口径由模型结合对话史判断（无 per-unit 状态可注入，不虚构）')
+ok(/lines\.push\(renderSegmentProgressLine\(\{ activeIdx, total: ids\.length, activeName: active\?\.name \}\)\)/.test(src),
+  'A1 注入「当前聚焦第 X/N 个知识点」（纯函数渲染）')
+ok(plainLine === '本段进度：当前聚焦第 2/3 个知识点（安全序列）。已讲到哪、还有哪些没讲，结合本段对话自行判断。',
+  'A2 已讲口径由模型结合对话史判断（文案逐字不变）', JSON.stringify(plainLine))
+ok(!plainLine.includes('台账'),
+  'A3 「本段进度」句与台账解耦（system 前缀同一段内逐字稳定）', JSON.stringify(plainLine))
 
 console.log('\n=== B. 段内收尾协议（B-47 ②③，open 分支） ===')
 ok(/段内收尾协议：/.test(src), 'B1 注入「段内收尾协议」段')
@@ -65,6 +79,7 @@ ok(/x\.lesson\.status === 'open' && \(Number\(x\.lesson\.order\) \|\| 0\) > \(Nu
 ok(/chapterSegments\(s\.lessons, chapterUnitIds\)/.test(src), 'D4 复用 chapterSegments 取同章段列')
 
 console.log('\n========================================')
+try { rmSync(tmpDir, { recursive: true, force: true }) } catch { /* 清理失败不影响结论 */ }
 if (fails.length === 0) {
   console.log(`[OK] 全部通过：${pass} 项断言 PASS`)
 } else {

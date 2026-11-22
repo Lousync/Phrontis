@@ -46,6 +46,11 @@ const { mod: usageUi, tmpDir: usageUiTmp } = await loadStripped(
   'src/lib/contextUsagePure.ts',
   'contextUsagePure.mjs',
 )
+// 段内台账纯函数（分层断言：台账必须走请求级，不能进 system 分区）
+const { mod: ledgerPure, tmpDir: ledgerTmp } = await loadStripped(
+  'electron/lib/teachLedgerPure.ts',
+  'teachLedgerPure.mjs',
+)
 
 const {
   CHARS_PER_TOKEN,
@@ -219,6 +224,50 @@ check('没有片段被重复计入两个分区', duplicated.length === 0, duplic
 check('messages / tools 走真实序列化', block.includes('JSON.stringify(convo') && block.includes('JSON.stringify(toolPayload)'), '')
 check('旧字段 constraintsRaw 仍是四层原始正文', block.includes('constraintsRaw: scopeLayers.global + scopeLayers.workspace + scopeLayers.unit + scopeLayers.lesson'), '')
 
+console.log('\n=== 7b. 台账分层：不进 system 分区（同段内 systemFull 逐字稳定） ===')
+const requestInjectionLine = (agentSrc.match(/const requestInjection = \[[^\]]*\]/) || [''])[0]
+const systemFullBlock = (agentSrc.match(/const systemFull = manual[\s\S]*?\n\n/) || [''])[0]
+check('★ 台账经 requestInjection（首条 user 消息层）注入', requestInjectionLine.includes('courseRequestHint'), requestInjectionLine.slice(0, 160))
+check('★ systemFull 拼接不含台账块（负向，防打散 prompt cache 前缀）',
+  systemFullBlock !== '' && !systemFullBlock.includes('courseRequestHint') && !systemFullBlock.includes('台账'),
+  systemFullBlock.slice(-120))
+check('buildCourseInjection 用 out 参携带台账（system 返回值不含它）',
+  /buildCourseInjection\(sessionId, getSettingReader\(\), courseRequestOut\)/.test(agentSrc), '')
+check('课程 / 复习上下文（course 分区）只取 system 返回值 courseHint',
+  block.includes('course: courseHint') && !block.includes('course: courseHint + courseRequestHint'), '')
+
+// 纯函数级：同一段（聚焦参数不变）连续两轮 —— system 段逐字相同，台账块随进度变化
+const TWO_ORDER = ['u1', 'u2', 'u3']
+const TWO_UNITS = [
+  { id: 'u1', name: '资源分配图' },
+  { id: 'u2', name: '安全序列' },
+  { id: 'u3', name: '银行家算法' },
+]
+const ROUND1 = [
+  { role: 'assistant', content: '第一轮\n```teach\n{"unitId":"u1","step":1,"label":"定义"}\n```', created_at: '2026-11-22T10:00:00.000Z' },
+]
+const ROUND2 = [
+  ...ROUND1,
+  { role: 'assistant', content: '第二轮\n```teach\n{"unitId":"u2","step":1,"label":"安全序列","newTerms":["安全序列"]}\n```', created_at: '2026-11-22T10:01:00.000Z' },
+]
+const focus = { activeIdx: 2, total: 3, activeName: '安全序列' }
+const requestBlockOf = (msgs) => ledgerPure.renderSegmentLedgerRequestBlock({
+  patch: ledgerPure.ledgerToPatch(ledgerPure.foldTeachFences(msgs, { unitOrder: TWO_ORDER })),
+  units: TWO_UNITS,
+  focusId: 'u2',
+  ...focus,
+})
+const sysLineRound1 = ledgerPure.renderSegmentProgressLine(focus)
+const sysLineRound2 = ledgerPure.renderSegmentProgressLine(focus)
+const reqBlockRound1 = requestBlockOf(ROUND1)
+const reqBlockRound2 = requestBlockOf(ROUND2)
+check('★ 同一段内连续两轮 system 段逐字相同（进度句与台账解耦）',
+  sysLineRound1 === sysLineRound2 && !sysLineRound1.includes(ledgerPure.TEACH_LEDGER_HEADER),
+  JSON.stringify(sysLineRound1))
+check('★ 同一段内连续两轮请求级台账块随进度变化（不是冻结）',
+  reqBlockRound1 !== reqBlockRound2 && reqBlockRound2.includes('已覆盖：资源分配图'), JSON.stringify(reqBlockRound2))
+check('无围栏轮次请求级注入为空（零成本）', requestBlockOf([]) === '', '')
+
 console.log('\n=== 8. 双端一致性：src/lib/contextUsagePure.ts（渲染层镜像） ===')
 const UI_TRIO = (list) => JSON.stringify(list.map((c) => [c.key, c.label, c.field]))
 check('渲染层导出了 5 个同名算法', ['CHARS_PER_TOKEN', 'CONTEXT_USAGE_CATEGORIES', 'estimateTokensFromChars', 'scaleTokensToBudget', 'buildContextUsage'].every((k) => usageUi[k] != null), Object.keys(usageUi).join(','))
@@ -301,4 +350,5 @@ console.log(`\n${failed.length === 0 ? 'PASS' : 'FAIL'} —— ${checks.length -
 
 try { fs.rmSync(usageTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
 try { fs.rmSync(usageUiTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
+try { fs.rmSync(ledgerTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
 process.exit(failed.length === 0 ? 0 : 1)

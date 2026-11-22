@@ -1566,7 +1566,14 @@ async function runAgentLoopInner(
   const hookStartHint = renderRunStartHooks(promptHooks)
   // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
   // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
-  const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
+  // ★ 分层（2026-11-22）：返回值（system 层）只含逐字稳定的部分 —— 段内「当前聚焦第 X/N」句；
+  //   逐轮变化的【本段台账】经 `courseRequestOut` 交给下面的首条 user 消息层（requestInjection）。
+  //   台账并入 system 会让同一段内每轮都 miss prompt cache 前缀（system + tools）。
+  const courseRequestOut: { block: string } = { block: '' }
+  const courseHint = source === 'aiTeaching'
+    ? buildCourseInjection(sessionId, getSettingReader(), courseRequestOut)
+    : ''
+  const courseRequestHint = source === 'aiTeaching' ? courseRequestOut.block : ''
   // 2026-11-10：AI 教学讲课口径 —— 默认「小步引导」（一条回答一个台阶 + 一个检查问题并停下），
   // 设置 aiTeachLectureStyle 可切回「整段精讲」。文案在零依赖 pure 文件里，契约脚本可直接跑。
   // 仍只覆盖教学面，不改其他助手；事务性回答由口径内部排除，保持基础人设的简洁直接。
@@ -1755,9 +1762,10 @@ async function runAgentLoopInner(
   const aiManifestHint = unifiedAssistant && !scopeAll
     ? buildScopeManifest(aiScope, textOfContent([...history].reverse().find((m) => m.role === 'user')?.content), false)
     : ''
-  // 首条 user 消息层注入（每轮变化的数据快照）：日程 / 情报各自的数据快照 + 引用骨架 / 感知素材 ——
-  // 逐字会变的内容都只进这一层，不进 system（防打散 prompt cache 前缀）
-  const requestInjection = [scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, recentArtifactsHint, aiManifestHint].filter(Boolean).join('\n\n')
+  // 首条 user 消息层注入（每轮变化的数据快照）：段内台账 / 日程 / 情报各自的数据快照 + 引用骨架 / 感知素材 ——
+  // 逐字会变的内容都只进这一层，不进 system（防打散 prompt cache 前缀）。
+  // 【本段台账】放最前：它是段会话的「讲到哪」权威，其它注入都排在它之后。
+  const requestInjection = [courseRequestHint, scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, recentArtifactsHint, aiManifestHint].filter(Boolean).join('\n\n')
 
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
