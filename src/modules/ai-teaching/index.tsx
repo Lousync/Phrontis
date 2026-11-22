@@ -457,7 +457,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const raw = splitJumps(m.content)
     const rec = {
       src: m.content,
-      body: raw.body.replace(/```(profile|plan|ask|outline|endcourse)[^\n]*\n[\s\S]*?```/g, ''),
+      body: raw.body.replace(/```(profile|plan|ask|outline|endcourse|teach)[^\n]*\n[\s\S]*?```/g, ''),
       jumps: raw.jumps,
     }
     msgParseCache.current.set(key, rec)

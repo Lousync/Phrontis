@@ -9,6 +9,8 @@
  *   · `stripTeachFence` —— 渲染层去掉该围栏，**不碰** quiz / plan / ask / outline 等其它围栏；
  *   · `mergeLedger`     —— 程序累加进 `progress.json` 的 ledger：幂等、step 只增不减、术语去重；
  *   · `renderLedgerForPrompt` —— 下轮注入的中文台账块（≤ 800 字符）；
+ *   · `lastTeachPatchOf` / `renderSegmentLedger` —— 段会话接线：取最后一条围栏、
+ *     渲染「已讲到 / 已覆盖 / 未覆盖 / 下一步 / 最近术语」（≤ 800 字符，台账优先于当前聚焦）；
  *   · `ledgerFromHeadings`    —— 模型漏写围栏时，用回答里最后一个 `### 标题` 兜底。
  *
  * 容错口径（parseTeachFence）：
@@ -365,6 +367,26 @@ export function mergeLedger(prev: TeachLedger | null, patch: TeachPatch, now: st
 /* ------------------------------------------------------------------ 注入 */
 
 /**
+ * 抬头 + 若干行拼成注入块；超长时**从最后一行开始丢**，末尾追加「（台账已截断）」，
+ * 且保证总长 ≤ limit。renderLedgerForPrompt / renderSegmentLedger 共用这一份截断口径。
+ */
+function joinLedgerLines(header: string, lines: string[], limit: number): string {
+  const joined = `${header}\n${lines.join('\n')}`
+  if (joined.length <= limit) return joined
+
+  const keep = lines.slice()
+  const mark = TEACH_LEDGER_TRUNCATED_MARK
+  let body = `${header}\n${keep.join('\n')}`
+  while (keep.length > 0 && body.length + 1 + mark.length > limit) {
+    keep.pop()
+    body = keep.length ? `${header}\n${keep.join('\n')}` : header
+  }
+  if (body.length + 1 + mark.length <= limit) return `${body}\n${mark}`
+  if (limit <= mark.length) return mark.slice(0, limit)
+  return `${body.slice(0, limit - mark.length)}${mark}`
+}
+
+/**
  * 产出中文台账块（下轮注入用）。空 ledger → 空串。
  * 超长按行截断（从最后一行开始丢），末尾追加「（台账已截断）」且总长 ≤ maxChars。
  */
@@ -389,19 +411,98 @@ export function renderLedgerForPrompt(
   if (ledger.next && ledger.next.trim()) lines.push(`下一步：${ledger.next.trim()}`)
   if (!lines.length) return ''
 
-  const joined = `${TEACH_LEDGER_HEADER}\n${lines.join('\n')}`
-  if (joined.length <= limit) return joined
+  return joinLedgerLines(TEACH_LEDGER_HEADER, lines, limit)
+}
 
-  const keep = lines.slice()
-  let body = `${TEACH_LEDGER_HEADER}\n${keep.join('\n')}`
-  const mark = TEACH_LEDGER_TRUNCATED_MARK
-  while (keep.length > 0 && body.length + 1 + mark.length > limit) {
-    keep.pop()
-    body = keep.length ? `${TEACH_LEDGER_HEADER}\n${keep.join('\n')}` : TEACH_LEDGER_HEADER
+/* ------------------------------------------------------------------ 段内注入 */
+
+/** 台账里「最近术语」最多展示几个（本轮增量通常就两三个；异常长时只留后几个） */
+const SEGMENT_LEDGER_TERMS_MAX = 8
+
+export interface SegmentLedgerInput {
+  /** 最后一条 ` ```teach ` 围栏解析出的增量（null = 本段还没有围栏） */
+  patch: TeachPatch | null
+  /** 本段知识点（按大纲顺序）—— 用来把 unitId 换成名字、并推导已覆盖 / 未覆盖 */
+  units: Array<{ id: string; name: string }>
+  /** 界面当前聚焦的知识点 id（「当前聚焦第 X/N」推断口径） */
+  focusId?: string
+  /** 注入上限（字符），默认与 renderLedgerForPrompt 同值 */
+  maxChars?: number
+}
+
+export interface SegmentLedgerBlock {
+  /** 台账块；无围栏 / 围栏里没有任何进度字段 → 空串（调用方据此保持原注入逐字不变） */
+  text: string
+  /** 台账当前知识点 ≠ 界面当前聚焦（块内已点明「以台账为准」） */
+  conflict: boolean
+}
+
+/**
+ * 取**最后一条**带 ` ```teach ` 围栏的 assistant 消息里的增量。
+ *
+ * 口径：整段消息从新往旧扫，跳过 user 消息与没有有效围栏的 assistant 回答；
+ * 一条都找不到返回 null。只读，不落盘、不改消息。
+ */
+export function lastTeachPatchOf(
+  messages: Array<{ role?: string; content?: string }>,
+): TeachPatch | null {
+  const rows = Array.isArray(messages) ? messages : []
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const m = rows[i]
+    if (!m || m.role !== 'assistant') continue
+    const patch = parseTeachFence(String(m.content ?? ''))
+    if (patch) return patch
   }
-  if (body.length + 1 + mark.length <= limit) return `${body}\n${mark}`
-  if (limit <= mark.length) return mark.slice(0, limit)
-  return `${body.slice(0, limit - mark.length)}${mark}`
+  return null
+}
+
+/**
+ * 段内台账注入块（已讲到 / 已覆盖 / 未覆盖 / 下一步 / 最近术语）。
+ *
+ * 优先级：**围栏里的台账 > 「当前聚焦第 X/N」推断** —— 台账与界面聚焦不一致时，
+ * 块内单独点名「以台账为准」，调用方另把那句推断降级为界面状态。
+ * 无围栏时返回空串（调用方必须让原注入逐字不变）。
+ */
+export function renderSegmentLedger(input: SegmentLedgerInput): SegmentLedgerBlock {
+  const patch = input?.patch ?? null
+  if (!patch) return { text: '', conflict: false }
+  const limit = Math.max(1, Math.floor(input.maxChars ?? TEACH_LEDGER_PROMPT_MAX_CHARS))
+  const units = Array.isArray(input.units) ? input.units : []
+
+  const rawId = typeof patch.unitId === 'string' ? patch.unitId.trim() : ''
+  const idx = rawId ? units.findIndex((u) => u.id === rawId || u.name === rawId) : -1
+  const cur = idx >= 0 ? units[idx] : null
+  const curName = cur?.name ?? rawId
+  const focusId = String(input.focusId ?? '').trim()
+  // 模型写名字也认（cur 已解析出 id）；解析不出 unit 时按原文比对，宁可报冲突也不静默吞掉
+  const conflict = !!curName && !!focusId && (cur ? cur.id !== focusId : curName !== focusId)
+
+  const lines: string[] = []
+  const progress: string[] = []
+  if (curName) progress.push(curName)
+  if (typeof patch.step === 'number' && Number.isFinite(patch.step) && patch.step > 0) {
+    progress.push(`第 ${Math.floor(patch.step)} 步`)
+  }
+  if (patch.label && patch.label.trim()) progress.push(patch.label.trim())
+  if (progress.length) lines.push(`已讲到：${progress.join(' · ')}`)
+  if (conflict) lines.push('冲突提示：界面「当前聚焦」与台账不一致，以台账为准（继续按台账推进）。')
+  if (idx > 0) lines.push(`已覆盖：${units.slice(0, idx).map((u) => u.name).join('、')}`)
+  if (idx >= 0 && idx < units.length - 1) lines.push(`未覆盖：${units.slice(idx + 1).map((u) => u.name).join('、')}`)
+  if (patch.next && patch.next.trim()) lines.push(`下一步：${patch.next.trim()}`)
+  const terms: string[] = []
+  const seenTerms = new Set<string>()
+  for (const rawTerm of patch.newTerms ?? []) {
+    const term = String(rawTerm ?? '').trim()
+    if (!term) continue
+    const key = normTerm(term)
+    if (seenTerms.has(key)) continue
+    seenTerms.add(key)
+    terms.push(term)
+  }
+  if (terms.length) lines.push(`最近术语：${terms.slice(-SEGMENT_LEDGER_TERMS_MAX).join('、')}`)
+
+  if (!lines.length) return { text: '', conflict: false }
+  return { text: joinLedgerLines(TEACH_LEDGER_HEADER, lines, limit), conflict }
 }
 
 /* ------------------------------------------------------------------ 兜底 */

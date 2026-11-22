@@ -44,6 +44,7 @@ import {
   type SourceSummary,
 } from './aiTeachingSourceRegistry'
 import { detectLongMaterial } from '../../src/lib/aiTeachingSourcesPure'
+import { lastTeachPatchOf, renderSegmentLedger } from './teachLedgerPure'
 import { rewriteFavoritePrefixes } from './aiTeachingFavorites'
 import {
   buildCourseLayoutPlan,
@@ -1117,6 +1118,8 @@ export function getSessionUnitFolderRels(sessionId: string, getSetting: (key: st
 export interface SessionLessonBrief {
   unitIds: string[]
   activeUnitId?: string
+  /** 段是否已收尾（只读）—— 已收尾段不再注入台账协议 / 台账块 */
+  ended?: boolean
 }
 
 /** 当前会话是否为段会话；不是（课程助手 / 复习课 / 零散对话）→ null。 */
@@ -1129,7 +1132,7 @@ export function getSessionLessonBrief(sessionId: string): SessionLessonBrief | n
     const s = wsState(readProgressFile(), wsId)
     const l = s.lessons?.[sid]
     if (!l) return null
-    return { unitIds: lessonUnitIds(l), activeUnitId: l.activeUnitId }
+    return { unitIds: lessonUnitIds(l), activeUnitId: l.activeUnitId, ended: l.status === 'ended' }
   } catch {
     return null
   }
@@ -1392,9 +1395,30 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     const mark = u.id === active?.id ? '【当前聚焦】' : ''
     lines.push(`- ${mark}[${u.id}] ${u.name}（出自「${u.chapter}」，来源：${u.source || '未标注'}）${u.goal ? ` · 目标：${u.goal}` : ''}`)
   }
-  // B-47 ①本段进度：当前聚焦第几个（可得的真状态，无 per-unit 讲授状态可注入）
+  // B-47 ①本段进度：当前聚焦第几个（可得的真状态）；有台账时以台账为准（见下）
   const activeIdx = active ? ids.indexOf(active.id) + 1 : 0
-  lines.push(`本段进度：当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。已讲到哪、还有哪些没讲，结合本段对话自行判断。`)
+  // 段内教学台账（2026-11-22）：取本段**最后一条**带 ```teach 围栏的 assistant 回答。
+  // 台账 > 「当前聚焦第 X/N」推断：有台账时把那句推断降级为界面状态，进度以台账为准；
+  // 无围栏 → 空串，下面的原句逐字保持不变（verify-segment-wrapup A1/A2 锁定）。
+  const ledgerBlock = curLesson.status === 'ended'
+    ? ''
+    : (() => {
+        try {
+          const patch = lastTeachPatchOf(getAgentMessages(sessionId))
+          if (!patch) return ''
+          return renderSegmentLedger({
+            patch,
+            units: unitRows.map((u) => ({ id: u.id, name: u.name })),
+            focusId: active?.id,
+          }).text
+        } catch { return '' }
+      })()
+  if (ledgerBlock) {
+    lines.push(`本段进度：界面当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。实际讲到哪以下方【本段台账】为准，冲突时以台账为准。`)
+    lines.push(ledgerBlock)
+  } else {
+    lines.push(`本段进度：当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。已讲到哪、还有哪些没讲，结合本段对话自行判断。`)
+  }
   const handoff = readPrevHandoff(sessionId, getSetting)
   if (handoff) lines.push(`\n【上一段交接（同章）】\n${handoff}`)
   lines.push(`课程进度：已学完 ${done}/${total}`)

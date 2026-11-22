@@ -16,6 +16,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
+import { stripComments } from '../shared/strip-comments.mjs'
 
 const ROOT = process.argv[2]
   ? path.resolve(process.argv[2])
@@ -40,6 +41,8 @@ const {
   stripTeachFence,
   mergeLedger,
   renderLedgerForPrompt,
+  lastTeachPatchOf,
+  renderSegmentLedger,
   ledgerFromHeadings,
   TEACH_LEDGER_PROMPT_MAX_CHARS,
   TEACH_LEDGER_HEADER,
@@ -135,6 +138,74 @@ check('取最后一个 `### 标题` 作为 label', headingPatch?.label === '银�
 check('传入 unitId 时一并带上', ledgerFromHeadings('### 甲', 'u3')?.unitId === 'u3', JSON.stringify(ledgerFromHeadings('### 甲', 'u3')))
 check('没有 `### 标题` 返回 null（负向）', ledgerFromHeadings('## 只有二级标题\n正文') === null, '')
 check('`####` 不进兜底（负向）', ledgerFromHeadings('#### 四级标题') === null, '')
+
+console.log('\n=== 6. lastTeachPatchOf：只取最后一条 assistant 围栏 ===')
+const MSGS = [
+  { role: 'user', content: '老师继续' },
+  { role: 'assistant', content: '第一轮\n```teach\n{"unitId":"u1","step":1,"label":"定义"}\n```' },
+  { role: 'assistant', content: '中间一条没有围栏的回答' },
+  { role: 'assistant', content: '第三轮\n```teach\n{"unitId":"u2","step":2,"label":"第二步"}\n```' },
+  { role: 'user', content: '```teach\n{"unitId":"u9","step":9}\n```' },
+]
+const lastPatch = lastTeachPatchOf(MSGS)
+check('★ 取最后一条围栏（不是第一条）', lastPatch?.unitId === 'u2' && lastPatch?.step === 2, JSON.stringify(lastPatch))
+check('后续无围栏回答不影响取最后一条有效围栏', lastPatch?.label === '第二步', '')
+check('user 消息里的围栏不计入（负向）', lastPatch?.unitId !== 'u9', JSON.stringify(lastPatch))
+check('全部没有围栏返回 null（负向）', lastTeachPatchOf([{ role: 'assistant', content: '只有正文' }]) === null, '')
+check('空消息列表返回 null（负向）', lastTeachPatchOf([]) === null, '')
+
+console.log('\n=== 7. renderSegmentLedger：注入块 / 优先级 / 上限 ===')
+const UNITS = [
+  { id: 'u1', name: '资源分配图' },
+  { id: 'u2', name: '安全序列' },
+  { id: 'u3', name: '银行家算法' },
+]
+const seg = renderSegmentLedger({
+  patch: { unitId: 'u3', step: 2, label: '安全性检查', newTerms: ['安全状态', '安全状态', '死锁'], next: '讲不安全状态反例' },
+  units: UNITS,
+  focusId: 'u2',
+})
+check('无围栏 → 空串（调用方保持原注入逐字不变）', renderSegmentLedger({ patch: null, units: UNITS, focusId: 'u1' }).text === '', '')
+check('已讲到 = 知识点名 · 第 N 步 · 台阶', seg.text.includes('已讲到：银行家算法 · 第 2 步 · 安全性检查'), JSON.stringify(seg.text))
+check('已覆盖 = 当前知识点之前的部分', seg.text.includes('已覆盖：资源分配图、安全序列'), JSON.stringify(seg.text))
+check('最后一个知识点时不再输出未覆盖行（负向）', !seg.text.includes('未覆盖：'), JSON.stringify(seg.text))
+check('下一步 + 最近术语（同轮去重）', seg.text.includes('下一步：讲不安全状态反例') && seg.text.includes('最近术语：安全状态、死锁'), JSON.stringify(seg.text))
+check('★ 台账与当前聚焦冲突 → conflict=true 且块内点明以台账为准', seg.conflict === true && seg.text.includes('以台账为准'), JSON.stringify(seg))
+check('不冲突时 conflict=false（负向）', renderSegmentLedger({ patch: { unitId: 'u1', step: 1 }, units: UNITS, focusId: 'u1' }).conflict === false, '')
+const mid = renderSegmentLedger({ patch: { unitId: 'u2', step: 1 }, units: UNITS, focusId: 'u2' })
+check('未覆盖 = 当前知识点之后的部分', mid.text.includes('未覆盖：银行家算法'), JSON.stringify(mid.text))
+check('台账块抬头稳定', seg.text.startsWith(TEACH_LEDGER_HEADER), JSON.stringify(seg.text))
+const huge = renderSegmentLedger({
+  patch: { unitId: 'u2', step: 1, label: 'x'.repeat(900), newTerms: ['y'.repeat(500)] },
+  units: UNITS,
+  focusId: 'u2',
+})
+check('★ 注入块 ≤ 800 字符且带截断标记', huge.text.length <= 800 && huge.text.endsWith(TEACH_LEDGER_TRUNCATED_MARK), String(huge.text.length))
+
+console.log('\n=== 8. 接线：提示词 / 段会话注入 / 渲染层剥离 ===')
+const agentSrc = stripComments(fs.readFileSync(path.join(ROOT, 'electron/lib/agentService.ts'), 'utf8'))
+const courseSrc = stripComments(fs.readFileSync(path.join(ROOT, 'electron/lib/aiTeachingCourse.ts'), 'utf8'))
+const panelSrc = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/index.tsx'), 'utf8')
+check('系统提示含 ```teach 台账协议', agentSrc.includes('【段内台账协议（AI教学）】') && agentSrc.includes('```teach'))
+check('协议字段与解析口径一致（unitId / step / label / newTerms / next）',
+  ['"unitId"', '"step"', '"label"', '"newTerms"', '"next"'].every((k) => agentSrc.includes(k)), '')
+check('协议要求：每条都输出、step 只增、newTerms 只放本轮新术语',
+  agentSrc.includes('每条回答都输出、最多一个') && agentSrc.includes('只增不减') && agentSrc.includes('newTerms 只放本轮**新引入**的术语'), '')
+check('★ 只对段会话注入（课程助手 / 复习课 / 零散会话不注入）',
+  /const teachLedgerRuleHint = source === 'aiTeaching' && !isSideLane[\s\S]{0,200}getSessionLessonBrief\(sessionId\)/.test(agentSrc), '')
+check('已收尾段不注入台账协议（负向）', /getSessionLessonBrief\(sessionId\)[\s\S]{0,120}!brief\.ended/.test(agentSrc), '')
+check('teachLedgerRuleHint 拼进 systemFull', /\+ endcourseRuleHint \+ teachLedgerRuleHint \+ visualHint/.test(agentSrc), '')
+check('台账协议计入 protocols 分区（与其它协议同区）', /outlineRuleHint \+ endcourseRuleHint \+ teachLedgerRuleHint \+ teachStyleHint/.test(agentSrc), '')
+check('段会话取最后一条围栏（复用 lastTeachPatchOf + getAgentMessages）',
+  /const patch = lastTeachPatchOf\(getAgentMessages\(sessionId\)\)/.test(courseSrc), '')
+check('注入块走 renderSegmentLedger 且带上当前聚焦',
+  courseSrc.includes('renderSegmentLedger({') && courseSrc.includes('focusId: active?.id'), '')
+check('★ 无围栏时原「本段进度」句逐字保留',
+  courseSrc.includes("本段进度：当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。已讲到哪、还有哪些没讲，结合本段对话自行判断。"), '')
+check('有台账时把推断行降级并点明以台账为准',
+  /本段进度：界面当前聚焦第[\s\S]{0,200}以台账为准/.test(courseSrc), '')
+check('已收尾段不注入台账块（负向）', /const ledgerBlock = curLesson\.status === 'ended'/.test(courseSrc), '')
+check('渲染层剥离 teach 围栏（不进正文）', panelSrc.includes('(profile|plan|ask|outline|endcourse|teach)'), '')
 
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)
