@@ -45,13 +45,6 @@ interface TabRuntime {
 
 const EMPTY_RUNTIME: TabRuntime = { canGoBack: false, canGoForward: false, loading: false }
 
-/** 起始页快捷入口：固定 3 个，不再往上堆（空态只负责「给个能点的东西」） */
-const QUICK_LINKS = [
-  { label: '百度', url: 'https://www.baidu.com' },
-  { label: '维基百科', url: 'https://zh.wikipedia.org' },
-  { label: 'MDN 文档', url: 'https://developer.mozilla.org' },
-]
-
 interface PaneSnapshot {
   tabs: WebTabRef[]
   activeIndex: number
@@ -527,22 +520,11 @@ export function WebPane(props: WebPaneProps) {
 
   const placeholder = (() => {
     if (!activeTab || !activeTab.url) {
+      /* 空网页：只留一枚安静的 Globe（2026-11-22 用户拍板 —— 起始页占位与三个快捷入口一起撤掉，
+         不用说明文字；地址栏本身就是入口，铁律 26） */
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-3 px-6">
-          <p className="text-[12px] text-[var(--text-secondary)]">输入网址，或粘贴一个链接</p>
-          <div className="flex w-full max-w-[240px] flex-col gap-1">
-            {QUICK_LINKS.map((q) => (
-              <button
-                key={q.url}
-                type="button"
-                onClick={() => void navigate(q.url)}
-                className="flex h-7 w-full items-center gap-2 rounded-md border border-[var(--border-color)] px-2 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
-              >
-                <Globe size={12} className="shrink-0 text-[var(--text-muted)]" />
-                <span className="truncate">{q.label}</span>
-              </button>
-            ))}
-          </div>
+        <div className="flex h-full items-center justify-center">
+          <Globe size={28} strokeWidth={1.5} className="text-[var(--text-muted)] opacity-40" aria-hidden />
         </div>
       )
     }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, llmReasoningCapable, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
@@ -28,6 +28,7 @@ import { ArtifactsPane } from './ArtifactsPane'
 import { RightViewer } from './right-viewer/RightViewer'
 import type { ViewerTabKey } from './right-viewer/paneContracts'
 import { SideLanePanel } from './SideLanePanel'
+import { pickLearningQuote } from './learningQuotes'
 import type { ArtTab } from './artifacts'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { Collapsible } from '../../components/shared/Collapsible'
@@ -1966,6 +1967,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    */
   const emptyState = messages.length === 0 && !pending && !askVisible && !courseReadonly && !preflight
   /**
+   * 空态标语（2026-11-22 用户拍板）：大标题不再播报状态，改成与学习有关的名言。
+   * 用「段 id → 会话 id」做稳定哈希，同一段永远同一句、换段就换一句。
+   */
+  const emptyQuote = useMemo(
+    () => pickLearningQuote(activeSegmentSid ?? activeId ?? ''),
+    [activeSegmentSid, activeId],
+  )
+  /**
    * 推荐动作条只在「已进入课程段」的空态露出：没开段的自由对话 / 课程助手建课没有段内动作可推荐。
    * 与 emptyState 分离，是为了让居中位移覆盖所有空态、而推荐动作仍只照顾本段。
    */
@@ -2872,7 +2881,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       data-tip="选择本对话模型（仅本对话生效，默认跟随 设置→AI 默认模型）" aria-label="选择本对话模型（仅本对话生效，默认跟随 设置→AI 默认模型）">
                       <Bot size={11} />
                       <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
-                      {convoEffort !== 'off' && <span className="text-[var(--accent)]">· 🧠{EFFORT_LABEL[convoEffort]}</span>}
+                      {convoEffort !== 'off' && (
+                        <span className="flex shrink-0 items-center gap-0.5 text-[var(--accent)]">
+                          <span aria-hidden>·</span>
+                          <Brain size={10} strokeWidth={2} className="shrink-0" aria-hidden />
+                          {EFFORT_LABEL[convoEffort]}
+                        </span>
+                      )}
                       <ChevronRight size={10} className="-rotate-90 shrink-0" />
                     </button>
                     {modelMenu.open && modelMenu.pos && (
@@ -3770,17 +3785,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         如需完全对齐参考图，可只改这一个 class（如 text-[32px]）。
                         文案最长 7 字，正常宽度单行居中；极窄中栏时允许折行（不加 whitespace-nowrap，
                         否则会横向溢出）。说明文字字号不动，只调标题这一层。 */}
-                    <div className="text-[28px] font-semibold leading-snug text-[var(--text-primary)]">
-                      {courseReviewChapter ? '章末复习' : activeSegment ? '本段开始' : activeId ? (assistantSid && activeId === assistantSid ? (courseState?.outline ? '课程助手' : '和课程助手建课') : '开始对话') : '从左侧开始'}
-                    </div>
-                    <div className="max-w-[420px] text-[11.5px] leading-relaxed text-[var(--text-muted)]">
-                      {courseReviewChapter
-                        ? '本章知识点都学完了。把复习讨论整理成《复习讲义》，或按你的要求逐块回顾。'
-                        : activeSegment
-                          ? '本段只围绕左侧列出的知识点推进。讲完点左栏段行的 ✓（或对话流末尾那张卡）收尾，系统会生成交接给同章下一段。'
-                          : assistantSid && activeId === assistantSid
-                            ? '把资料和目标交给课程助手：它负责登记素材、给出章→知识点大纲、按章分配素材；开讲由你点知识点开段。'
-                            : '从左侧点一个知识点开段，或点「课程助手」建课 / 改大纲。'}
+                    {/* 空态主标题（2026-11-22）：改成一句与学习有关的名言，按段稳定取词；
+                        「章末复习」保留状态名（它是模式而不是对话开场）；小字说明整段删除 ——
+                        用户要的是标语，不是操作手册。 */}
+                    <div className="max-w-[620px] text-balance text-[24px] font-semibold leading-snug text-[var(--text-primary)]">
+                      {courseReviewChapter ? '章末复习' : (
+                        <>
+                          {emptyQuote.text}
+                          <span className="ml-2 align-middle text-[12px] font-normal text-[var(--text-muted)]">— {emptyQuote.source}</span>
+                        </>
+                      )}
                     </div>
                     {!activeId && (
                       <button onClick={() => void courseOpenAssistant()} className="mt-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11.5px] text-white hover:opacity-90">打开课程助手</button>
@@ -4235,25 +4249,29 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           </div>
         )}
 
-        {/* 右侧查看器（P4）：网页 / 笔记 / 书架 / 旁问 —— 取代原右栏（进度 / 素材 / 支线）。
-            进度 → 中栏「进度」按钮浮层；素材 → 左栏「文件 / 素材」分段；本次改动 → 工件栏底部。 */}
-        <RightViewer
-          open={srcVisible}
-          onClose={() => toggleSide('right')}
-          onWidthChange={setViewerW}
-          rootId={vaultRootId}
-          sessionId={activeId ?? ''}
-          sessionTitle={activeTitle}
-          workspaceId={activeWs && activeWs !== '__none__' ? activeWs : ''}
-          request={viewerReq}
-          onOpenInEditor={(rel) => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))}
-          onOpenFullscreen={(rel) => window.dispatchEvent(new CustomEvent('kb-open-book', { detail: { relPath: rel, from: 'aiTeaching' } }))}
-          onQuote={quoteFromLane}
-          onFloat={floatFromCenter}
-          anchorMessageId={lastAssistantId}
-          onTabChange={setViewerTab}
-        />
       </div>
+
+      {/* 右侧查看器（P4）：网页 / 笔记 / 书架 / 旁问 —— 取代原右栏（进度 / 素材 / 支线）。
+          素材 → 左栏「文件 / 素材」分段；本次改动 → 工件栏底部。
+          ★ 挂在**模块根节点**而不是中栏行容器里：行容器在顶栏下面，面板上沿就会比顶栏低一截，
+            看起来像被顶栏压住（2026-11-22 用户反馈）。挂到根节点后 `absolute inset-y-0` 从模块顶端起算，
+            刚好盖住那条面包屑顶栏；中栏仍用 `padding-right` 双向让位，左侧面包屑不受影响。 */}
+      <RightViewer
+        open={srcVisible}
+        onClose={() => toggleSide('right')}
+        onWidthChange={setViewerW}
+        rootId={vaultRootId}
+        sessionId={activeId ?? ''}
+        sessionTitle={activeTitle}
+        workspaceId={activeWs && activeWs !== '__none__' ? activeWs : ''}
+        request={viewerReq}
+        onOpenInEditor={(rel) => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))}
+        onOpenFullscreen={(rel) => window.dispatchEvent(new CustomEvent('kb-open-book', { detail: { relPath: rel, from: 'aiTeaching' } }))}
+        onQuote={quoteFromLane}
+        onFloat={floatFromCenter}
+        anchorMessageId={lastAssistantId}
+        onTabChange={setViewerTab}
+      />
       </>
       ) : (
       /* P5：工作区选择页（3.26 改版：左课程清单 + 右预览 = 方案 E；单击选中、双击 / 按钮 / Enter 进入） */

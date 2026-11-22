@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star, ListTree, Loader2, Sparkles } from 'lucide-react'
+import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, Brain, ChevronRight, Zap, Star, ListTree, Loader2, Sparkles } from 'lucide-react'
 import type { AgentSessionInfo, AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
 import { resolveCatalogEntry, useModelCatalog } from '../../lib/modelCatalog'
@@ -774,7 +774,13 @@ export function AiAssistantModule({
                 >
                   <Bot size={11} />
                   <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
-                  {api.effort !== 'off' && <span className="text-[var(--accent)]">· 🧠{EFFORT_LABEL[api.effort]}</span>}
+                  {api.effort !== 'off' && (
+                    <span className="flex shrink-0 items-center gap-0.5 text-[var(--accent)]">
+                      <span aria-hidden>·</span>
+                      <Brain size={10} strokeWidth={2} className="shrink-0" aria-hidden />
+                      {EFFORT_LABEL[api.effort]}
+                    </span>
+                  )}
                   <ChevronRight size={10} className="-rotate-90 shrink-0" />
                 </button>
                 {modelMenu.open && modelMenu.pos && createPortal(

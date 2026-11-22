@@ -651,7 +651,7 @@ export function NotesPane(props: NotesPaneProps) {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索"
               aria-label="搜索笔记"
-              className={`min-w-0 bg-transparent text-[11.5px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none ${narrow ? 'w-[90px]' : 'w-[130px]'}`}
+              className={`kb-field-control min-w-0 text-[11.5px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] ${narrow ? 'w-[90px]' : 'w-[130px]'}`}
             />
             {search && (
               <button
