@@ -227,6 +227,24 @@ AI 教学消息区共用同一组件）。同批复用的既有令牌：`.kb-pop
 
 首个使用方：AI 教学左栏「会话 / 资源管理器」（`src/modules/ai-teaching/index.tsx`）。
 
+### N. 跳转定位反馈 → `.kb-turn-flash`（2026-11-21 新增，AI 教学右缘轮次导航）
+
+适用场景：**从导航跳到正文某一段**之后的「脚下踩的是哪」的确认（AI 教学右缘轮次卡片点行 /
+键盘 Enter）。这类跳转是瞬时的——滚动结束后用户需要一次轻提示才敢确认落点，否则容易以为「没反应」。
+
+用法：目标消息行挂 `relative`，行内末尾条件渲染一个 `<span className="kb-turn-flash" />`；
+需要重播（同一行连点两次）时改 React `key` 重挂元素 —— **不要**「摘类再加」，那样动画不会重来。
+
+- ★ 用**覆盖层**而不是给行换背景色/高亮 class：换背景会重绘整段 markdown（长回答上千行），
+  覆盖层只跑 `opacity`，走合成器线程（§五-1）。
+- ★ `1.8s` 的节奏是「12% 起亮 / 68% 开始退」，给足阅读确认时间又不长期染色。
+- ★ `prefers-reduced-motion` 下**调用方根本不挂这个层**（不是只关动画）：CSS 里另有
+  `display: none` 兜底，但真正的口径是「不发这次反馈」，免得留一块静态色块。
+- ★ 同一时刻只允许一个闪烁层（state 只存一个 `{ idx, seq }`）。
+
+首个使用方：AI 教学右缘轮次导航（`src/modules/ai-teaching/TurnRail.tsx` 触发、
+`src/modules/ai-teaching/index.tsx` 渲染）。契约：`.AGENT/scripts/ai-teaching/verify-turn-rail.mjs`。
+
 ---
 
 ## 五、性能评估（实测数据）

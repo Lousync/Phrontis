@@ -1276,6 +1276,81 @@ input:focus, textarea:focus, select:focus {
   animation: kb-wiki-flash 1.6s ease-out 1 both;
 }
 
+/* --- D3 跳转定位反馈 → `.kb-turn-flash`（2026-11-21 新增，AI 教学右缘轮次导航）---
+   场景：点轮次卡片某一行后，目标消息「洗一下色」告诉用户脚下踩的是哪一轮。
+   用法：消息行挂 `relative`，行内末尾条件渲染一个 `<span class="kb-turn-flash">`；
+   需要重播时改 key 重挂（React 侧用 seq），**不要**去掉类再加。
+   约束：只动 opacity（合成器动画）；用覆盖层而不是改行背景 —— 不重绘整段文本。
+   reduced-motion 下**根本不挂这个层**（调用方判 prefersReducedMotion），类里另有 display:none 兜底。 */
+@keyframes kb-turn-flash {
+  0%   { opacity: 0; }
+  12%  { opacity: 1; }
+  68%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.kb-turn-flash {
+  position: absolute;
+  inset: -4px -8px;
+  border-radius: 8px;
+  pointer-events: none;
+  opacity: 0;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  animation: kb-turn-flash 1.8s var(--ease-kb) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-turn-flash { display: none; }
+}
+
+/* --- 轮次导航 · 收起态（AI 教学右缘一列短横，2026-11-21）---
+   硬约束：**绝不贯穿全高** —— 容器高度由短横条数决定，垂直居中在 55% 处。
+   命中区用 ::before 外扩（不影响布局）；focus-visible 的环也画在 ::before 上。 */
+.kb-turn-rail {
+  position: absolute;
+  right: 16px;
+  top: 55%;
+  transform: translateY(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: 14px;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+.kb-turn-rail::before {
+  content: '';
+  position: absolute;
+  inset: -16px -14px;
+}
+.kb-turn-rail:focus-visible::before {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.kb-turn-dash {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  transition: background-color var(--dur-micro) var(--ease-kb);
+}
+.kb-turn-dash[data-cur='1'] {
+  width: 14px;
+  background: var(--accent);
+}
+.kb-turn-rail:hover .kb-turn-dash,
+.kb-turn-rail:focus-visible .kb-turn-dash {
+  background: color-mix(in srgb, var(--text-muted) 80%, transparent);
+}
+.kb-turn-rail:hover .kb-turn-dash[data-cur='1'],
+.kb-turn-rail:focus-visible .kb-turn-dash[data-cur='1'] {
+  background: var(--accent-hover);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-turn-dash { transition: none; }
+}
+
 /* --- E 状态反馈：微回弹 --- */
 @keyframes kb-micro-pop {
   0%   { transform: scale(1); }

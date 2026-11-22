@@ -46,6 +46,9 @@ import { useComposerImages, type ComposerImage } from '../../lib/useComposerImag
 import { looksLikeMindMap } from '../../lib/mindmap'
 import { isRenderableImagePath } from '../../lib/imageFormats'
 import { toolActionLabel } from '../../lib/toolLabels'
+import { TurnRail } from './TurnRail'
+import { ACTIVE_THRESHOLD, clampTurn, pickTurn, turnTitle, type TurnItem } from './turnRailPure'
+import { prefersReducedMotion } from '../../lib/usePresence'
 
 /** AI 教学面的斜杠指令（/mindmap、/生图）已收口到 src/lib/chatCommands.ts 的
  *  PASSTHROUGH_COMMANDS 单一真源 —— 弹层候选与「放行给模型」判定读同一张表，
@@ -78,7 +81,8 @@ import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTrac
  * P1 会话⇄文件夹绑定：新建对话即建 `{MM-DD} 标题` 文件夹（.session.json 锚点）、重命名同步改夹、
  * 删除会话按 aiTeachDeleteSessionFolder（ask/keep/delete）处理文件夹（进系统回收站）。
  * P2 约束文件化：会话要求唯一真相源 = 会话文件夹 CONSTRAINTS.md（弹层读写文件，主进程每轮重读注入）。
- * P3 中栏改版：AI 回答去气泡平铺 + 逐条操作条（整理成文档/复制/轨迹）；右缘快速定位条（标题锚点）；
+ * P3 中栏改版：AI 回答去气泡平铺 + 逐条操作条（整理成文档/复制/轨迹）；右缘快速定位条（**2026-11-21 重做为「轮次导航」**：
+ * 刻度单位改为用户提问、形态改为贴右缘浮动卡片，见 `TurnRail.tsx` + `turnRailPure.ts`，方案 `tmp/ai-teach-anchor-rail/PLAN.md`）；
  * 输入区流式停止键 + 本对话模型/思考强度合一菜单（仅本对话生效）；顶栏收敛（时间线/文档视图/文档地图退役）。
  * P4 左栏 VS Code 化（§3.7/3.9）：多分区侧栏（资源管理器=产物根文件树全套操作 / 会话），
  * 折叠贴靠+状态记忆，左右侧栏整体收放记忆；md 点击 → 中栏文档阅读视图（方案 B：工具行+宽幅渲染+h2/h3 大纲+滚动记忆）。
@@ -2402,13 +2406,62 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!artExpanded) return
     applyArtOpen(true)
   }, [artExpanded, applyArtOpen])
-  // P3a（§3.8-1）：快速定位条锚点——每条 AI 回答取首行标题（标题规则由主进程注入，3-13）
-  const anchors = useMemo(
-    () => messages.flatMap((m, idx) => (m.role === 'assistant' ? [{ idx, title: msgAnchorTitle(m.content, idx) }] : [])),
-    [messages])
-  const jumpToAnchor = useCallback((idx: number) => {
-    scrollRef.current?.querySelector(`[data-msg-idx="${idx}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [])
+  // ---------- 右缘轮次导航（2026-11-21 重做，方案 tmp/ai-teach-anchor-rail/PLAN.md） ----------
+  /**
+   * 刻度单位改成**用户提问（轮次）**（方案 §三-1）：用户记的是「我问了什么」，不是「AI 答了什么」；
+   * 一轮里还可能有 N 条回答（多步工具调用 / 追问链），以回答为单位会与「进行了几轮」脱节。
+   * `msgAnchorTitle()` 保留 —— 「整理成文档」（`organizeDocFor`）仍用它取文件名。
+   */
+  const turns = useMemo<TurnItem[]>(() => {
+    const out: TurnItem[] = []
+    messages.forEach((m, idx) => {
+      if (m.role !== 'user') return
+      const no = out.length + 1
+      out.push({ idx, no, title: turnTitle(m.content, no), time: fmtTime(m.createdAt) })
+    })
+    return out
+  }, [messages])
+  /** 各轮用户消息的 offsetTop 缓存（一次测量，滚动时零 DOM 读，方案 §八） */
+  const turnTops = useRef<number[]>([])
+  /** 上次测量时的 scrollHeight：高度变了才重测（流式增量 / 图片加载 / 折行都会改它） */
+  const measuredHRef = useRef(-1)
+  const scrollRaf = useRef(0)
+  /** 跳转闪烁（只允许一个）：seq 用于重播同一行的动画（改 key 重挂动画层） */
+  const [flash, setFlash] = useState<{ idx: number; seq: number } | null>(null)
+  const flashSeq = useRef(0)
+  const flashTimer = useRef<number | null>(null)
+
+  /** 一次测量：每轮用户消息在滚动容器内的 offsetTop。`clientHeight===0`（Tab 保活 / 预检卸载）直接跳过，不落 0 值 */
+  const measureTurns = useCallback((): void => {
+    const c = scrollRef.current
+    if (!c || c.clientHeight === 0) return
+    const tops: number[] = []
+    for (const t of turns) {
+      const el = c.querySelector<HTMLElement>(`[data-msg-idx="${t.idx}"]`)
+      if (!el) return
+      tops.push(el.offsetTop)
+    }
+    turnTops.current = tops
+  }, [turns])
+
+  /** 当前轮：对缓存二分（阈值沿用 90px 口径），贴底时强制最后一轮 */
+  const readActiveTurn = useCallback((): number => {
+    const c = scrollRef.current
+    // 缓存可能比当前 turns 长（切会话瞬间还没重测）：以较小的那个为准，别把下标放出去
+    const n = Math.min(turnTops.current.length, turns.length)
+    if (!c || n === 0) return 0
+    return clampTurn(
+      pickTurn(turnTops.current, c.scrollTop, ACTIVE_THRESHOLD, c.scrollHeight - c.clientHeight),
+      n,
+    )
+  }, [turns.length])
+
+  const remeasureTops = useCallback((): void => {
+    const c = scrollRef.current
+    if (!c) return
+    measuredHRef.current = c.scrollHeight
+    measureTurns()
+  }, [measureTurns])
   const onConvScroll = useCallback(() => {
     const c = scrollRef.current
     if (!c) return
@@ -2420,15 +2473,78 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const near = c.scrollHeight - c.scrollTop - c.clientHeight < 48
     stickRef.current = near
     setJumpBottom(!near)
-    if (anchors.length === 0) return
-    const top = c.getBoundingClientRect().top
-    let cur = 0
-    anchors.forEach((a, i) => {
-      const el = c.querySelector(`[data-msg-idx="${a.idx}"]`)
-      if (el && el.getBoundingClientRect().top - top <= 90) cur = i
+    if (scrollRaf.current) return
+    // 每帧只做一次：高度没变就纯二分（零 DOM 读），变了才重测一遍
+    scrollRaf.current = requestAnimationFrame(() => {
+      scrollRaf.current = 0
+      const el = scrollRef.current
+      if (!el) return
+      if (Math.abs(el.scrollHeight - measuredHRef.current) > 0.5) remeasureTops()
+      const cur = readActiveTurn()
+      setActiveAnchor(prev => (prev === cur ? prev : cur))
     })
-    setActiveAnchor(cur)
-  }, [anchors, isActive])
+  }, [isActive, remeasureTops, readActiveTurn])
+
+  const jumpToTurn = useCallback((turnIdx: number): void => {
+    const c = scrollRef.current
+    const t = turns[clampTurn(turnIdx, turns.length)]
+    const el = t && c ? c.querySelector<HTMLElement>(`[data-msg-idx="${t.idx}"]`) : null
+    if (!c || !t || !el) return
+    const target = Math.max(0, el.offsetTop - 10)
+    // 长距离 smooth 要好几秒且期间当前轮被扫一遍 ⇒ 超过 2 屏瞬时；reduced-motion 一律瞬时。
+    // 不再用 scrollIntoView：它会带走所有可滚动祖先。
+    const far = Math.abs(target - c.scrollTop) > c.clientHeight * 2
+    c.scrollTo({ top: target, behavior: prefersReducedMotion() || far ? 'auto' : 'smooth' })
+    setActiveAnchor(clampTurn(turnIdx, turns.length))
+    // 跳转反馈：行内盖一层只动 opacity 的洗色层；reduced-motion 下**根本不挂**（不是只关动画）
+    if (!prefersReducedMotion()) {
+      flashSeq.current += 1
+      setFlash({ idx: t.idx, seq: flashSeq.current })
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
+      flashTimer.current = window.setTimeout(() => {
+        flashTimer.current = null
+        setFlash(null)
+      }, 1900)
+    }
+  }, [turns])
+
+  // 消息 / 窗口尺寸 / 查看器开合都会改 offsetTop：渲染后集中在 rAF 里重测一次（先读后写同一帧）
+  useEffect(() => {
+    if (preflight) return
+    const id = requestAnimationFrame(() => {
+      remeasureTops()
+      const cur = readActiveTurn()
+      setActiveAnchor(prev => (prev === cur ? prev : cur))
+    })
+    return () => cancelAnimationFrame(id)
+  }, [messages, isActive, preflight, remeasureTops, readActiveTurn])
+
+  // 滚动容器自身尺寸变化（窗口高度 / 字体缩放 / 查看器让位）→ 折行变 → 位置失效
+  useEffect(() => {
+    if (preflight) return
+    const c = scrollRef.current
+    if (!c || typeof ResizeObserver === 'undefined') return
+    let id = 0
+    const ro = new ResizeObserver(() => {
+      if (id) cancelAnimationFrame(id)
+      id = requestAnimationFrame(() => {
+        id = 0
+        remeasureTops()
+        const cur = readActiveTurn()
+        setActiveAnchor(prev => (prev === cur ? prev : cur))
+      })
+    })
+    ro.observe(c)
+    return () => {
+      ro.disconnect()
+      if (id) cancelAnimationFrame(id)
+    }
+  }, [isActive, preflight, remeasureTops, readActiveTurn])
+
+  useEffect(() => () => {
+    if (scrollRaf.current) cancelAnimationFrame(scrollRaf.current)
+    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
+  }, [])
 
   /**
    * 内容变化 → **仅贴底时**滚到底（规则 2）。
@@ -2448,6 +2564,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   useEffect(() => {
     if (preflight) return
     setActiveAnchor(0)
+    setFlash(null) // 切会话：上一会话的闪烁层不该落到新会话同下标的行上
     const saved = activeId ? convScroll.current.get(activeId) : undefined
     const t = saved ?? 0
     requestAnimationFrame(() => {
@@ -3277,7 +3394,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   </div>
                 )}
                 {messages.map((m, idx) => (
-                  <div key={m.id ?? idx} data-msg-idx={idx} className={`${m.role === 'user' ? 'group relative flex justify-end' : 'min-w-0'}${longThread ? ' kb-cv-msg' : ''}`}>
+                  <div key={m.id ?? idx} data-msg-idx={idx} className={`${m.role === 'user' ? 'group relative flex justify-end' : 'relative min-w-0'}${longThread ? ' kb-cv-msg' : ''}`}>
                     {m.role === 'user' ? (
                       /* 用户消息保留右侧气泡（§3.8-3：仅 AI 回复去气泡）；v3.1.1 条目6：
                          select-text = 全局 body user-select:none（防误选 UI）下对气泡的局部白名单恢复，
@@ -3456,6 +3573,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         </div>
                       </div>
                     )}
+                    {/* 轮次导航跳转反馈：行内只动 opacity 的洗色层（.kb-turn-flash，1.8s）。
+                        key 带 seq → 同一行连点两次也会重播；reduced-motion 下根本不挂这个层。 */}
+                    {flash?.idx === idx && (
+                      <span key={`flash-${flash.seq}`} className="kb-turn-flash" aria-hidden="true" />
+                    )}
                   </div>
                 ))}
 
@@ -3506,18 +3628,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   </div>
                 )}
                 </div>
-                {/* 右缘快速定位条（§3.8-1，3-13）：每条回答一个刻度，hover 预览标题，点击滚动定位。
-                    2026-09-08 用户拍板：锚点紧凑聚拢（顶部起 + 固定间距），不再 evenly 拉满整条高度 */}
-                {anchors.length > 1 && (
-                  <div className="absolute right-1 top-2 w-3 flex flex-col items-center justify-start gap-1.5 z-10">
-                    {anchors.map((a, i) => (
-                      <button key={a.idx} onClick={() => jumpToAnchor(a.idx)}
-                        data-tip={a.title} aria-label={a.title}
-                        className={`group relative w-1.5 rounded-full transition-all ${i === activeAnchor ? 'h-3 bg-[var(--accent)]' : 'h-1.5 bg-[var(--border-color)] hover:bg-[var(--text-muted)]'}`}>
-                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 hidden group-hover:block whitespace-nowrap max-w-[260px] truncate px-1.5 py-0.5 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] text-[10px] text-[var(--text-primary)] shadow z-20">{a.title}</span>
-                      </button>
-                    ))}
-                  </div>
+                {/* 右缘轮次导航（2026-11-21 重做）：收起态=一列短横，展开态=贴右缘的浮动轮次卡片。
+                    刻度单位=用户提问（每一轮一条）；2 轮起才显示（1 轮没有导航价值）。
+                    位置挂在中栏 `relative` 容器上 —— 右侧查看器通过 padding-right 让位，轨道自动跟着左移。 */}
+                {turns.length >= 2 && (
+                  <TurnRail turns={turns} active={activeAnchor} onJump={jumpToTurn} />
                 )}
                 {/* v3.2.0 条目6 规则3：不贴底时的「回到底部」浮标——圆 · 纯白底（暗色主题随 --bg-primary）·
                     无边框 · 柔和阴影 · 细线 ↓。进场走 .kb-pop（已被统一 reduced-motion 兜底覆盖）；

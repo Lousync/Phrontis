@@ -2960,3 +2960,20 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`verify-artifact-tabs.mjs` 增原地刷新断言；新增 `verify-artifact-inplace.mjs`。
 
 **验收**：双端 `tsc --noEmit` 0 错；新增/更新契约脚本全绿。
+
+## 2026-11-21 · AI 教学 · 右缘轮次导航重做
+
+**现状 / 用户反馈**：右缘定位条是「每条 AI 回答一枚定高圆点、从顶部顺序往下排」的铁轨形态，轮次一多就排出容器、被裁成一条虚线；hover 出来的手写 tooltip 与全局 tooltip 还会两层同时弹。实拍对照后发现真实形态应是**贴右缘的浮动卡片** —— 刻度就是每行行尾的短横，不是独立的一条线。
+
+**改动点**：
+- 数据源：`anchors`（AI 回答）→ `turns`（**用户提问**）。用户记的是「我问了什么」，且一轮里可能有 N 条回答；标题取提问首个非空行（剥 markdown 记号、截 40 字，只发图片退「第 N 轮（图片）」）。`msgAnchorTitle()` 保留给「整理成文档」取文件名。
+- 收起态：右缘中部一列短横（最多 11 条按比例采样、当前条 `--accent`），**不贯穿全高**；命中区由 `::before` 外扩。
+- 展开态：浮动卡片（宽 300 / 圆角 12 / `--bg-tertiary` / 行高 30），行 = 右对齐首句 + 行尾 12×2 短横；超过 `min(300px, 100%-20px)` 在卡片内滚动，**不做 +N**。
+- 交互：鼠标 hover 0ms 展开、离开 240ms 收起；触摸 / 笔点短横列展开并钉住；点行跳转 + 1.8s 闪烁 + 关闭；Esc / 点外部关闭；键盘 `↑↓ / Home / End / PgUp / PgDn` 移选择、`Enter` 跳转；打开时当前轮自动滚进卡片中部。
+- 性能：去掉 `onConvScroll` 里每帧逐锚点 `querySelector` + `getBoundingClientRect`，改为「一次测量缓存 `offsetTop` + 二分」；`ResizeObserver` 与 scrollHeight 变化时失效重测；跳转不再用 `scrollIntoView`。
+- 修 bug：贴底时强制把最后一轮算作当前（最后一轮永远滚不到顶部，按阈值判定会永远停在倒数第二轮）。
+- 定位：导航挂在中栏 `relative` 容器上，右侧查看器开合只改容器右缘，卡片自动跟着左移且始终向左展开。
+
+**新增文件**：`src/modules/ai-teaching/TurnRail.tsx`（导航本体）、`src/modules/ai-teaching/turnRailPure.ts`（轮次抽取 / 采样 / 当前轮判定）、`.AGENT/scripts/ai-teaching/verify-turn-rail.mjs`（契约）。
+
+**验收**：双端 `tsc --noEmit` 0 错；`npm run build` 通过；`verify-turn-rail.mjs` 全 PASS。
