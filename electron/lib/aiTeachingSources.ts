@@ -1133,7 +1133,7 @@ export async function transcribeVision(sessionId: string, no: number, pages: { n
 
 // ===== 网页素材目录展开与批量抓取（.claude/plans/ai-teaching-web-source-crawl.md P2）=====
 // 纯程序流水线零 LLM token；清洗复用剪藏管线；落盘进 SOURCES/{会话}/web/{slug}/，
-// 回写「已提取 ✓ → web/{slug}/」后由注入层展开章节清单（见 resolveSourcesForInjection）。
+// 回写「已提取 ✓ → web/{slug}/」后由**旧**注入层展开章节清单（resolveSourcesForInjection，现役零调用）。
 
 const crawlAborts = new Map<string, AbortController>()
 
@@ -1269,6 +1269,14 @@ function listDirFilesRecursive(dirAbs: string, out: { rel: string; bin: boolean 
 }
 
 /**
+ * 死代码（2026-11-22 核实：全仓零调用，现役注入走 `aiTeachingSourceRegistry.renderSourcesHint`）。
+ * **暂不删除**：它独有的两项能力现役链路未覆盖 ——
+ *   ① url 素材按 `web/{slug}/` 展开章节清单（现役 `extractSource` 对 url 直接返回「不需要提取」，
+ *      抓取管线 `webProbeSource/webCrawlSource` 又只写旧 SOURCE.md，不喂 sources.json）；
+ *   ② dir 素材展开文件清单（现役只给路径，靠 `builtin.vault.list` 按需列）。
+ * 若要删除本函数 + 仅它使用的私有 helper（TEXT_EXTS / DIR_LIST_LIMIT / DIR_LIST_DEPTH /
+ * listDirFilesRecursive），先把这两项能力在现役链路上落好，或明确放弃。
+ *
  * AgentRunner 注入（每轮重读，与 CONSTRAINTS 同哲学）：素材目录 + 编号制引用规则（3-29）。
  * v3.1.1：**工作区主库 + 本对话私有补充合并注入**（readMerged 统一编号）——新建对话也能看到
  * 工作区已登记的教材，不再「每次都喊没素材」；零条目 → 空串（零注入）。

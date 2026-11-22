@@ -926,6 +926,12 @@ export interface SourcesHintInput {
   maxChars?: number
 }
 
+/**
+ * 引用纪律（2026-11-22 从旧 SOURCE.md 注入链路接回）。
+ * 逐字稳定、不含随机量 → 不破坏 prompt cache；**只在确有条目时追加**（空清单不出现，避免纯噪音）。
+ */
+const SOURCE_CITATION_RULE = '引用素材内容时行内标注编号与页码/行号，形如 [1] p.15（code 写作 [1] L120，网页写作 [1]）；每条回答末尾附「本次引用素材」清单，只列实际用到的：编号. 名称 · 页码/URL；没有用到素材的段落不要编造出处。'
+
 /** 纯格式化（主进程 / 契约脚本共用）。 */
 export function renderSourcesHint(input: SourcesHintInput): string {
   const max = Math.max(400, Number(input.maxChars) || (input.role === 'assistant' ? 2800 : 4000))
@@ -937,15 +943,26 @@ export function renderSourcesHint(input: SourcesHintInput): string {
   } else if (input.role === 'review') {
     lines.push('【本章素材（章级分配，复习用）】')
     const list = input.chapterSources ?? []
-    if (!list.length) lines.push('（本章没有分配素材，按已学知识点与各段交接复习）')
-    else for (const t of list) lines.push(`- ${t}`)
+    if (!list.length) {
+      lines.push('（本章没有分配素材，按已学知识点与各段交接复习）')
+    } else {
+      // 编号按输出顺序 1..N：同一轮内稳定即可，不引素材 id（id 会随登记/删除变化）
+      lines.push(SOURCE_CITATION_RULE)
+      list.forEach((t, i) => lines.push(`- [${i + 1}] ${t}`))
+    }
     lines.push('复习只围绕本章已学知识点；不要引入新知识点。')
   } else {
     lines.push('【本段确认素材（只读这些，不要扫描 SOURCES 下未确认的文件）】')
     const items = input.items ?? []
     if (!items.length) lines.push('（本段没有确认素材，按大纲讲；需要素材请先让用户在本章分配并开段确认）')
-    for (const it of items) {
-      const bits = [`- ${it.title}`, `类型 ${it.type}`, `区间 ${it.anchor}`]
+    if (items.length) {
+      lines.push(SOURCE_CITATION_RULE)
+      // 提取稿 / 未提取的行为指引（判定沿用条目自身的 extractMatch，不在此改口径）
+      if (items.some((it) => !!it.extractPath)) lines.push('有提取稿的条目优先读提取稿，引用时仍按原件标页码/行号。')
+      if (items.some((it) => !it.extractPath)) lines.push('未提取的条目不要假装引用，先让用户提取本段区间。')
+    }
+    items.forEach((it, i) => {
+      const bits = [`- [${i + 1}] ${it.title}`, `类型 ${it.type}`, `区间 ${it.anchor}`]
       if (it.pages) bits.push(`共 ${it.pages} 页`)
       if (it.chars) bits.push(`${it.chars} 字符`)
       if (it.textLayer === 'empty') bits.push('扫描件（文本层为空，需视觉转写）')
@@ -956,7 +973,7 @@ export function renderSourcesHint(input: SourcesHintInput): string {
       else if (it.extractMatch === 'fallback' && it.extractPath) bits.push(`提取稿 ${it.extractPath}（非本章区间，请先提取本章）`)
       else bits.push('未提取（先 course.sources.extract 本段区间）')
       lines.push(bits.join(' · '))
-    }
+    })
   }
   let s = lines.join('\n')
   if (s.length > max) s = s.slice(0, max) + '\n…（素材清单过长已截断）'

@@ -40,6 +40,7 @@ const SCRIPTS = [
   'verify-quiz-quality.mjs',
   'verify-quiz-quality-wiring.mjs',
   'verify-segment-wrong-feedback.mjs',
+  'verify-source-citation.mjs',
   'verify-context-compiler.mjs',
   'verify-viewer-tabs.mjs',
   'verify-side-scope.mjs',
