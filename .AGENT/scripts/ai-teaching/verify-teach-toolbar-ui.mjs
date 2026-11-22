@@ -10,10 +10,13 @@
  *   3. 段上下文条 / 章末复习条「要求」/ 本会话要求行内条 / 560px 模态 / 要求抽屉**零残留**；
  *   4. ```endcourse 围栏全对话**只渲染一张**卡，且结课后不渲染。
  *
+ * 2026-11-22 随死代码清理更新：`CourseProgress.tsx` / `RequirementsDrawer.tsx` 零 importer，文件已删除；
+ * 原先「文件仍在（留作结课报告 / 本模块不再用）」的两条正向断言改为负向断言。
+ *
  * 跑法：node .AGENT/scripts/ai-teaching/verify-teach-toolbar-ui.mjs
  * 只读源码做结构断言（不跑 dev / 不跑构建）——与库内其它 verify-*.mjs 同范式。
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -106,8 +109,9 @@ check('RequirementsDrawer 引用已删', !mod.includes('RequirementsDrawer'))
 check('CourseProgress 挂载与 import 已删', !mod.includes("from './CourseProgress'") && !mod.includes('<CourseProgress'))
 check('AnchoredLayer import 已删（进度浮层退役）', !mod.includes('AnchoredLayer'))
 check('进度浮层状态已删', !mod.includes('progressOpen') && !mod.includes('progressAnchorRef'))
-check('CourseProgress.tsx 文件仍在（留作结课报告）', read('src/modules/ai-teaching/CourseProgress.tsx').length > 0)
-check('RequirementsDrawer.tsx 文件仍在（本模块不再用）', read('src/modules/ai-teaching/RequirementsDrawer.tsx').length > 0)
+// 2026-11-22：零 importer，文件已删除（进度由左栏课程树承载 / 要求走右栏笔记页签）
+check('CourseProgress.tsx 已删除（不再留作结课报告）', !existsSync(join(ROOT, 'src/modules/ai-teaching/CourseProgress.tsx')))
+check('RequirementsDrawer.tsx 已删除（本模块不再用）', !existsSync(join(ROOT, 'src/modules/ai-teaching/RequirementsDrawer.tsx')))
 
 console.log('\n[收尾] 左栏 ✓ + 流末尾卡，行内两段式')
 check('index 向 CourseRail 传 segmentEndable', mod.includes('segmentEndable={!!activeSegment && activeId === activeSegmentSid && segmentStatus === \'open\' && !courseEnded}'))

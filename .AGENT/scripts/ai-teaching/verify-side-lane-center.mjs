@@ -12,6 +12,10 @@
  *
  * 2026-11-22 随动态多页签改造更新：旁问列表搬进壳的 `+ -> 旁问` 浮层（AskHistoryMenu），
  * 页签只剩详情（SideLanePanel），本脚本按新分工断言。
+ *
+ * 2026-11-22 随死代码删除更新：`SideLaneCenter.tsx` 零 importer，已删除 —— 原先锁它内部实现
+ * （升格过滤 / 搜索 / 详情接线）的断言，改为「文件已删除」负向断言 + 锁新落点
+ * （AskHistoryMenu 列表、AskPane 详情、SideLanePanel 能力），文件名与本脚本其余断言不变。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -73,30 +77,32 @@ const types = read('src/types/index.ts')
 check('types 定义 AgentSideLaneInfo（继承 AgentSessionInfo）', types.includes('export interface AgentSideLaneInfo extends AgentSessionInfo'))
 check('types ElectronAPI 含 markSideLaneRead', types.includes('agentMarkSideLaneRead:'))
 
-console.log('\n=== 6. 渲染层：SideLaneCenter + index 接线 ===')
-const center = read('src/modules/ai-teaching/SideLaneCenter.tsx')
-check('SideLaneCenter 存在且过滤已升格（lane!=main）', center.includes('export function SideLaneCenter') && center.includes("r.lane !== 'main'"))
-check('打开即已读（agentMarkSideLaneRead）', center.includes('agentMarkSideLaneRead('))
-check('搜索：标题 + 来源回答 + 摘要', center.includes('l.title +') && center.includes('anchorTitle') && center.includes('excerpt'))
-check('详情复用 SideLanePanel 且带 onBack/onQuote/onFloat', center.includes('<SideLanePanel') && center.includes('onBack={back}') && center.includes('onQuote={onQuote}') && center.includes('onFloat='))
+console.log('\n=== 6. 渲染层：旁问列表 / 详情（SideLaneCenter 已删除） ===')
 const idx = read('src/modules/ai-teaching/index.tsx')
-// P4（2026-11-19）：右栏退役，支线中心并入查看器「旁问」页签 —— 断言跟着落点走。
-check('index 挂 RightViewer', idx.includes("import { RightViewer } from './right-viewer/RightViewer'") && idx.includes('<RightViewer'))
-// 旁问列表已移进壳的 `+ -> 旁问` 浮层，页签只剩详情 —— 断言钉新分工，而不是钉旧组件
 const ask = read('src/modules/ai-teaching/right-viewer/AskPane.tsx')
 const askHistory = read('src/modules/ai-teaching/right-viewer/AskHistoryMenu.tsx')
 const chrome = read('src/modules/ai-teaching/right-viewer/ViewerChrome.tsx')
+// 2026-11-22：SideLaneCenter.tsx 零 importer，已删除；能力分别落在 AskHistoryMenu / AskPane / SideLanePanel。
+check('SideLaneCenter 已删除且 index 不再引用',
+  !fs.existsSync(path.join(ROOT, 'src/modules/ai-teaching/SideLaneCenter.tsx'))
+  && !idx.includes('SideLaneCenter'))
+// P4（2026-11-19）：右栏退役，支线中心并入查看器「旁问」页签 —— 断言跟着落点走。
+check('index 挂 RightViewer', idx.includes("import { RightViewer } from './right-viewer/RightViewer'") && idx.includes('<RightViewer'))
+// 旁问列表已移进壳的 `+ -> 旁问` 浮层，页签只剩详情 —— 断言钉新分工，而不是钉旧组件
 check('旁问页签：列表在 AskHistoryMenu、详情复用 SideLanePanel',
   !ask.includes('agentListSideLanes(')
   && ask.includes('agentMarkSideLaneRead(')
   && ask.includes("from '../SideLanePanel'")
   && ask.includes('openLaneId={laneId}') && ask.includes('quotePerMessage')
-  && askHistory.includes('agentListAllSideLanes(') && chrome.includes('<AskHistoryMenu')
-  && !idx.includes('<SideLaneCenter'))
+  && askHistory.includes('agentListAllSideLanes(') && chrome.includes('<AskHistoryMenu'))
+check('打开即已读（agentMarkSideLaneRead）', ask.includes('agentMarkSideLaneRead('))
+check('列表条目含标题 / 来源对话 / 未读点 / 时间（原搜索行随死代码退场）',
+  askHistory.includes('lane.parentTitle') && askHistory.includes('lane.unread') && askHistory.includes('lastAssistantAt'))
+check('详情复用 SideLanePanel 且带 onClose/onQuote/onFloat', ask.includes('<SideLanePanel') && ask.includes('onClose={() => onRequestClose?.()}') && ask.includes('onQuote={onQuote}') && ask.includes('onFloat={onFloat'))
 check('锚点映射由会话库派生（不再 localStorage）', idx.includes('const anchorLanes = useMemo') && !idx.includes('ANCHOR_LANES_KEY'))
 check('锚点 chip 走 openCenter（open/create）', idx.includes("openCenter(al ? { kind: 'open', laneId: al.laneId } : { kind: 'create'"))
 check('引用回主线接 setQuotes', idx.includes('const quoteFromLane = useCallback') && idx.includes('setQuotes(prev'))
-check('支线详情保留浮出能力（onFloat 可选）', read('src/modules/ai-teaching/SideLaneCenter.tsx').includes('onFloat?') && read('src/modules/ai-teaching/SideLanePanel.tsx').includes('onFloat?'))
+check('支线详情保留浮出能力（onFloat 可选）', read('src/modules/ai-teaching/SideLanePanel.tsx').includes('onFloat?'))
 // P4 D2：素材从右栏搬到左栏资源管理器「文件 / 素材」分段
 check('素材分段在左栏资源管理器', idx.includes("setExplorerSeg('sources')") && idx.includes('<CourseSources'))
 

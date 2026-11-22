@@ -5,6 +5,10 @@
  * 这类漏接在应用里是静默的（按钮点了没反应 / AI 说改好了界面没变）。
  *
  * 用法（仓库根）：node .AGENT/scripts/ai-teaching/verify-course-mode.mjs .
+ *
+ * 2026-11-22 随死代码清理更新：`CourseProgress.tsx` / `RequirementsDrawer.tsx` 已删除（零 importer），
+ * 「进度」锁到左栏 `CourseRail`，「四层要求」锁到主进程 `aiTeachingScope` 的四层定义 +
+ * `scopePrompt` 的注入顺序；UI 侧只留负向断言（文件不存在 + index 不引用）。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -27,9 +31,8 @@ const tools = read('electron/lib/builtinTools.ts')
 const main = read('electron/main/index.ts')
 const rail = read('src/modules/ai-teaching/CourseRail.tsx')
 const preflight = read('src/modules/ai-teaching/Preflight.tsx')
-const progress = read('src/modules/ai-teaching/CourseProgress.tsx')
 const sources = read('src/modules/ai-teaching/CourseSources.tsx')
-const req = read('src/modules/ai-teaching/RequirementsDrawer.tsx')
+const scope = read('electron/lib/aiTeachingScope.ts')
 const scopePrompt = read('electron/lib/scopePrompt.ts')
 const help = read('resources/help/AI 教学 · 课程模式.md')
 
@@ -55,7 +58,8 @@ check('index 不再挂 RequirementsDrawer（四层入口改走右栏笔记页签
 check('左栏渲染 CourseRail', idx.includes('<CourseRail') && rail.includes('课程助手') && rail.includes('章末复习'))
 check('中栏渲染 Preflight', idx.includes('<Preflight') && preflight.includes('buildPreflight'))
 check('开段预检内容垂直居中（长内容仍可滚）', preflight.includes('flex-1 min-h-0 overflow-y-auto flex flex-col') && preflight.includes('mx-auto px-5 py-5 my-auto'))
-check('中栏不再渲染进度浮层（CourseProgress 仅保留为历史组件）', !idx.includes('<CourseProgress'))
+check('中栏不再渲染进度浮层（CourseProgress.tsx 已删除；进度由左栏课程树承载）', !idx.includes('<CourseProgress') && !exists('src/modules/ai-teaching/CourseProgress.tsx'))
+check('左栏课程树即进度视图（章头 learned/total + 进行中徽章 + 段状态）', rail.includes('{ch.review.learned}/{ch.review.total}') && rail.includes('>进行中</span>') && rail.includes(": '已收尾'"))
 check('右栏素材渲染 CourseSources', idx.includes('<CourseSources') && sources.includes('aiTeachCourseGetSources'))
 check('右栏素材不依赖大纲即可打开', idx.includes('outline={courseState?.outline ?? null}') && !/courseState\?\.outline\s*&&[\s\S]{0,160}<CourseSources/.test(idx))
 check('CourseSources 支持无大纲', sources.includes('outline: AiTeachCourseOutline | null') && sources.includes('const hasOutline = chapters.length > 0'))
@@ -88,7 +92,14 @@ check('大纲落盘卡提供去左栏开段入口', idx.includes('goCourseRailFi
 check('无大纲素材页提示可先登记', sources.includes('还没有课程大纲。可以先登记素材'))
 check('未分配只认当前大纲的有效章', sources.includes('validChapterIds') && sources.includes('.filter(([cid]) => validChapterIds.has(cid))'))
 check('右栏改为多页签查看器（旧 进度/素材/支线 三栏退役）', idx.includes('<RightViewer') && !idx.includes("setRailTab('progress')") && !idx.includes("setRailTab('lanes')"))
-check('要求抽屉四层（全局 / 本课程 / 本知识点 / 本段）', req.includes("'global'") && req.includes("'workspace'") && req.includes("'unit'") && req.includes("'segment'"))
+// 2026-11-22：RequirementsDrawer.tsx 已删除（零 importer）。四层要求的真相源改到主进程：
+// `aiTeachingScope` 定义四层读写，`scopePrompt` 决定注入顺序；UI 侧只留负向断言。
+check('四层要求（全局 / 本课程 / 本知识点 / 本段）定义在 aiTeachingScope',
+  /AI_CONSTRAINT_LEVELS = new Set<AiTeachConstraintLevel>\(\['global', 'workspace', 'unit', 'segment'\]\)/.test(scope))
+check('四层注入顺序由 scopePrompt LAYERS 决定（全局 → 本课程 → 知识点 → 本段）',
+  /const LAYERS[\s\S]{0,700}?key: 'global'[\s\S]{0,220}?key: 'workspace'[\s\S]{0,220}?key: 'unit'[\s\S]{0,220}?key: 'lesson'/.test(scopePrompt))
+check('本模块不再有要求抽屉（RequirementsDrawer.tsx 已删除；要求入口 = pill → 右栏笔记页签）',
+  !exists('src/modules/ai-teaching/RequirementsDrawer.tsx') && !idx.includes('RequirementsDrawer') && idx.includes('aiTeachEnsureConstraints('))
 check('帮助文档说明可直接对助手写要求', help.includes('写一条要求') && help.includes('默认写到「本课程」层') && help.includes('下一轮对话生效'))
 
 console.log('\n=== 3. 段 / 复习接线 ===')

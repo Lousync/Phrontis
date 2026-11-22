@@ -3,8 +3,12 @@
  * 对话驱动建课 Phase 2 契约：教学助手工具接线。
  * 静态断言为主（aiTeachingCourse 依赖 electron，无法在纯 Node 直接跑）。
  * 跑法：node .AGENT/scripts/ai-teaching/verify-ai-teaching-tools.mjs
+ *
+ * 2026-11-22 随死代码清理更新：`RequirementsDrawer.tsx` 已删除（零 importer）。
+ * 原来锁抽屉内联轻提示的断言，改锁主进程侧要求链路（`course.constraints.*` / `aiTeachingScope` /
+ * `scopePrompt`）；UI 侧只保留「本模块不再有抽屉」的负向断言。
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -72,7 +76,8 @@ check('归档拒绝 SOURCES 目录（用户要求也不能覆盖）', course.inc
 check('分段归档拒绝时指向 vault.write', course.includes('教材 / 知识库正文请用 vault.write'))
 
 console.log('\n[输出落点优先级 / 要求全文读取] aiTeachingScope + builtinTools')
-check('导出 readConstraintsForAiTeaching', read('electron/lib/aiTeachingScope.ts').includes('export function readConstraintsForAiTeaching'))
+const scope = read('electron/lib/aiTeachingScope.ts')
+check('导出 readConstraintsForAiTeaching', scope.includes('export function readConstraintsForAiTeaching'))
 check('注册 course.constraints.read', tools.includes("name: 'course.constraints.read'"))
 check('course.constraints.read readOnly:read + tier:ondemand', /name: 'course\.constraints\.read'[\s\S]{0,900}readOnly: true[\s\S]{0,100}requires: 'read'[\s\S]{0,100}tier: 'ondemand'/.test(tools))
 check('course.constraints.read 走业务函数 + 仅教学面', tools.includes('readConstraintsForAiTeaching(sid') && tools.includes("ctx?.source !== 'aiTeaching'"))
@@ -83,8 +88,18 @@ check('vault.write 回传稳定 id', tools.includes('readFrontmatterId(content)'
 check('vault.write / vault.edit 硬边界拦 SOURCES', tools.includes("s.toUpperCase() === 'SOURCES'"))
 check('vault.write / vault.edit 硬边界拦交接 / 课程', tools.includes('交接文档只由「收尾本段」生成') && tools.includes('课程大纲请用 course.outline.write'))
 check('显式多段路径不再被归一化改写', /if \(segs\.length > 1\) return rel/.test(tools))
-const drawer = read('src/modules/ai-teaching/RequirementsDrawer.tsx')
-check('要求抽屉超限给一行内联轻提示', drawer.includes('exceedsConstraintInjectLimit(text)') && drawer.includes('超出注入上限') && drawer.includes('truncate'))
+// 2026-11-22：RequirementsDrawer.tsx 已删除（零 importer）。要求链路改锁主进程三件事：
+// 四层定义在 aiTeachingScope、注入顺序在 scopePrompt、写盘截断提示与注入同口径。
+console.log('\n[要求链路] aiTeachingScope + scopePrompt（UI 抽屉已退役）')
+check('四层要求（global / workspace / unit / segment）定义在主进程',
+  /AI_CONSTRAINT_LEVELS = new Set<AiTeachConstraintLevel>\(\['global', 'workspace', 'unit', 'segment'\]\)/.test(scope))
+check('写入后按注入上限截断并给 warning / hint（写盘成功 != 进上下文）',
+  scope.includes('const cut = cutScopeLayer(body)') && scope.includes('超出部分不会注入'))
+check('要求注入顺序由 scopePrompt LAYERS 决定（全局 → 本课程 → 知识点 → 本段）',
+  /key: 'global'[\s\S]{0,220}?key: 'workspace'[\s\S]{0,220}?key: 'unit'[\s\S]{0,220}?key: 'lesson'/.test(read('electron/lib/scopePrompt.ts')))
+check('AI 教学模块不再有要求抽屉（RequirementsDrawer.tsx 已删除）',
+  !existsSync(join(ROOT, 'src/modules/ai-teaching/RequirementsDrawer.tsx'))
+  && !read('src/modules/ai-teaching/index.tsx').includes('RequirementsDrawer'))
 
 console.log('\n[权限放行] 课程助手注入')
 check('不再有「只读约束」', !course.includes('【只读约束】'))

@@ -3010,11 +3010,13 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - **输入区工具条（折叠形态乙）**：最左常驻两枚文字 pill「画像 / 要求」，其后 `│ 思考 四档 │ 引用 …… 模型`；折叠只收「思考 / 引用 / 模型」，两枚 pill 仍可见可点。沿用既有 `trayOpen` / `aiTeach.composerTray`，只动 transform + opacity（`translate-y-[12px]` + 淡出，380ms spring 曲线，`motion-reduce:transition-none`）。图片待确认圆点从旧顶栏「画像」迁到画像 pill。
 - **画像 / 要求 pill 只做本会话一层**：`aiTeachProfileEnsureSession` / 冻结接口 `aiTeachEnsureConstraints` → `requestViewer({ tab: 'notes', relPath })` 在右栏笔记页签就地编辑；没有层选择 UI（本课程 / 全局层由 AI 教学助手代改，人眼确认走编辑器或选择页）。会话夹未建立时 Toast「先发一条消息…」，不建空页签。
 - **收尾本段迁左栏 + 流末尾**：左栏当前进行中段行右侧 18×18 `✓`（点它**只进确认态**）→ 段行下方原位展开「收尾后只读 · 取消 / 收尾」；对话流末尾「本段学完了？」卡 → 原位换成「确认收尾本段？」。两处共用同一个 `endConfirm`，Esc 取消；已收尾后流末尾换成「本段已收尾 · 交接.md」。
-- **进度浮层退役**：顶栏「进度」按钮与 `CourseProgress` 锚定浮层删除（左栏课程树即进度）；`CourseProgress.tsx` 只保留给结课报告用。
+- **进度浮层退役**：顶栏「进度」按钮与 `CourseProgress` 锚定浮层删除（左栏课程树即进度）。
 - **AI 结课卡**：正文剥离正则加 `endcourse`；新增 `endCourseFence` memo（倒序扫全部 assistant，取最后一条带围栏的回复），在**产生它的那条回复**里渲染行内卡「开始结课流程 →」→ `startEndFlow(activeWs, 1)`；守卫有工作区 + 未结课，全对话只渲染一张。流末尾新增「本课已结课」卡（结课报告 / 重新开课），承接退役的顶栏结课组。
 - **删除**：段上下文条整块、章末复习条里的「要求」、本会话要求行内条、560px「本会话约束」模态、`RequirementsDrawer` 挂载与 `reqOpen / reqLayer`、`AnchoredLayer` 进度浮层、`loadConstraints` / 保存约束的旧通道（约束正文不再由本模块持有副本）。
 
-**刻意不动**：章末复习条（只删「要求」）、工具条折叠机制本身、工件分栏（改由折叠贴边条点开）、选择页的画像 / 要求 / 结课入口、`RequirementsDrawer.tsx` 与 `CourseProgress.tsx` 文件本身（移出本模块使用）。
+**刻意不动**：章末复习条（只删「要求」）、工具条折叠机制本身、工件分栏（改由折叠贴边条点开）、选择页的画像 / 要求 / 结课入口。
+
+**后续（2026-11-22）**：`RequirementsDrawer.tsx`、`CourseProgress.tsx`、`SideLaneCenter.tsx` 三个组件确认零 importer 后已删除；对应契约脚本改为锁主进程真相源（`aiTeachingScope` 四层 / `scopePrompt` 注入顺序）或负向断言。
 
 **新增文件**：`.AGENT/scripts/ai-teaching/verify-teach-toolbar-ui.mjs`（69 条结构断言：顶栏单图标 / pill 折叠后可达 / 段条与行内要求条零残留 / endcourse 单卡）。
 

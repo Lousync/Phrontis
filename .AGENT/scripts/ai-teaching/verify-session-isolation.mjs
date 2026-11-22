@@ -48,9 +48,14 @@ check('停止按 sessionId（agentAbortSession，不再 abort chatId）',
   /agentAbortSession\(sid\)/.test(teach) && !/agentAbort\(chatIdRef/.test(teach), '')
 check('浮层支线切换按 laneId 重挂载',
   /<SideLanePanel[\s\S]{0,160}key=\{floatLane\.laneId\}/.test(teach), '')
-check('侧栏支线详情按 activeId / create 重挂载',
-  /<SideLanePanel[\s\S]{0,120}key=\{activeId\}/.test(read('src/modules/ai-teaching/SideLaneCenter.tsx'))
-  && /key=\{`create:\$\{creatingAnchor\}`\}/.test(read('src/modules/ai-teaching/SideLaneCenter.tsx')), '')
+// 2026-11-22 随死代码清理更新：SideLaneCenter.tsx 已删除（零 importer），
+// 原来锁它的 `key={activeId}` / `key={create:${creatingAnchor}}`（详情 / 新建按目标重挂载）
+// 改为锁新落点：AskPane 内 `SideLanePanel key={laneId}`（换 lane 必重挂载）+
+// RightViewer 的 `PaneSlot key={tab.id}`（一个旁问页签一个挂载实例，草稿转详情不移交状态）。
+check('旁问详情按 laneId 重挂载',
+  /<SideLanePanel[\s\S]{0,80}key=\{laneId\}/.test(read('src/modules/ai-teaching/right-viewer/AskPane.tsx')), '')
+check('旁问页签按 tab.id 独立挂载',
+  /<PaneSlot key=\{tab\.id\}/.test(read('src/modules/ai-teaching/right-viewer/RightViewer.tsx')), '')
 
 console.log('\n=== C. 其他 AI 对话面：共用会话级控制器 ===')
 const hosts = [
