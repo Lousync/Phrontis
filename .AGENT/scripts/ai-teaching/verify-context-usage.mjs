@@ -233,6 +233,12 @@ check('★ systemFull 拼接不含台账块（负向，防打散 prompt cache �
   systemFullBlock.slice(-120))
 check('buildCourseInjection 用 out 参携带台账（system 返回值不含它）',
   /buildCourseInjection\(sessionId, getSettingReader\(\), courseRequestOut\)/.test(agentSrc), '')
+// 2026-11-22 错题回流：与台账同一分层口径 —— requestOut.wrongBlock 只进首条 user 消息层
+check('★ 错题块经 courseRequestOut.wrongBlock 注入（与台账同层，不进 system）',
+  /courseRequestOut: \{ block: string; wrongBlock: string \}/.test(agentSrc)
+  && /\[courseRequestOut\.block, courseRequestOut\.wrongBlock\]\.filter\(Boolean\)\.join\(/.test(agentSrc), '')
+check('★ systemFull 拼接不含错题块（负向，防打散 prompt cache 前缀）',
+  systemFullBlock !== '' && !systemFullBlock.includes('wrongBlock') && !systemFullBlock.includes('错题'), systemFullBlock.slice(-120))
 check('课程 / 复习上下文（course 分区）只取 system 返回值 courseHint',
   block.includes('course: courseHint') && !block.includes('course: courseHint + courseRequestHint'), '')
 

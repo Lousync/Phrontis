@@ -14,6 +14,7 @@ import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { ensureQuizDocFrontmatter, forceFrontmatterId, hasQuizFence, readFrontmatterId } from './quizDocPure'
 import { applyQuizQualityGate, normalizeQuizQualityMode, QUIZ_GATE_MAX_REWRITE, type QuizGateWarning } from './quizGatePure'
+import { renderSegmentWrongRequestBlock, type SegmentQuizPage, type SegmentQuizRecord } from './segmentWrongFeedbackPure'
 import {
   normalizeOutline,
   resolveOutlineRequires,
@@ -1305,20 +1306,72 @@ function nextOpenSegmentBrief(
 }
 
 /**
+ * 本段可归属的题单页（`archiveOrganizedPage` 把题单写进本段产物夹，故归属 = 路径前缀）。
+ *
+ * 真实键（不按标题模糊匹配）：
+ *  - 目录：`resolveWriteOwnerRel(sessionId)` —— 与写盘同一口径（段夹 `…/段N`、支线夹 `…/支线·X`）；
+ *    夹还没建时回退确定性段路径 `lessonFolderRel`；
+ *  - 页面：frontmatter `id`，缺省回退知识索引同口径的 `auto:<仓库相对路径>`；
+ *  - 只认含 ` ```quiz ` 围栏的 .md（讲义 / 交接等一律跳过）。
+ *
+ * 扫不到目录 / 读失败 → 空列表（调用方据此不注入任何块）。
+ */
+const SEGMENT_QUIZ_SCAN_MAX_FILES = 80
+const SEGMENT_QUIZ_SCAN_MAX_DEPTH = 3
+
+function readSegmentQuizPages(
+  sessionId: string,
+  getSetting: (key: string) => unknown,
+): { ownerRel: string; pages: SegmentQuizPage[] } {
+  const vault = getCurrentVault()
+  if (!vault) return { ownerRel: '', pages: [] }
+  const ownerRel = (resolveWriteOwnerRel(sessionId, getSetting) ?? lessonFolderRel(sessionId, getSetting) ?? '').replace(/\\/g, '/')
+  if (!ownerRel) return { ownerRel: '', pages: [] }
+  const pages: SegmentQuizPage[] = []
+  const stack: Array<{ abs: string; rel: string; depth: number }> = [{ abs: join(vault.rootPath, ownerRel), rel: ownerRel, depth: 0 }]
+  let scanned = 0
+  while (stack.length && scanned < SEGMENT_QUIZ_SCAN_MAX_FILES) {
+    const cur = stack.pop() as { abs: string; rel: string; depth: number }
+    let entries: import('fs').Dirent[]
+    try { entries = readdirSync(cur.abs, { withFileTypes: true }) } catch { continue }
+    for (const e of entries) {
+      if (scanned >= SEGMENT_QUIZ_SCAN_MAX_FILES) break
+      if (e.name.startsWith('.')) continue
+      const rel = `${cur.rel}/${e.name}`
+      if (e.isDirectory()) {
+        if (cur.depth < SEGMENT_QUIZ_SCAN_MAX_DEPTH) stack.push({ abs: join(cur.abs, e.name), rel, depth: cur.depth + 1 })
+        continue
+      }
+      if (!e.isFile() || !/\.md$/i.test(e.name)) continue
+      scanned++
+      try {
+        const text = readFileSync(join(vault.rootPath, rel), 'utf-8')
+        if (!hasQuizFence(text)) continue
+        pages.push({ pageId: readFrontmatterId(text) || `auto:${rel}`, relPath: rel, title: e.name.replace(/\.md$/i, '') })
+      } catch { /* 单个文件读失败跳过 */ }
+    }
+  }
+  return { ownerRel, pages }
+}
+
+/**
  * AI 教学会话的 **system 层**注入（课程 / 复习 / 段）。
  *
- * ★ `requestOut`（可选出参）：【本段台账】这类**逐轮变化**的内容不并入返回值 ——
+ * ★ `requestOut`（可选出参）：【本段台账】【本段错题】这类**逐轮变化**的内容不并入返回值 ——
  *   返回值进 `systemFull`，而 system + tools 是 prompt cache 前缀（见 `agentService.ts` 顶部口径）；
- *   逐字会变的台账由调用方拼进**首条 user 消息层**。无围栏 / 已收尾时 `block` 保持空串，
- *   行为与台账并入 system 时期逐字一致。
+ *   逐字会变的内容由调用方拼进**首条 user 消息层**。无围栏 / 无错题 / 已收尾时各块保持空串，
+ *   行为与这些块并入 system 时期逐字一致。
  */
 export function buildCourseInjection(
   sessionId: string,
   getSetting: (key: string) => unknown,
-  requestOut?: { block: string },
+  requestOut?: { block: string; wrongBlock?: string },
 ): string {
   // 出参先清空：调用方可能复用同一个对象（旧块不能残留到本轮）
-  if (requestOut) requestOut.block = ''
+  if (requestOut) {
+    requestOut.block = ''
+    requestOut.wrongBlock = ''
+  }
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return ''
   /** 长资料读取纪律（长资料方案 §8.2）：素材过线时追加；非长资料返回空串，注入逐字不变。 */
@@ -1439,6 +1492,27 @@ export function buildCourseInjection(
       })
       if (requestBlock && requestOut) requestOut.block = requestBlock
     } catch { /* 台账读取失败不影响 system 注入（请求级只是少一块上下文） */ }
+    // 错题回流（2026-11-22）：本段题单里**最近一次答错**的题，讲到这里时优先回头补。
+    // ★ 错题随答题实时变化，同样**不进 system**（会打散 prompt cache 前缀）；
+    //   已收尾段不注入；本段无错题 → 不产出块（请求级与 system 均逐字不变）。
+    try {
+      const quiz = readSegmentQuizPages(sessionId, getSetting)
+      if (quiz.pages.length) {
+        const pageIds = new Set(quiz.pages.map((p) => p.pageId))
+        const records: SegmentQuizRecord[] = readQuizRecords()
+          .filter((r) => pageIds.has(String(r.page_id)))
+          .map((r) => ({
+            pageId: String(r.page_id),
+            quizNo: Number(r.quiz_no) || 0,
+            pageTitle: String(r.page_title ?? ''),
+            lastResult: r.last_result ?? null,
+            updatedAt: String(r.updated_at ?? ''),
+            snapshotJson: String(r.snapshot_json ?? ''),
+          }))
+        const wrongBlock = renderSegmentWrongRequestBlock({ ownerRel: quiz.ownerRel, pages: quiz.pages, records })
+        if (wrongBlock && requestOut) requestOut.wrongBlock = wrongBlock
+      }
+    } catch { /* 错题读不到只少一块上下文，不影响 system 注入 */ }
   }
   const handoff = readPrevHandoff(sessionId, getSetting)
   if (handoff) lines.push(`\n【上一段交接（同章）】\n${handoff}`)
