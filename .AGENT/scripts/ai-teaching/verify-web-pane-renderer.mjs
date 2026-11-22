@@ -10,6 +10,9 @@
  * 方案：`/home/lousync/Projects/Phrontis/docs/ai-teaching-right-viewer-plan.md` §6.1 / §8 / §9
  *       + 内核文档 C2（外链复用当前页签）/ C4（只认 http/https）/ C6（恢复但不预加载）。
  *
+ * 2026-11-22 随内层页签条删除更新：第 8 节补了五条静态断言 —— 内层「新建 / 关闭」入口消失、
+ * 地址栏仍在、pane 不再自己写 localStorage、空态是点阵而不是起始块、五种状态名必须都出现。
+ *
  * 运行（项目根目录）：node .AGENT/scripts/ai-teaching/verify-web-pane-renderer.mjs [仓库路径]
  * 输出纯 ASCII（禁 emoji，AGENTS.md）；期望全部 PASS 且 exit=0。
  */
@@ -171,6 +174,20 @@ check('toggles native visibility with webPaneSetVisible', paneSrc.includes('setV
 check('subscribes to main-process state via onWebPaneChanged', paneSrc.includes('onWebPaneChanged'))
 check('no blocking dialogs (alert / confirm)', !paneSrc.includes('alert(') && !paneSrc.includes('confirm('))
 check('closes only its own views (never disposeAll)', !paneSrc.includes('webPaneDisposeAll'))
+
+/* 2026-11-22 随内层页签条删除更新：网页 pane 退化为「单页面 + 地址栏」。
+   内层那套「新建 / 关闭」入口必须真的不存在（不是隐藏），壳层页签条才是唯一权威；
+   同时锁住「地址栏没被空态改造弄丢」与「pane 不再写旧的 aiTeach.webTabs.<sid>」。 */
+check('inner web tab strip is gone (no second "+" / "×" in the pane)',
+  !paneSrc.includes('aria-label="新建网页页签"') && !paneSrc.includes('role="tablist"')
+  && !paneSrc.includes('closeTabAt') && !paneSrc.includes('nextTabId'))
+check('the address bar survives the empty-state rework', /aria-label="网址"/.test(paneSrc))
+check('the pane never persists tabs itself (shell is the only writer)',
+  !paneSrc.includes('localStorage') && !paneSrc.includes('setItem'))
+check('empty state is a dot-grid layer, not a start block',
+  /radial-gradient/.test(paneSrc) && !paneSrc.includes('快捷入口'))
+check('the five placeholder states stay distinguishable',
+  ['start', 'dormant', 'loading', 'error', 'ready'].every((s) => new RegExp(`'${s}'`).test(paneSrc)))
 
 /* ---------------------------------------------------------------- 报告 */
 const failed = checks.filter((c) => !c.pass)

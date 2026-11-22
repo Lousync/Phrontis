@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, Globe, Plus, RotateCw, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, Globe, RotateCw } from 'lucide-react'
 import type { WebPaneProps } from './paneContracts'
-import { VIEWER_LS_KEYS } from './paneContracts'
 import {
   onWebPaneChanged,
   openExternal,
@@ -17,10 +16,7 @@ import {
 import { showToast } from '../../../lib/toast'
 import {
   boundsPayload,
-  closeTabAt,
-  nextTabId,
   normalizeUrl,
-  restoreTabs,
   shouldShowView,
   tabCaption,
   type WebTabRef,
@@ -29,7 +25,11 @@ import {
 /**
  * AI 教学右侧查看器 · 网页页签（渲染层）
  *
- * 结构：内层页签条（最多 3）→ 浏览器动作行 → 内容占位区。
+ * 结构：单行动作条（← → ↻ [地址栏] ↗）→ 内容占位区。**没有内层页签条**
+ * （2026-11-22 删除：壳层页签条 + `+` 菜单已经是唯一的「新建 / 关闭」权威，
+ * 内层再放一套就是两个 `+`、两个 `×`；壳的 web 页签本来就只存一个 URL）。
+ * 本实例恒为「0 或 1 个页面」，多开留给「网页多开扁平化」那一批（壳层一个 web 页签 = 一个 wN）。
+ *
  * 内容区的真实像素不在 React 里：主进程用 `WebContentsView` 盖在占位区上面，
  * 渲染层只做两件事 —— 把占位区的 CSS px 几何同步过去、决定它该不该可见。
  * 方案：`docs/ai-teaching-right-viewer-plan.md` §6.1 / §8 / §9；决策 C2 / C4 / C6。
@@ -53,6 +53,29 @@ interface PaneSnapshot {
   error?: string
 }
 
+/**
+ * 占位区的五种面貌 —— 必须一眼能分开（PLAN §5）：
+ *   start   空态：只有顶部那一行地址栏 + 内容区极淡点阵，没有任何禁用图标以外的装饰；
+ *   dormant 休眠：换会话恢复了地址但按 C6 不预加载（没有原生视图，卡片里有唯一动作）；
+ *   loading 加载中：原生视图里是站点自己的首屏，能看见的只有顶部 2px 进度条；
+ *   error   加载失败：失败卡（重试 / 系统浏览器打开），动作条上没有第二个「刷新」入口；
+ *   ready   已打开：原生视图盖住整个占位区，DOM 侧返回 null。
+ */
+type PanePhase = 'start' | 'dormant' | 'loading' | 'error' | 'ready'
+
+/**
+ * 空态底纹（PLAN §3 方案 B）：18px 网格、1px 点、`--text-primary` 5%。
+ *
+ * 只用 background-image，不加 DOM 节点、不做动画；外层是 `absolute inset-0` 的装饰层，
+ * 绝对定位不参与滚动尺寸，所以既不会撑出滚动条也不影响原生视图的 bounds。
+ * 浅色主题由令牌自动反相，不写死颜色。
+ */
+const DOT_GRID_STYLE: CSSProperties = {
+  backgroundImage: 'radial-gradient(color-mix(in srgb, var(--text-primary) 5%, transparent) 1px, transparent 1px)',
+  backgroundSize: '18px 18px',
+  backgroundPosition: 'center',
+}
+
 function IconButton(props: {
   label: string
   disabled?: boolean
@@ -66,7 +89,7 @@ function IconButton(props: {
       aria-label={props.label}
       disabled={props.disabled}
       onClick={props.onClick}
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-default disabled:text-[var(--text-disabled)] disabled:opacity-[0.55] disabled:hover:bg-transparent disabled:hover:text-[var(--text-disabled)]"
     >
       {props.children}
     </button>
@@ -81,8 +104,6 @@ export function WebPane(props: WebPaneProps) {
   const [address, setAddress] = useState('')
   /** 地址栏聚焦中：此时不要用页面 URL 覆盖用户正在敲的字 */
   const [editing, setEditing] = useState(false)
-  /** 当前 state 里这组页签属于哪个会话（防止切会话的瞬间把旧页签写进新键） */
-  const [tabsSid, setTabsSid] = useState('')
 
   const slotRef = useRef<HTMLDivElement | null>(null)
   const addrRef = useRef<HTMLInputElement | null>(null)
@@ -91,6 +112,8 @@ export function WebPane(props: WebPaneProps) {
   const frameRef = useRef<number>(0)
   const sessionRef = useRef('')
   const lastReqRef = useRef('')
+  /** 首次挂载 ≠ 换会话：挂载时 initialUrl 是「用户刚点开的东西」，必须直接加载 */
+  const firstMountRef = useRef(true)
   const latestRef = useRef<PaneSnapshot>({ tabs: [], activeIndex: 0, active: false, open: false })
 
   const activeTab = tabs[activeIndex] ?? null
@@ -221,36 +244,24 @@ export function WebPane(props: WebPaneProps) {
     })
   }, [])
 
-  /** 唯一导航入口：地址栏回车、起始页快捷入口、外链请求、失败重试都走这里 */
+  /**
+   * 唯一导航入口：地址栏回车、外链请求、失败重试、休眠页签唤醒都走这里。
+   * 本 pane 恒为「一个页面」：页面实例的 id 固定 `w1`（主进程按 id 保活 view），
+   * 再次导航就是替换这一个页签，而不是新开一个。
+   */
   const navigate = useCallback(
     async (raw: string) => {
       const url = normalizeUrl(raw)
       if (!url) {
         rejectToast(raw)
+        // 地址被拒之后把焦点还给地址栏（状态在组件里，用户敲的字不会丢）
+        requestAnimationFrame(() => addrRef.current?.focus())
         return
       }
       const snap = latestRef.current
-      const current = snap.tabs[snap.activeIndex] ?? null
-
-      let id: string
-      let nextTabs: WebTabRef[]
-      if (current) {
-        id = current.id
-        nextTabs = snap.tabs.map((t, i) =>
-          i === snap.activeIndex ? { ...t, url, title: undefined, dormant: false } : t,
-        )
-      } else {
-        const slot = nextTabId(snap.tabs)
-        if (!slot) {
-          showToast({ type: 'warning', message: '最多 3 个网页页签' })
-          return
-        }
-        id = slot
-        nextTabs = [...snap.tabs, { id, url, dormant: false }]
-      }
-
-      setTabs(nextTabs)
-      setActiveIndex(current ? snap.activeIndex : snap.tabs.length)
+      const id = snap.tabs[snap.activeIndex]?.id ?? 'w1'
+      setTabs([{ id, url, dormant: false }])
+      setActiveIndex(0)
       setAddress(url)
       setRuntime((prev) => ({ ...prev, [id]: { ...EMPTY_RUNTIME, loading: true } }))
       await mountOrNavigate(id, url)
@@ -259,75 +270,13 @@ export function WebPane(props: WebPaneProps) {
     [mountOrNavigate, rejectToast, scheduleSync],
   )
 
-  /* ------------------------------------------------------------ 页签操作 */
-
-  const activateTab = useCallback(
-    (index: number) => {
-      const snap = latestRef.current
-      const tab = snap.tabs[index]
-      if (!tab) return
-      setActiveIndex(index)
-      setAddress(tab.url)
-      if (tab.url && !createdRef.current.has(tab.id)) {
-        // C6：恢复出来的页签在这一刻才 loadURL（恢复阶段不预加载）
-        setRuntime((prev) => ({ ...prev, [tab.id]: { ...EMPTY_RUNTIME, loading: true } }))
-        void mountOrNavigate(tab.id, tab.url).then(() => scheduleSync())
-      }
-      scheduleSync()
-    },
-    [mountOrNavigate, scheduleSync],
-  )
-
-  const addTab = useCallback(() => {
-    const snap = latestRef.current
-    const slot = nextTabId(snap.tabs)
-    if (!slot) {
-      showToast({ type: 'warning', message: '最多 3 个网页页签' })
-      return
-    }
-    // 空 url = 起始页：此时不调主进程，等真有地址了再 create
-    setTabs([...snap.tabs, { id: slot, url: '', dormant: false }])
-    setActiveIndex(snap.tabs.length)
-    setAddress('')
-    // 复用了旧 id 的话，别把上一个 view 的 canGoBack / loading 带进来
-    setRuntime((prev) => {
-      const next = { ...prev }
-      delete next[slot]
-      return next
-    })
-    scheduleSync()
-    requestAnimationFrame(() => addrRef.current?.focus())
-  }, [scheduleSync])
-
-  const closeTab = useCallback(
-    (index: number) => {
-      const snap = latestRef.current
-      const target = snap.tabs[index]
-      if (!target) return
-      const result = closeTabAt(snap.tabs, snap.activeIndex, index)
-      setTabs(result.tabs)
-      setActiveIndex(result.activeIndex)
-      setAddress(result.tabs[result.activeIndex]?.url ?? '')
-      setRuntime((prev) => {
-        const next = { ...prev }
-        delete next[target.id]
-        return next
-      })
-      if (visibleRef.current === target.id) {
-        visibleRef.current = null
-        void webPaneSetVisible(target.id, false)
-      }
-      if (createdRef.current.delete(target.id)) void webPaneClose(target.id)
-      scheduleSync()
-    },
-    [scheduleSync],
-  )
-
-  /** 恢复出来的页签点「加载」时显式唤醒 */
+  /** 休眠页签点「加载这个页签」时显式唤醒（C6：恢复不预加载，加载只在这一刻发生） */
   const wakeActive = useCallback(() => {
     const snap = latestRef.current
     const tab = snap.tabs[snap.activeIndex]
     if (!tab || !tab.url || createdRef.current.has(tab.id)) return
+    // 先摘掉 dormant：进度条只在 loading 态出现，点了加载就不该还停在休眠卡上
+    setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, dormant: false } : t)))
     setRuntime((prev) => ({ ...prev, [tab.id]: { ...EMPTY_RUNTIME, loading: true } }))
     void mountOrNavigate(tab.id, tab.url).then(() => scheduleSync())
   }, [mountOrNavigate, scheduleSync])
@@ -346,11 +295,28 @@ export function WebPane(props: WebPaneProps) {
     void openExternal(tab.url)
   }, [])
 
-  /* ------------------------------------------------------------ 会话 / 持久化 */
+  /* ------------------------------------------------------------ 会话 / 恢复 */
 
-  // 会话切换：旧会话的 view 必须销毁，否则 w1..w3 是全局 id，新会话会撞上旧页面
+  /**
+   * 会话切换 / 首次挂载。
+   *
+   * 为什么换会话一定要收 view：`w1` 是主进程侧的全局槽位，另一个会话的网页 pane
+   * 若还活着就会撞到同一块原生视图上。
+   *
+   * 恢复口径（2026-11-22 内层页签条删除后）：**不再读写 `aiTeach.webTabs.<sid>`**
+   * —— 那是内层页签结构的旧键，壳层已经把它当「只读迁移」吞进 v2 页签（`viewerTabs.ts`
+   * 的 `parseLegacyWebTabs` + `migrateLegacyViewerState`），pane 再写一份就是第二个真相源。
+   * 现在唯一的地址来源是壳传下来的 `initialUrl`（壳的 web 页签只存一个 URL）。
+   *
+   * 首次挂载 vs 换会话：
+   *   · 首次挂载 = 用户刚点开一个东西（外链 / `+` 菜单新建带地址）→ 留给下面的
+   *     `initialUrl` effect 直接加载，不要在这里变成「要再点一次加载」；
+   *   · 换会话 = 用户没有要求加载 → 按 C6 恢复一个 dormant 页签（有地址、没有 view）。
+   */
   useEffect(() => {
     if (sessionRef.current === props.sessionId) return
+    const isFirstMount = firstMountRef.current
+    firstMountRef.current = false
     sessionRef.current = props.sessionId
 
     const prevVisible = visibleRef.current
@@ -358,44 +324,30 @@ export function WebPane(props: WebPaneProps) {
     if (prevVisible) void webPaneSetVisible(prevVisible, false)
     for (const id of createdRef.current) void webPaneClose(id)
     createdRef.current.clear()
+    setRuntime({})
 
-    if (!props.sessionId) {
+    if (isFirstMount) {
       setTabs([])
       setActiveIndex(0)
-      setRuntime({})
       setAddress('')
-      setTabsSid('')
+      scheduleSync()
       return
     }
 
-    let raw: string | null = null
-    try {
-      raw = localStorage.getItem(VIEWER_LS_KEYS.webTabs(props.sessionId))
-    } catch {
-      raw = null
+    // 地址取「页面此刻真正在看的」，拿不到才退回壳的 initialUrl
+    const url = String(latestRef.current.tabs[0]?.url || props.initialUrl || '').trim()
+    if (!props.sessionId || !url) {
+      setTabs([])
+      setActiveIndex(0)
+      setAddress('')
+      scheduleSync()
+      return
     }
-    const restored = restoreTabs(raw)
-    setTabs(restored)
+    setTabs([{ id: 'w1', url, dormant: true }])
     setActiveIndex(0)
-    setRuntime({})
-    setAddress(restored[0]?.url ?? '')
-    // 只有 tabsSid 与 props.sessionId 对齐了才允许写盘（见下面的持久化 effect）
-    setTabsSid(props.sessionId)
+    setAddress(url)
     scheduleSync()
-  }, [props.sessionId, scheduleSync])
-
-  // 只存结构，不存状态：主进程回传的 title 是缓存，url 才是真相
-  useEffect(() => {
-    if (!props.sessionId || tabsSid !== props.sessionId) return
-    try {
-      localStorage.setItem(
-        VIEWER_LS_KEYS.webTabs(props.sessionId),
-        JSON.stringify(tabs.map((t) => ({ id: t.id, url: t.url, title: t.title ?? '' }))),
-      )
-    } catch {
-      /* 存储不可用时放弃持久化：页签只是便利，不该把面板弄崩 */
-    }
-  }, [tabs, tabsSid, props.sessionId])
+  }, [props.sessionId, props.initialUrl, scheduleSync])
 
   /* ------------------------------------------------------------ 外壳请求 / 事件 */
 
@@ -409,11 +361,7 @@ export function WebPane(props: WebPaneProps) {
     void navigate(req.url)
   }, [props.request, props.sessionId, navigate])
 
-  /**
-   * 壳的页签模型带着地址恢复时（重启 / 休眠后重建）：内部没有页签才导航一次。
-   * 等一帧再看页签数 —— 上面那个旧的 `aiTeach.webTabs.<sid>` 恢复是同步排在 effect 队列里的，
-   * 直接读会拿到空数组、把恢复出来的页面顶掉。
-   */
+  /** 壳的页签模型带着地址（重启恢复 / 新建网页页签时直接带 URL）：空态才导航一次 */
   const initialUrl = String(props.initialUrl ?? '').trim()
   useEffect(() => {
     if (!initialUrl) return
@@ -473,7 +421,7 @@ export function WebPane(props: WebPaneProps) {
 
   /* ------------------------------------------------------------ bounds 触发器 */
 
-  // 几何变化的四条来源：占位区自身尺寸（面板宽度过渡 / 页签条换行）、窗口 resize、
+  // 几何变化的四条来源：占位区自身尺寸（面板宽度过渡）、窗口 resize、
   // 字体加载完成（行高变了）、以及 props.width 变化（壳的宽度是外部状态，不一定先反映到 rect）
   useEffect(() => {
     const el = slotRef.current
@@ -516,28 +464,34 @@ export function WebPane(props: WebPaneProps) {
 
   /* ------------------------------------------------------------ 渲染 */
 
-  const loadingBar = activeLive && props.active && activeRuntime.loading && !activeRuntime.error
+  const phase: PanePhase = !activeTab || !activeTab.url
+    ? 'start'
+    : activeTab.dormant
+      ? 'dormant'
+      : activeRuntime.error
+        ? 'error'
+        : activeRuntime.loading
+          ? 'loading'
+          : 'ready'
+
+  // 动作条的可见性按状态矩阵走（PLAN §4.1）：休眠没有 view、天然没有历史，干脆不摆三个空按钮；
+  // 失败态的「重试」只在卡里，动作条不再留第二个刷新入口。
+  // 空态与「有页面但没历史」都**不隐藏**按钮，只用 disabled —— 否则每导航一次行的宽度都会变。
+  const showNavButtons = phase !== 'dormant'
+  const showReloadButton = phase !== 'dormant' && phase !== 'error'
+  const loadingBar = phase === 'loading' && props.active
 
   const placeholder = (() => {
-    if (!activeTab || !activeTab.url) {
-      /* 空网页：只留一枚安静的 Globe（2026-11-22 用户拍板 —— 起始页占位与三个快捷入口一起撤掉，
-         不用说明文字；地址栏本身就是入口，铁律 26） */
-      return (
-        <div className="flex h-full items-center justify-center">
-          <Globe size={28} strokeWidth={1.5} className="text-[var(--text-muted)] opacity-40" aria-hidden />
-        </div>
-      )
-    }
-
-    if (activeTab.dormant) {
+    if (phase === 'dormant' && activeTab) {
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+          <Globe size={22} strokeWidth={1.5} className="text-[var(--text-muted)] opacity-50" aria-hidden />
           <p className="text-[12px] text-[var(--text-secondary)]">这个页签还没有加载</p>
           <p className="max-w-[220px] truncate text-[11.5px] text-[var(--text-muted)]">{activeTab.url}</p>
           <button
             type="button"
             onClick={wakeActive}
-            className="mt-1 rounded-md border border-[var(--border-color)] px-2.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
+            className="mt-1 h-6 rounded-md border border-[var(--border-color)] px-2.5 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
           >
             加载这个页签
           </button>
@@ -545,10 +499,10 @@ export function WebPane(props: WebPaneProps) {
       )
     }
 
-    if (activeRuntime.error) {
+    if (phase === 'error' && activeTab) {
       return (
         <div className="flex h-full items-center justify-center p-4">
-          <div className="kb-item-in w-full max-w-[300px] rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-3">
+          <div className="w-full max-w-[300px] rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-3">
             <div className="flex items-start gap-2">
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[var(--warning)]" />
               <div className="min-w-0">
@@ -560,14 +514,14 @@ export function WebPane(props: WebPaneProps) {
               <button
                 type="button"
                 onClick={() => void navigate(activeTab.url)}
-                className="rounded-md border border-[var(--border-color)] px-2.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
+                className="h-6 rounded-md border border-[var(--border-color)] px-2.5 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-primary)]"
               >
                 重试
               </button>
               <button
                 type="button"
                 onClick={openInSystemBrowser}
-                className="rounded-md px-2.5 py-1 text-[11.5px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="h-6 rounded-md px-2.5 text-[11.5px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 在系统浏览器打开
               </button>
@@ -577,104 +531,42 @@ export function WebPane(props: WebPaneProps) {
       )
     }
 
-    if (activeRuntime.loading) {
-      return (
-        <div className="flex h-full items-center justify-center">
-          <span className="text-[11.5px] text-[var(--text-muted)]">正在加载页面…</span>
-        </div>
-      )
-    }
-
-    // 已就绪：这块是透明的，真实像素由主进程原生视图盖上来
+    // 加载中与已打开都不写 DOM 文案：这块会被主进程原生视图整块盖住，
+    // 能看见的只有顶部那 2px 进度条（PLAN §5）。
     return null
   })()
 
-  const placeholderKey = !activeTab || !activeTab.url
-    ? 'start'
-    : activeTab.dormant
-      ? `dormant:${activeTab.id}`
-      : activeRuntime.error
-        ? `error:${activeTab.id}`
-        : activeRuntime.loading
-          ? `loading:${activeTab.id}`
-          : `ready:${activeTab.id}`
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-secondary)]">
-      {/* 内层页签条：切换只改 visible，不重建 view（主进程按 id 保活） */}
-      <div
-        role="tablist"
-        aria-label="网页页签"
-        className="flex h-7 shrink-0 items-center gap-1 overflow-x-auto px-1.5"
-      >
-        {tabs.map((t, i) => {
-          const selected = i === activeIndex
-          return (
-            <div
-              key={t.id}
-              className={`kb-item-in flex h-6 min-w-0 shrink-0 items-center rounded-md ${
-                selected ? 'bg-[var(--bg-primary)]' : 'hover:bg-[var(--bg-hover)]'
-              }`}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                tabIndex={selected ? 0 : -1}
-                data-tip={t.url || '新标签页'}
-                onClick={() => activateTab(i)}
-                className={`h-full max-w-[150px] min-w-0 truncate pl-2 pr-1 text-left text-[11.5px] ${
-                  selected ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'
-                }`}
-              >
-                {tabCaption(t)}
-              </button>
-              <button
-                type="button"
-                aria-label={`关闭 ${tabCaption(t)}`}
-                data-tip="关闭"
-                onClick={() => closeTab(i)}
-                className="mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <X size={10} />
-              </button>
-            </div>
-          )
-        })}
-        <button
-          type="button"
-          aria-label="新建网页页签"
-          data-tip="新建网页页签"
-          onClick={addTab}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <Plus size={13} />
-        </button>
-      </div>
-
-      {/* 浏览器动作行 */}
+      {/* 唯一的动作行：空态也在原位，只有按钮变成 disabled（地址栏不跳位、焦点不丢） */}
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-1.5">
-        <IconButton
-          label="后退"
-          disabled={!activeLive || !activeRuntime.canGoBack}
-          onClick={() => withActiveView((id) => void webPaneBack(id))}
-        >
-          <ChevronLeft size={14} />
-        </IconButton>
-        <IconButton
-          label="前进"
-          disabled={!activeLive || !activeRuntime.canGoForward}
-          onClick={() => withActiveView((id) => void webPaneForward(id))}
-        >
-          <ChevronRight size={14} />
-        </IconButton>
-        <IconButton
-          label="重新加载"
-          disabled={!activeLive}
-          onClick={() => withActiveView((id) => void webPaneReload(id))}
-        >
-          <RotateCw size={13} />
-        </IconButton>
+        {showNavButtons && (
+          <>
+            <IconButton
+              label="后退"
+              disabled={!activeLive || !activeRuntime.canGoBack}
+              onClick={() => withActiveView((id) => void webPaneBack(id))}
+            >
+              <ChevronLeft size={14} />
+            </IconButton>
+            <IconButton
+              label="前进"
+              disabled={!activeLive || !activeRuntime.canGoForward}
+              onClick={() => withActiveView((id) => void webPaneForward(id))}
+            >
+              <ChevronRight size={14} />
+            </IconButton>
+          </>
+        )}
+        {showReloadButton && (
+          <IconButton
+            label="重新加载"
+            disabled={!activeLive}
+            onClick={() => withActiveView((id) => void webPaneReload(id))}
+          >
+            <RotateCw size={13} />
+          </IconButton>
+        )}
 
         <form
           className="min-w-0 flex-1"
@@ -718,12 +610,19 @@ export function WebPane(props: WebPaneProps) {
           aria-hidden={!loadingBar}
           className="kb-view-toggle pointer-events-none absolute inset-x-0 -top-[2px] z-10 h-[2px] overflow-hidden"
         >
-          <div className="h-full w-1/3 rounded-full bg-[var(--accent)] animate-pulse" />
+          {loadingBar && (
+            <div className="h-full w-1/3 rounded-full bg-[var(--accent)] animate-pulse motion-reduce:animate-none" />
+          )}
         </div>
 
         <div className="absolute inset-0 overflow-auto">
-          {placeholder ? (
-            <div key={placeholderKey} className="kb-view-fade h-full">
+          {phase === 'start' ? (
+            /* 空态：只有一层极淡点阵。装饰层是 absolute，不撑滚动尺寸，也不挡任何指针事件 */
+            <div key="start" aria-hidden className="kb-view-fade pointer-events-none absolute inset-0">
+              <div className="absolute inset-0" style={DOT_GRID_STYLE} />
+            </div>
+          ) : placeholder ? (
+            <div key={phase} className="kb-view-fade h-full">
               {placeholder}
             </div>
           ) : null}
