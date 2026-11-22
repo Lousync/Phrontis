@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
-  agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmReasoningCapable, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
+  agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, llmReasoningCapable, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault, workspaceOpenInSystem,
-  agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged, onWsExternalChange,
+  agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachEnsureConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged, onWsExternalChange,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachCourseGetState, aiTeachCourseGetSources, aiTeachCourseWriteOutlineDraft, onAiTeachCourseRefresh,
   aiTeachCourseOpenSegment, aiTeachCourseSetActiveUnit, aiTeachCourseEndSegment, aiTeachCourseFinalizeSegment,
@@ -20,9 +20,7 @@ import { CourseRail } from './CourseRail'
 import { CourseEndFlow } from './CourseEndFlow'
 import { CourseEndReportDrawer } from './CourseEndReportDrawer'
 import { Preflight } from './Preflight'
-import { CourseProgress } from './CourseProgress'
 import { CourseSources } from './CourseSources'
-import { RequirementsDrawer, type ReqLayer } from './RequirementsDrawer'
 import { buildCourseRail, activeChapterId as pickRailChapter, type RailChapterInput } from './courseRailPure'
 import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
@@ -33,7 +31,6 @@ import { SideLanePanel } from './SideLanePanel'
 import type { ArtTab } from './artifacts'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { Collapsible } from '../../components/shared/Collapsible'
-import { AnchoredLayer } from '../../components/shared/AnchoredLayer'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { looseJsonParse } from '../../components/shared/QuizParser'
 import { showToast } from '../../lib/toast'
@@ -84,7 +81,8 @@ import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTrac
  * 已实现：会话列表/新建任务（场景模板）/发送/回复渲染/实时步骤/轨迹折叠/改动清单可跳编辑器；
  * P1 会话⇄文件夹绑定：新建对话即建 `{MM-DD} 标题` 文件夹（.session.json 锚点）、重命名同步改夹、
  * 删除会话按 aiTeachDeleteSessionFolder（ask/keep/delete）处理文件夹（进系统回收站）。
- * P2 约束文件化：会话要求唯一真相源 = 会话文件夹 CONSTRAINTS.md（弹层读写文件，主进程每轮重读注入）。
+ * P2 约束文件化：会话要求唯一真相源 = 会话文件夹 CONSTRAINTS.md（主进程每轮重读注入；
+ * 读写入口 2026-11-22 收敛为输入区「要求」pill → 右栏笔记页签就地编辑，不再有模块内编辑弹层）。
  * P3 中栏改版：AI 回答去气泡平铺 + 逐条操作条（整理成文档/复制/轨迹）；右缘快速定位条（**2026-11-21 重做为「轮次导航」**：
  * 刻度单位改为用户提问、形态改为贴右缘浮动卡片，见 `TurnRail.tsx` + `turnRailPure.ts`，方案 `tmp/ai-teach-anchor-rail/PLAN.md`）；
  * 输入区流式停止键 + 本对话模型/思考强度合一菜单（仅本对话生效）；顶栏收敛（时间线/文档视图/文档地图退役）。
@@ -109,7 +107,12 @@ import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTrac
  * v3.2.0 第 20 项起：围栏内容是**相对本主题画像的变化条目**（`[{field,op,text}]`），卡片升级为
  * 可勾选 / 可编辑的 diff 列表 —— 本主题层可整段替换字段，工作区 / 全局只允许追加（只接受 add）；
  * 忽略后有节流窗口（8 轮 / 30 分钟取先到），窗口内只留安静入口，不再每轮弹；
- * 「🩺 诊断问答」模板（3-34）答完生成初稿；入口=选择页「全局画像」chip + 顶栏「画像」chip（3-35）。
+ * 「🩺 诊断问答」模板（3-34）答完生成初稿；入口=选择页「全局画像」chip + 输入区「画像」pill（3-35 → 2026-11-22 迁入）。
+ *
+ * 2026-11-22 中栏 UI 改版（方案 `tmp/ai-teach-toolbar/PLAN.md`，本文件顶部这一批注释之后不再重述）：
+ * 顶栏右侧只剩一枚「打开右侧栏」图标；画像 / 要求两枚 pill 落在输入区工具条最左（只做本会话一层，
+ * 折叠时仍常驻）；段上下文条 / 560px 约束模态 / 要求抽屉 / 进度浮层全部退役；
+ * 收尾本段改为左栏 ✓ + 对话流末尾卡两处行内两段式确认；结课由 AI 回复里的 ```endcourse 围栏给按钮。
  */
 
 /** P5：工作区卡片「最近活跃」相对时间（updated_at 'YYYY-MM-DD HH:MM:SS' 本地串） */
@@ -305,6 +308,7 @@ type AiTeachNav = {
    * - `started` 缺省/false = 仍停准备态；true = 已开讲（此后不再进准备态）
    * - `draft` 首条消息（用户编辑后的值；缺省回落场景 startPrompt）
    * - `srcOpen`/`reqOpen` 素材条 / 会话要求条折叠态（切回时还原到切走瞬间）
+   *   ★ 2026-11-22：会话要求行内条已退役，`reqOpen` 只作**旧存档读兼容**保留（读到不报错、不再写回）。
    * 素材与约束内容不入快照——真相源是 SOURCE.md / CONSTRAINTS.md，实时读才不会丢外部变更。
    */
   prep?: { started?: boolean; draft?: string; srcOpen?: boolean; reqOpen?: boolean }
@@ -446,7 +450,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const raw = splitJumps(m.content)
     const rec = {
       src: m.content,
-      body: raw.body.replace(/```(profile|plan|ask|outline)[^\n]*\n[\s\S]*?```/g, ''),
+      body: raw.body.replace(/```(profile|plan|ask|outline|endcourse)[^\n]*\n[\s\S]*?```/g, ''),
       jumps: raw.jumps,
     }
     msgParseCache.current.set(key, rec)
@@ -528,7 +532,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (side === 'left') { const v = !leftOpen; setLeftOpen(v); localStorage.setItem('aiTeach.leftOpen', v ? '1' : '0') }
     else { const v = !rightOpen; setRightOpen(v); localStorage.setItem('aiTeach.rightOpen', v ? '1' : '0'); setSrcVisible(v) }
   }
-  /** 展开右栏（保持上次分区，只把面板拉出来——顶栏 chip / 贴边条专用） */
+  /** 展开右栏（保持上次分区，只把面板拉出来——贴边条 / Ctrl+Alt+B 专用） */
   const openRail = () => { setRightOpen(true); localStorage.setItem('aiTeach.rightOpen', '1'); setSrcVisible(true) }
   // Ctrl+B 切左侧栏 / Ctrl+Alt+B 切右侧栏（2026-09-08 用户反馈补齐，对齐 VS Code 侧栏习惯）。
   // 模块级快捷键：仅本模块激活时生效；焦点在输入控件内不拦截；deps 随开合状态刷新闭包
@@ -557,7 +561,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    *  供工件内部按宽自适应（原先是右栏单面板的宽度上报） */
   const [artPaneW, setArtPaneW] = useState(0)
   /** v3.8.0：工件分栏开关（用户意图态，持久）。列可见 = `artTabs` 非空 && `artOpen` ——
-   *  拖到最窄（ResizablePanel snap-close）或点顶栏「工件」chip 即隐藏分栏，页签不丢（再点即回） */
+   *  拖到最窄（ResizablePanel snap-close）或点工件分栏右缘的贴边条即隐藏 / 展开分栏（页签不丢）。 */
   const [artOpen, setArtOpen] = useState(() => localStorage.getItem('aiTeach.artOpen') !== '0')
   const applyArtOpen = useCallback((v: boolean) => {
     setArtOpen(v)
@@ -573,7 +577,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!artOpen || artTabs.length === 0) return
     applyArtOpen(false)
     artAutoCollapsedRef.current = true
-    showToast({ type: 'info', message: '工件栏已收起，查看器占用右侧', detail: '页签保留，点顶栏「工件」即可再展开' })
+    showToast({ type: 'info', message: '工件栏已收起，查看器占用右侧', detail: '页签保留，点对话区右缘的工件贴边条即可再展开' })
     // 仅在查看器开合时判定一次：拖动宽度、切页签都不该反复收起
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcVisible])
@@ -720,6 +724,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [activeUnitId, setActiveUnitId] = useState<string | null>(null)
   /** 当前段状态：ended → 只读 */
   const [segmentStatus, setSegmentStatus] = useState<'open' | 'ended'>('open')
+  /**
+   * 收尾本段的两段式确认落点（2026-11-22 A 线）：'rail' = 左栏当前段行下方，'card' = 对话流末尾卡。
+   * 两处**原位互换**成「确认收尾 / 取消」，不再一键冻结（铁律 25：行内化，不用模态）；Esc 取消。
+   */
+  const [endConfirm, setEndConfirm] = useState<'rail' | 'card' | null>(null)
   /** 当前打开的章末复习课所属章 id（null = 不在复习课） */
   const [courseReviewChapter, setCourseReviewChapter] = useState<string | null>(null)
   /** 开段预检：{ 章 id, 被点的知识点, 上一段交接 } */
@@ -731,11 +740,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [railSearch, setRailSearch] = useState('')
   /** 当前章（左栏展开 / 右栏素材归属） */
   const [activeChapterState, setActiveChapterState] = useState<string | null>(null)
-  /** 要求抽屉 */
-  const [reqOpen, setReqOpen] = useState(false)
-  const [reqLayer, setReqLayer] = useState<ReqLayer>('workspace')
-  /** 要求抽屉重读信号（AI 工具 / 编辑器写盘后刷新当前层） */
-  const [reqTick, setReqTick] = useState(0)
   /** 上段交接内容（界面条） */
   const [prevHandoff, setPrevHandoff] = useState('')
   /** prevHandoff 归属的段会话：切段时旧文本不闪到新段 */
@@ -745,6 +749,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const courseReadonly = !!activeSegmentSid && activeId === activeSegmentSid && segmentStatus === 'ended'
   /** 已结课：章节 / 大纲只读，课程助手仍可用 */
   const courseEnded = !!courseState?.endedAt
+  /** 收尾确认只对「当前正在看的这一段」有意义：切会话 / 切段 / 段状态变化即撤回，绝不串到别的段 */
+  useEffect(() => { setEndConfirm(null) }, [activeId, activeSegmentSid, segmentStatus, courseEnded])
   const courseUnits = useMemo(() => (courseState?.outline?.chapters ?? []).flatMap(c => c.units), [courseState])
   /** L4 引用网络：知识点名（归一化） → 最近已收尾段 / 旧总结篇（跳转 chip 点击打开） */
   const courseJumpByName = useMemo(() => {
@@ -827,10 +833,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
   /** 导图节点 ref 点击 → 在工件栏开该笔记页签（左聊右看，不跳模块） */
   const artOpenRef = useCallback((rel: string) => { void openArtFile(rel) }, [openArtFile])
-  const wsSessions = useMemo(
-    () => sessions.filter(s => (wsSessionMap[s.id] ?? '__none__') === (activeWs ?? '__none__')),
-    [sessions, wsSessionMap, activeWs],
-  )
   /**
    * v3.1.2 条目11 P4：**已升格支线**（lane==='main' 且带 parentSessionId）跟随父行缩进。
    * 支线本身不分配工作区，故从**全量** sessions 里按父行归属；父行不在当前工作区视图时不出现（旧行为）。
@@ -905,23 +907,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
   // P1：主进程侧不可静默的提示（根目录改名迁移失败/目标占用等）
   useEffect(() => onAiTeachNotice((msg) => { if (msg) showToast({ type: 'warning', message: msg }) }), [])
-  // 会话级全局要求（P2 §2.3：唯一真相源=会话文件夹 CONSTRAINTS.md；DB 字段仅旧会话读兼容）
-  const [activeInstr, setActiveInstr] = useState('')
-  const [instrRel, setInstrRel] = useState('')
-  const [instrOpen, setInstrOpen] = useState(false)
-  const [instrDraft, setInstrDraft] = useState('')
-  const [instrDismiss, setInstrDismiss] = useState(false)
   /**
+   * 2026-11-22 A 线改版：会话要求（CONSTRAINTS.md）的顶栏弹层 / 行内条 / 560px 模态全部退役，
+   * 入口收敛为输入区工具条最左的「要求」pill（右栏笔记页签就地编辑）；本模块不再持有要求正文副本
+   * ——真相源只有文件，读写归右栏与主进程。
+   *
    * P4（2026-11-19 拍板）：右栏退役 —— 进度 / 素材 / 本次改动 按方案 §7.2 A 分流：
-   *   进度 → 中栏上下文条上的「进度」按钮点开锚定浮层；
+   *   进度 → 左栏课程树（2026-11-22 起顶栏「进度」浮层一并退役）；
    *   素材 → 左栏资源管理器表头「文件 / 素材」分段；
    *   本次改动 → 工件栏底部细栏（见 ArtifactsPane 的 changes props）。
    * 查看器（网页/笔记/书架/旁问）占用原来的右栏位置。
    */
   const [explorerSeg, setExplorerSeg] = useState<'files' | 'sources'>(() => (localStorage.getItem('aiTeach.explorerSeg') === 'sources' ? 'sources' : 'files'))
   useEffect(() => { try { localStorage.setItem('aiTeach.explorerSeg', explorerSeg) } catch { /* ignore */ } }, [explorerSeg])
-  const [progressOpen, setProgressOpen] = useState(false)
-  const progressAnchorRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
     if (!railActiveChapter) return
     setCollapsedChap(prev => {
@@ -1068,13 +1066,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // → 整模块崩溃）。
   const zenActive = zenLevel >= 1 && !!onZenLevelChange
 
-  // P2（§2.3/2-6）：会话约束读取——文件唯一真相源；无文件夹的旧会话读兼容回退 DB 字段一次
-  const loadConstraints = useCallback(async (sid: string, dbFallback: string): Promise<void> => {
-    const r = await aiTeachReadConstraints(sid).catch(() => null)
-    const text = r && r.ok ? (r.relPath ? (r.text ?? '').trim() : dbFallback) : dbFallback
-    if (activeIdRef.current === sid) { setActiveInstr(text); setInstrRel(r?.relPath ?? '') }
-  }, [])
-
   const refreshSessions = useCallback(async () => {
     // 只保留 AI 教学来源的会话：助手侧栏 / AI 学堂 / 日程助手都有自己的列表（同表存储，按 source 分流）。
     // ★ 2026-10-13（F-8）：原来是排除法（`!== 'assistant'`）—— `schedule` 行也满足它，
@@ -1090,9 +1081,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     else if (!activeWsRef.current) {
       activeIdRef.current = null
       setActiveId(null)
-      setActiveInstr(''); setInstrRel('')
     }
-  }, [loadConstraints])
+  }, [])
 
   /** 右栏支线中心「引用到主线」：把支线末条 AI 回答作为引用胶囊放进主线输入框（不自动发送） */
   const quoteFromLane = useCallback((text: string) => {
@@ -1251,9 +1241,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     quotesRef.current = []; setQuotes([]); setQuotesOpen(false) // 引用片段属于发起时那个对话，切会话即失效
     setArtTabs([]); setArtActive(null) // 工件栏页签=会话内存态：切会话清空（阅读位置记忆保留在页签组件内）
     setPreflight(null)
-    const row = sessions.find(s => s.id === sid)
-    setInstrDismiss(false)
-    void loadConstraints(sid, row?.instructions ?? '')
     await refreshMessages(sid)
     const nav = readNav(sid)
     // UI 优化条目6B + 分屏留存轮：恢复该会话「上次离开时的工件」（页签在则栏在——内容驱动，无手动开合）。
@@ -1267,7 +1254,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         })
     } else if (nav.docRel) void openArtFile(nav.docRel)
     else if (nav.readerRel && /\.pptx$/i.test(nav.readerRel)) void openArtFile(nav.readerRel, { cur: nav.readerPage ?? 0 })
-  }, [refreshMessages, sessions, loadConstraints, openArtFile])
+  }, [refreshMessages, openArtFile])
 
   /**
    * 一次 Agent 运行的共同收尾（发送 / 续跑共用）：
@@ -1490,7 +1477,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         else {
           activeIdRef.current = null
           setActiveId(null); setActiveTitle(''); setMessages([]); setLastChanges(null); setArtTabs([]); setArtActive(null)
-          setActiveInstr(''); setInstrRel('')
         }
         void refreshSessions()
         return
@@ -1514,7 +1500,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       } else {
         activeIdRef.current = null
         setActiveId(null); setActiveTitle(''); setMessages([]); setLastChanges(null); setArtTabs([]); setArtActive(null)
-        setActiveInstr(''); setInstrRel('')
       }
       void refreshSessions()
     })()
@@ -1863,21 +1848,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [courseJumpByName, openArtFile, openSegmentBySid])
 
   const courseReviewChapterName = useMemo(() => courseState?.outline?.chapters.find(c => c.id === courseReviewChapter)?.name ?? '', [courseState, courseReviewChapter])
-  const activeChapterObj = useMemo(() => courseState?.outline?.chapters.find((c) => c.id === railActiveChapter) ?? null, [courseState, railActiveChapter])
-  const activeSegmentUnitNames = useMemo(() => {
-    const ids = activeSegment ? lessonUnitIds(activeSegment) : []
-    return ids.map((id) => courseUnits.find((u) => u.id === id)?.name ?? id)
-  }, [activeSegment, courseUnits])
-  const activeSegmentUnitName = useMemo(() => {
-    const ids = activeSegment ? lessonUnitIds(activeSegment) : []
-    const uid = activeUnitId && ids.includes(activeUnitId) ? activeUnitId : ids[0]
-    return uid ? (courseUnits.find((u) => u.id === uid)?.name ?? uid) : '未选择'
-  }, [activeSegment, activeUnitId, courseUnits])
-
-  const openRequirements = useCallback((layer: ReqLayer) => {
-    setReqLayer(layer)
-    setReqOpen(true)
-  }, [])
 
   // ---------- 左栏「收藏」（v3.6.0：钉住活文档随手翻；favorites.json 按工作区） ----------
   const [favorites, setFavorites] = useState<AiTeachFavorite[]>([])
@@ -1903,21 +1873,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
   const isPinned = useCallback((rel: string) => favoritesRef.current.some((f) => f.rel === rel), [])
 
-  /** CONSTRAINTS / 打开中的工件回读（3.14 不再回读 SOURCE.md；素材由 right rail 按需拉） */
-  const instrStateRef = useRef({ open: false, draft: '' })
-  useEffect(() => { instrStateRef.current = { open: instrOpen, draft: instrDraft } }, [instrOpen, instrDraft])
-  const syncSessionFiles = useCallback((opts: { constraints?: boolean; doc?: string | null }) => {
-    const sid = activeIdRef.current
-    if (opts.constraints && sid) {
-      void aiTeachReadConstraints(sid).then(r => {
-        if (!r?.ok || !r.relPath || activeIdRef.current !== sid) return
-        const text = (r.text ?? '').trim()
-        setActiveInstr(text)
-        setInstrRel(r.relPath)
-        const st = instrStateRef.current
-        if (!(st.open && st.draft.trim() !== text)) setInstrDraft(text)
-      }).catch(() => null)
-    }
+  /** 打开中的工件页签回读（3.14 不再回读 SOURCE.md；PROFILE / CONSTRAINTS 由右栏笔记页签自己读盘） */
+  const syncSessionFiles = useCallback((opts: { doc?: string | null }) => {
     // 打开中的工件页签回读磁盘（编辑器保存/程序重写后即时反映）
     const rel = opts.doc ?? null
     const openTabs = artTabsRef.current.filter(t => !t.generating && t.rel && t.kind !== 'image' && (rel ? t.rel === rel : t.kind === 'md'))
@@ -1935,14 +1892,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   useEffect(() => {
     const onSaved = (e: Event) => {
       const rel = String((e as CustomEvent).detail?.relPath ?? '')
-      const base = rel.split(/[\\/]/).pop() ?? ''
       const artHit = !!rel && artTabsRef.current.some(t => !t.generating && t.rel === rel)
-      if (base !== 'CONSTRAINTS.md' && !artHit) return
-      if (base === 'CONSTRAINTS.md') setReqTick(v => v + 1)
-      syncSessionFiles({ constraints: base === 'CONSTRAINTS.md', doc: artHit ? rel : null })
+      if (!artHit) return
+      syncSessionFiles({ doc: rel })
     }
-    const onTree = () => { syncSessionFiles({ constraints: true }); setReqTick(v => v + 1); void reloadCourse() }
-    const onFocus = () => syncSessionFiles({ constraints: true })
+    const onTree = () => { syncSessionFiles({}); void reloadCourse() }
+    const onFocus = () => syncSessionFiles({})
     window.addEventListener('kb:file-saved', onSaved)
     window.addEventListener('focus', onFocus)
     const off = onAiTeachTreeRefresh(onTree)
@@ -1967,7 +1922,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return off
   }, [openArtFile])
   // 切回本模块 Tab：回读一次（保活组件不卸载，isActive 是唯一「重新可见」信号）
-  useEffect(() => { if (isActive) syncSessionFiles({ constraints: true }) }, [isActive, syncSessionFiles])
+  useEffect(() => { if (isActive) syncSessionFiles({}) }, [isActive, syncSessionFiles])
   // 文件操作撤销 / 重做（v3.16.1 F-5）：等 fsWatcher 有约 1 秒延迟，这里立即重扫已加载目录
   useEffect(() => {
     const onFileOp = () => setTreeRefreshSeq(n => n + 1)
@@ -2105,12 +2060,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         setAskDismissed(askPending.id)
         return
       }
-      if (reqOpen) { setReqOpen(false); return }
+      // 收尾两段式确认（左栏 ✓ / 流末尾卡）：Esc = 取消，并原位退回未确认态
+      if (endConfirm) { setEndConfirm(null); return }
       if (preflight) { setPreflight(null); return }
       if (wsConfirmDel) { setWsConfirmDel(false); return }
       if (wsRenaming) { setWsRenaming(false); return }
       if (wsCreating) { setWsCreating(false); return }
-      if (instrOpen) { setInstrOpen(false); return }
       if (tokenOpen) { setTokenOpen(false); return }
       // 模型菜单的 Esc 由 useAnchoredMenu 自己收（它同时管点外部关闭），这里不再重复处理
       if (!zenActive) return
@@ -2119,7 +2074,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, reqOpen, preflight, wsConfirmDel, wsRenaming, wsCreating, instrOpen, tokenOpen])
+  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, endConfirm, preflight, wsConfirmDel, wsRenaming, wsCreating, tokenOpen])
   /**
    * 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件）。
    * v3.2.0 第 20 项起：围栏正文先过 `parseProfileFence` —— 解得出 JSON 条目数组就是新形态，
@@ -2158,6 +2113,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       return o && Array.isArray(o.chapters) ? o : null
     } catch { return null }
   }, [outlineFence])
+  /**
+   * AI 结课建议（2026-11-22）：扫描**全部** assistant 消息里**最后一个** ```endcourse 围栏。
+   * 与 outline 不同（outline 只看最新一条）：后一条普通回复不该让结课按钮消失 ——
+   * 课程结课后由渲染侧隐藏（流末尾「本课已结课」卡接管）。一次只渲染这**一个** idx，故不会出现两个按钮。
+   * 只做渲染，不写盘：用户点按钮进现有 CourseEndFlow 自己确认（系统提示词侧由 C 线落 agentService）。
+   */
+  const endCourseFence = useMemo<{ idx: number; raw: string } | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.role !== 'assistant') continue
+      const mt = /```endcourse[^\n]*\n([\s\S]*?)```/.exec(m.content)
+      if (mt) return { idx: i, raw: mt[1].trim() }
+    }
+    return null
+  }, [messages])
   /** 落盘态：记住**哪一份草稿**已落盘 + 落盘路径（草稿内容一变就退回未落盘）。内存态 —— 切会话即清。 */
   const [outlineDone, setOutlineDone] = useState<{ fence: string; rel: string } | null>(null)
   useEffect(() => { setOutlineDone(null) }, [activeId])
@@ -2317,22 +2287,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const lines = askPending.questions.map((q, i) => `${i + 1}. ${q.question} → ${picks[i] ?? '（未答）'}`)
     sendAskAnswer(`【整卷回答】\n${lines.join('\n')}`)
   }, [askPending, askPicks, pending, sendAskAnswer])
-
-  /** P2（2-6）：保存会话要求 = 写会话文件夹 CONSTRAINTS.md（懒建兜底）；清掉旧 DB 字段残留防双真相源 */
-  const saveInstr = async (): Promise<void> => {
-    const sid = activeIdRef.current
-    if (!sid) return
-    const text = instrDraft.trim().slice(0, 2000)
-    const r = await aiTeachWriteConstraints(sid, text).catch(() => null)
-    if (r && r.ok) {
-      const hadDb = !!sessions.find(s => s.id === sid)?.instructions
-      if (hadDb) void agentSetSessionInstructions(sid, '').catch(() => null)
-      setActiveInstr(text); setInstrRel(r.relPath ?? ''); setInstrDismiss(false); setInstrOpen(false)
-      showToast({ type: 'info', message: text ? '已保存到 CONSTRAINTS.md（编辑器里可直接改，AI 每轮发送时重读）' : '已清除本会话约束' })
-    } else {
-      showToast({ type: 'error', message: `约束保存失败${r?.error ? `：${r.error}` : ''}` })
-    }
-  }
 
   // ---- PPT 逐页阅读（已并入工件栏 pptx 页签；条目5.1 「原件」按钮 → openArtFile 分派）----
   const setArtPptxPage = useCallback((id: string, delta: number) => {
@@ -2843,6 +2797,50 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     <div className="mt-1 text-[10.5px] leading-relaxed text-[var(--text-muted)]">本轮尚无注入采样（发一条消息后可见构成）</div>
   )
 
+  /* ── 输入区「画像 / 要求」pill（2026-11-22 A 线，PLAN §4 / §5）─────────────────────────
+     口径：只做**本会话一层**（课程段会话 = 本段；自由对话 / 复习课 = 本会话）。
+     没有层选择器、没有 chip、没有抽屉 —— 本课程 / 全局的画像与要求由 AI 教学助手代改，
+     需要人眼确认时去编辑器的文件树或工作区选择页（这是 2026-11-22 的拍板，别再加回层 UI）。
+     打开路径：ensure（画像 = PROFILE.md 骨架；要求 = C 线冻结的 aiTeachEnsureConstraints）
+     → 右栏「笔记」页签就地编辑（A → B 唯一接缝仍是既有 requestViewer，形状不变）。
+     `docOpenKind` 只用于 pill 按下态：右栏开着且停在笔记页签、且最后是我点开的这一类文件。 */
+  const [docOpenKind, setDocOpenKind] = useState<'profile' | 'constraints' | null>(null)
+  useEffect(() => { if (!srcVisible) setDocOpenKind(null) }, [srcVisible])
+  const openSessionDoc = useCallback(async (kind: 'profile' | 'constraints') => {
+    const sid = activeIdRef.current
+    if (!sid) { showToast({ type: 'warning', message: '先选择或新建一个对话' }); return }
+    const r = kind === 'profile'
+      ? await aiTeachProfileEnsureSession(sid).catch(() => null)
+      : await aiTeachEnsureConstraints(sid).catch(() => null)
+    if (!r?.ok) { showToast({ type: 'error', message: `打开失败${r?.error ? `：${r.error}` : ''}` }); return }
+    if (!r.relPath) { showToast({ type: 'warning', message: '先发一条消息，会话文件夹建立后再编辑' }); return }
+    setDocOpenKind(kind)
+    requestViewer({ tab: 'notes', relPath: r.relPath, name: r.relPath.split('/').pop() })
+  }, [requestViewer])
+  const docPressed = (kind: 'profile' | 'constraints') => srcVisible && viewerTab === 'notes' && docOpenKind === kind
+  const docPillClass = (on: boolean) => `relative inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] whitespace-nowrap transition-colors ${
+    on
+      ? 'border-[var(--accent)]/55 bg-[var(--accent)]/10 text-[var(--accent)]'
+      : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+  }`
+  /** 两枚 pill：折叠（trayOpen=false）时**仍然可见可点** —— 只折叠 思考 / 引用 / 模型（乙方案） */
+  const docPills = (
+    <>
+      <button type="button" onClick={() => void openSessionDoc('profile')} aria-pressed={docPressed('profile')}
+        data-tip={`PROFILE.md · ${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}画像（右栏可就地编辑）`}
+        aria-label={`打开${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}画像 PROFILE.md`}
+        className={docPillClass(docPressed('profile'))}>
+        画像
+        {profPending && <span className="ml-0.5 h-1 w-1 shrink-0 rounded-full bg-[var(--warning)]" aria-hidden />}
+      </button>
+      <button type="button" onClick={() => void openSessionDoc('constraints')} aria-pressed={docPressed('constraints')}
+        data-tip={`CONSTRAINTS.md · ${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}要求（右栏可就地编辑）`}
+        aria-label={`打开${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}要求 CONSTRAINTS.md`}
+        className={docPillClass(docPressed('constraints'))}>
+        要求
+      </button>
+    </>
+  )
 
   const composerFooter = (
                 <div className="flex items-center gap-2 mt-0.5">
@@ -3036,7 +3034,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
        拍板：中间向两侧对齐 —— 整页取实底，模块自己承担底色（其它主题本来就是实底，无变化）。 */
     <div className="kb-theme-surface kb-theme-surface--solid h-full flex flex-col min-h-0 relative">
       {/* v3.8.0 §二：顶栏瘦身 —— 去掉会话页签与课程分段器（会话导航归左栏列表、课程切换归中栏视图切换器）；
-          工作区 chip 改为面包屑「AI教学 / 工作区 / 会话名」，右侧仅留工具组 */}
+          工作区 chip 改为面包屑「AI教学 / 工作区 / 会话名」；2026-11-22 起右侧只剩一枚「打开右侧栏」图标 */}
       {activeWs ? (
       <>
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 shrink-0 select-none">
@@ -3055,122 +3053,25 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         )}
         <div className="flex-1 min-w-0" />
         <div className="shrink-0 flex items-center gap-0.5">
-
-          {/* 顶栏工具组：**只图标不带文字**（窄栏不挤，含义靠 title 气泡；状态用右上角小圆点 / 数字）
-              非当前会话不需要的入口不渲染；工件分栏 chip 只有存在工件页签时才出现 */}
-          {courseEnded && activeWs && (
-            <>
-              <button onClick={() => setEndReportWs(activeWs)} data-tip="查看结课报告" aria-label="查看结课报告"
-                className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                <ScrollText size={14} />
-              </button>
-              <button onClick={() => void reopenCourse(activeWs)} data-tip="重新开课（保留结课报告与进度）" aria-label="重新开课（保留结课报告与进度）"
-                className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                <RotateCcw size={14} />
-              </button>
-            </>
-          )}
-          {!courseEnded && (
-          <button
-            onClick={() => { if (activeId) void openProfile('session'); else showToast({ type: 'warning', message: '本主题画像随对话存放：先选择或新建一个对话' }) }}
-            data-tip="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准" aria-label="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准"
-            className="relative p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-            <User size={14} />
-            {profPending && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" data-tip="AI 有画像更新建议待确认" aria-label="AI 有画像更新建议待确认" />}
-          </button>
-          )}
-          {/* 工件分栏开关（v3.8.0：工件 = 中栏右侧的独立分栏，与对话并排同屏）——
-              有工件页签时才出现；点＝收/放分栏（页签不丢，收起后再点即回），页签数与状态进 title */}
-          {artExpanded && (
-            <button onClick={() => applyArtOpen(!artOpen)}
-              data-tip={artOpen ? `收起工件分栏（含 ${artTabs.length} 个页签，页签保留，再点即回）` : `展开工件分栏，与对话并排同屏（${artTabs.length} 个页签）`} aria-label={artOpen ? `收起工件分栏（含 ${artTabs.length} 个页签，页签保留，再点即回）` : `展开工件分栏，与对话并排同屏（${artTabs.length} 个页签）`}
-              className={`p-1 rounded-md transition-colors ${artOpen ? 'text-[var(--accent)] hover:bg-[var(--bg-hover)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-              <FileText size={14} />
-            </button>
-          )}
-          {/* 右侧查看器入口（P4）：网页 / 笔记 / 书架 / 旁问；Ctrl+Alt+B 同效 */}
+          {/* 顶栏右侧只留**一枚**「打开右侧栏」（2026-11-22 A 线，PLAN §2）。
+              结课组 / 画像 / 工件 / 会话要求 / 进度 / 收尾全部退出顶栏，去向：
+                · 画像 / 要求 → 输入区工具条最左两枚 pill（只做本段 / 本会话一层）
+                · 收尾本段 → 左栏当前段行 ✓ + 对话流末尾卡（两处都行内两段式确认）
+                · 进度 → 左栏课程树本身就是进度
+                · 结课组 → 对话流末尾「本课已结课」卡 + 选择页已结课预览
+              图标是**内联 SVG**（18×14 / 外框 16×12 / rx 4 / 分隔线 x=10.9 / 描边 1.8）：
+              lucide PanelRight 的分隔线在 66.7%、rx 2、16px 下描边约 1.27，三处都对不上。
+              右栏打开时这枚**不渲染**（不是置灰）——右栏头部自己有收起。 */}
           {!srcVisible && (
-            <button onClick={() => requestViewer({ tab: viewerTab })} data-tip="右侧查看器：网页 / 笔记 / 书架 / 旁问（Ctrl+Alt+B）" aria-label="右侧查看器：网页 / 笔记 / 书架 / 旁问（Ctrl+Alt+B）"
+            <button type="button" onClick={() => requestViewer({ tab: viewerTab })}
+              data-tip="打开右侧栏（Ctrl+Alt+B）" aria-label="打开右侧栏（Ctrl+Alt+B）"
               className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-              <PanelRightOpen size={14} />
+              <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+                <rect x="1" y="1" width="16" height="12" rx="4" />
+                <path d="M10.9 1v12" />
+              </svg>
             </button>
           )}
-          {/* 会话要求（UI 优化条目8.1 方案 A：中型编辑弹层，规格对齐画像弹层；Ctrl+Enter 保存；阅读视图次级入口）。
-              约束随会话存放（CONSTRAINTS.md 在会话夹内）——工作区没有任何会话时整个入口不渲染
-              （2026-09-08 用户拍板：删除全部会话后也不出现，不只首次进入） */}
-          {!courseEnded && wsSessions.length > 0 && (
-          <div className="relative shrink-0">
-            <button
-              onClick={() => { setInstrDraft(activeInstr); setInstrOpen(v => !v); if (activeId) void aiTeachReadConstraints(activeId).then(r => { const t = r?.ok && r.relPath ? (r.text ?? '').trim() : ''; setActiveInstr(t); setInstrDraft(t); if (r?.relPath) setInstrRel(r.relPath) }).catch(() => null) }}
-              className={`relative p-1 rounded-md transition-colors ${activeInstr ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'} ${instrOpen ? 'bg-[var(--bg-hover)]' : ''}`}
-              data-tip="会话约束：写入本会话文件夹的 CONSTRAINTS.md，AI 每轮发送时重读（编辑器里可直接改）" aria-label="会话约束：写入本会话文件夹的 CONSTRAINTS.md，AI 每轮发送时重读（编辑器里可直接改）">
-              <PenLine size={14} />
-              {activeInstr && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
-            </button>
-          </div>
-          )}
-          {instrOpen && wsSessions.length > 0 && (
-            <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30" onClick={() => setInstrOpen(false)}>
-              <div className="w-[560px] max-w-[94vw] max-h-[86vh] flex flex-col rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl" onClick={e => e.stopPropagation()}>
-                <div className="shrink-0 px-4 pt-3.5 pb-2">
-                  <div className="flex items-center gap-2">
-                    <PenLine size={14} className="text-[var(--accent)] shrink-0" />
-                    <span className="text-[13px] font-medium text-[var(--text-primary)]">本会话约束</span>
-                    <span className="text-[10.5px] text-[var(--text-muted)]">CONSTRAINTS.md · 唯一真相源，AI 每轮重读</span>
-                    <button onClick={() => setInstrOpen(false)} className="ml-auto p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><X size={12} /></button>
-                  </div>
-                  <details className="mt-1.5 text-[11px] text-[var(--text-secondary)]">
-                    <summary className="cursor-pointer select-none text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">怎么写？（模板与示例）</summary>
-                    <div className="mt-1 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-color)] px-3 py-2 leading-relaxed text-[var(--text-muted)]">
-                      自由 Markdown，无固定字段。示例：<br />
-                      · 只用中文回答，先给结论再展开<br />
-                      · 这个对话只聊 Linux 内核，跑题请拉回<br />
-                       · 每次回答结尾附一个表情<br />
-                       （留空并保存 = 清除约束；此文件可在左栏资源管理器或编辑器直接改）<br />
-                       <span className="text-[var(--text-muted)]">层级从细到粗：<b>本会话要求</b>（此文件，只作用于本对话）＞ <b>工作区要求</b>（本工作区所有会话，入口见下方）＞ <b>全局要求</b>（AI教学选择页，跨工作区所有会话）。写在哪一层，作用范围就到哪一层。</span>
-                    </div>
-                  </details>
-                  {/* v3.1.2 条目6：本工作区要求入口（三层约束中间档）——仅当会话归属工作区时出现 */}
-                  {activeWs && activeWs !== '__none__' && (
-                    <button onClick={() => { setInstrOpen(false); void openWorkspaceConstraints() }} data-tip={`编辑本工作区要求（${wsActive?.name ?? '工作区'}/CONSTRAINTS.md）——本工作区所有会话共同遵循，优先级低于本会话要求、高于全局要求`} aria-label={`编辑本工作区要求（${wsActive?.name ?? '工作区'}/CONSTRAINTS.md）——本工作区所有会话共同遵循，优先级低于本会话要求、高于全局要求`}
-                      className="mt-1.5 flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline transition-colors">
-                      🏷️ 本工作区要求（{wsActive?.name ?? '工作区'}）→
-                    </button>
-                  )}
-                </div>
-                <textarea
-                  value={instrDraft}
-                  spellCheck={false}
-                  onChange={e => setInstrDraft(e.target.value)}
-                  maxLength={2000}
-                  placeholder={'把长期要求写在这里，例如：\n· 只用中文回答\n· 这个对话只聊 Linux 内核\n· 每次先给结论再展开\n（留空保存 = 清除）'}
-                  className="flex-1 min-h-[320px] mx-4 px-3 py-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] text-[12.5px] leading-relaxed text-[var(--text-primary)] outline-none focus:border-[var(--accent)] font-[var(--font-mono,var(--font-family))] resize-none"
-                  onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void saveInstr() } }}
-                />
-                <div className="shrink-0 flex items-center gap-2 px-4 py-3">
-                  {instrRel && (
-                    <button onClick={() => { setInstrOpen(false); void openArtFile(instrRel) }} data-tip="在工件栏阅读视图中打开本文件" aria-label="在工件栏阅读视图中打开本文件"
-                      className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors truncate max-w-[220px]" >📖 在阅读视图中打开 →</button>
-                  )}
-                  {instrRel && <span className="truncate text-[10px] text-[var(--text-muted)] flex-1 min-w-0" data-tip={instrRel} aria-label={instrRel}>{instrRel}</span>}
-                  {!instrRel && <span className="flex-1" />}
-                  {activeInstr && (
-                    <button onClick={() => { setInstrDraft(''); void saveInstr() }}
-                      className="text-[11.5px] px-2.5 py-1 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-red-400 hover:border-red-400/50 transition-colors">清除</button>
-                  )}
-                  <button onClick={() => { void saveInstr() }}
-                    className="rounded-md bg-[var(--accent)] px-3.5 py-1.5 text-[12.5px] text-white hover:opacity-90 transition-opacity">保存（Ctrl+Enter）</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* UI 优化条目9①：顶栏用量 chip 退役——用量指示迁入输入区（与模型·思考同簇，见下方输入栏）；
-              顶栏就此收敛为 工作区 chip + 页签 + 画像 + 会话要求 */}
-
-          {/* P3b（§3.8-2/连锁）：顶栏「文档地图」退役——产物导航由逐条「整理成文档」+ P4 左栏资源管理器承接；
-              顶栏恒为：会话要求 + Token 仪表 +（P5 工作区 chip）。
-              原「禅模式」按钮已迁出：入口统一到命令面板「布局：禅模式」（全模块可用），本模块只消费档位 */}
         </div>
       </div>
 
@@ -3273,6 +3174,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   onSearch={setRailSearch}
                   hasOutline={!!courseState?.outline?.chapters.length}
                   readOnly={courseEnded}
+                  segmentEndable={!!activeSegment && activeId === activeSegmentSid && segmentStatus === 'open' && !courseEnded}
+                  endConfirmOpen={endConfirm === 'rail'}
+                  onEndRequest={() => setEndConfirm('rail')}
+                  onEndCancel={() => setEndConfirm(null)}
+                  onEndConfirm={() => { setEndConfirm(null); void courseEndSegment() }}
                 />
               </div>
             </div>
@@ -3290,13 +3196,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <Paperclip size={12} />
               </button>
               {/* v3.2.0 条目 ④：与编辑器侧同语义的手动刷新（口径 b 全量：树重扫 + 知识索引/图谱失效
-                 + 归档清单 prune）。右栏退役后 SOURCE.md / 约束 / 打开中的工件由 syncSessionFiles 一并回读 */}
+                 + 归档清单 prune）。打开中的工件页签由 syncSessionFiles 一并回读 */}
               <button
                 onClick={() => {
                   if (treeRefreshing) return
                   setTreeRefreshing(true)
                   setTreeRefreshSeq(n => n + 1)
-                  syncSessionFiles({ constraints: true })
+                  syncSessionFiles({})
                   void workspaceRefreshVault()
                     .then(r => { if (r.error) showToast({ type: 'error', message: r.error }) })
                     .catch(() => {})
@@ -3377,39 +3283,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             />
           ) : (
             <>
-              {/* 段 / 复习顶部上下文条 */}
-              {activeSegment && activeId === activeSegmentSid && (
-                <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
-                  <span className="shrink-0 text-[11px] font-medium text-[var(--text-primary)]">{activeChapterObj?.name ?? '本段'}</span>
-                  <span className="shrink-0 text-[10px] text-[var(--text-muted)]">第{activeSegment.order}段</span>
-                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" data-tip={activeSegmentUnitNames.join('、')} aria-label={activeSegmentUnitNames.join('、')}>本段 {activeSegmentUnitNames.length} 个知识点 · 当前：{activeSegmentUnitName}</span>
-                  {segmentStatus === 'ended' && <span className="shrink-0 rounded-full border border-[var(--border-color)] px-1.5 py-0.5 text-[9.5px] text-[var(--text-muted)]">已收尾</span>}
-                  <div className="shrink-0 flex items-center gap-1">
-                    {segmentStatus === 'open' && !courseEnded && (
-                      <button onClick={() => void courseEndSegment()} disabled={pending}
-                        className="rounded-md border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-40">收尾本段</button>
-                    )}
-                    <button onClick={() => openRequirements('segment')} data-tip="本段要求（CONSTRAINTS.md）" aria-label="本段要求（CONSTRAINTS.md）"
-                      className="rounded-md px-1.5 py-0.5 text-[10.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">要求</button>
-                    <button ref={progressAnchorRef} onClick={() => setProgressOpen(v => !v)} data-tip="课程进度：章 / 段 / 复习" aria-label="课程进度：章 / 段 / 复习" aria-expanded={progressOpen}
-                      className={`rounded-md px-1.5 py-0.5 text-[10.5px] transition-colors ${progressOpen ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>进度</button>
-                    <AnchoredLayer anchorRef={progressAnchorRef} open={progressOpen} onClose={() => setProgressOpen(false)} align="end" maxWidth={420}>
-                      <div className="max-h-[min(60vh,520px)] w-[360px] overflow-y-auto">
-                        <CourseProgress
-                          outline={courseState?.outline ?? null}
-                          progress={courseState?.progress ?? {}}
-                          lessons={courseState?.lessons ?? {}}
-                          reviews={courseState?.reviews ?? {}}
-                          activeSegmentSid={activeSegmentSid}
-                          onOpenSegment={(sid) => { setProgressOpen(false); void openSegmentBySid(sid) }}
-                          onOpenReview={(chapterId) => { setProgressOpen(false); void courseOpenChapterReview(chapterId) }}
-                          readOnly={courseEnded}
-                        />
-                      </div>
-                    </AnchoredLayer>
-                  </div>
-                </div>
-              )}
+              {/* 段上下文条（章名 · 第N段 · N 个知识点 · 收尾 · 要求 · 进度）已于 2026-11-22 整块退役：
+                  收尾 → 左栏当前段行 ✓ + 对话流末尾卡；要求 → 输入区「要求」pill；进度 → 左栏课程树本身。
+                  段标题信息仍在中栏空态标题与左栏段行（「第N段 · N 个」）里，没有丢独有信息。 */}
               {courseReviewChapter && activeId && courseState?.reviews[courseReviewChapter]?.sessionId === activeId && (
                 <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
                   <span className="shrink-0 text-[11px] font-medium text-[var(--text-primary)]">章末复习 · {courseReviewChapterName}</span>
@@ -3422,17 +3298,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <button onClick={courseWriteReview} disabled={pending}
                         className="rounded-md bg-[var(--accent)] px-2 py-0.5 text-[10.5px] text-white disabled:opacity-40">生成复习讲义</button>
                     ) : null}
-                    <button onClick={() => openRequirements('workspace')} data-tip="本课程要求（CONSTRAINTS.md）" aria-label="本课程要求（CONSTRAINTS.md）"
-                      className="rounded-md px-1.5 py-0.5 text-[10.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">要求</button>
                   </div>
-                </div>
-              )}
-              {activeInstr && !instrDismiss && (
-                <div className="shrink-0 flex items-center gap-2 mx-4 mt-2 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)]">
-                  <PenLine size={11} className="shrink-0 text-[var(--accent)]" />
-                  <span className="flex-1 min-w-0 truncate" data-tip={activeInstr} aria-label={activeInstr}><b className="font-medium text-[var(--text-primary)]">本会话要求：</b>{activeInstr}</span>
-                  <button onClick={() => { setInstrOpen(true); setInstrDraft(activeInstr) }} className="shrink-0 text-[var(--accent)] hover:underline">编辑</button>
-                  <button onClick={() => setInstrDismiss(true)} data-tip="隐藏（不删除）" aria-label="隐藏（不删除）" className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"><X size={11} /></button>
                 </div>
               )}
               <div className="relative flex-1 min-h-0">
@@ -3576,6 +3442,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             </div>
                           </div>
                         )}
+                        {/* AI 结课建议（2026-11-22）：```endcourse 围栏 → **产生它的那条回复里**一张行内卡
+                            （照抄 ```outline 的「围栏 → 消息内卡 → 按钮直接调 UI 动作」模式，不新增 AI 工具、不改 IPC）。
+                            守卫：无工作区 / '__none__' 不渲染；已结课不渲染（流末尾「本课已结课」卡接管回看）。
+                            `endCourseFence` 是全局唯一结果 → 全对话至多一张卡。 */}
+                        {endCourseFence?.idx === idx && activeWs && activeWs !== '__none__' && !courseEnded && (
+                          <div className="mt-2 w-full max-w-[820px] mx-auto px-3">
+                            <div className="kb-pop flex items-center gap-2 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
+                              <ScrollText size={12} className="shrink-0 text-[var(--accent)]" />
+                              <span className="min-w-0 flex-1 text-[11.5px] text-[var(--text-secondary)]">
+                                课程主体已学完。结课后课程只读，资料可在流程里沉淀到笔记区。
+                              </span>
+                              <button type="button" onClick={() => startEndFlow(activeWs, 1)}
+                                className="shrink-0 rounded-md bg-[var(--accent)] px-3 py-1 text-[11.5px] text-white transition-opacity hover:opacity-90">
+                                开始结课流程<ArrowRight size={11} className="ml-0.5 inline" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
                           {/* A 方案：只有挂着 resumeInfo 的那条中断卡才有「继续」——与通用助手的按钮同源 */}
@@ -3680,6 +3564,63 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     <ImageCard pending={liveImagePending} onStop={abortActive} />
                   </div>
                 )}
+
+                {/* 流末尾收尾 / 结课卡（2026-11-22 A 线，PLAN §3 / §6.4）。三个状态互斥：
+                    · 段进行中（本段会话）→ 「本段学完了？」→ 原位两段式确认（取消 / 确认收尾）
+                    · 本段已收尾 → 一行「本段已收尾 · 交接.md」（点开交接文档）
+                    · 本课程已结课 → 「本课已结课」卡（结课报告 / 重新开课）—— 顶栏结课组退役后的落点
+                    复习课 / 自由对话 / 课程助手没有这张卡。不用模态（铁律 25）；进场走 .kb-item-in。 */}
+                {activeSegment && activeId === activeSegmentSid && !courseEnded && (messages.length > 0 || segmentStatus === 'ended') && (
+                  segmentStatus === 'ended' ? (
+                    <div className="kb-item-in flex items-center gap-1.5 pt-0.5 text-[10.5px] text-[var(--text-muted)] select-none">
+                      <Check size={11} className="shrink-0 text-[var(--success)]" />
+                      <span className="shrink-0">本段已收尾 ·</span>
+                      {activeSegment.handoffRel ? (
+                        <button type="button" onClick={() => { const rel = activeSegment.handoffRel; if (rel) void openArtFile(rel) }}
+                          data-tip={activeSegment.handoffRel} aria-label={`打开 ${activeSegment.handoffRel}`}
+                          className="min-w-0 truncate text-[var(--accent)] transition-colors hover:underline">交接.md</button>
+                      ) : (
+                        <span className="shrink-0 text-[var(--text-disabled)]">交接生成中…</span>
+                      )}
+                    </div>
+                  ) : endConfirm === 'card' ? (
+                    <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--accent)]/45 bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11.5px] text-[var(--text-primary)]">确认收尾本段？</div>
+                        <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">本段将冻结为只读，知识点标记为已学，并生成《交接.md》给同章下一段。</div>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        <button type="button" onClick={() => setEndConfirm(null)}
+                          className="h-6 shrink-0 rounded-[5px] border border-[var(--border-color)] px-2.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--text-muted)] hover:text-[var(--text-primary)]">取消</button>
+                        <button type="button" onClick={() => { setEndConfirm(null); void courseEndSegment() }}
+                          className="h-6 shrink-0 rounded-[5px] border border-[var(--accent)] bg-[var(--accent)] px-2.5 text-[10.5px] text-white transition-opacity hover:opacity-90">确认收尾</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11.5px] text-[var(--text-primary)]">本段学完了？</div>
+                        <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">收尾后本段冻结为只读，并生成《交接.md》交给同章下一段。</div>
+                      </div>
+                      <button type="button" onClick={() => setEndConfirm('card')}
+                        className="h-6 shrink-0 rounded-[5px] border border-[var(--accent)] bg-[var(--accent)] px-2.5 text-[10.5px] text-white transition-opacity hover:opacity-90">收尾本段</button>
+                    </div>
+                  )
+                )}
+                {courseEnded && activeWs && activeWs !== '__none__' && (
+                  <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11.5px] text-[var(--text-primary)]">本课已结课</div>
+                      <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">结课报告与全部段落交接都已归档，课程保持只读。</div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-1.5">
+                      <button type="button" onClick={() => setEndReportWs(activeWs)}
+                        className="h-6 shrink-0 rounded-[5px] border border-[var(--border-color)] px-2.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--text-muted)] hover:text-[var(--text-primary)]">结课报告</button>
+                      <button type="button" onClick={() => void reopenCourse(activeWs)}
+                        className="h-6 shrink-0 rounded-[5px] border border-[var(--border-color)] px-2.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--text-muted)] hover:text-[var(--text-primary)]">重新开课</button>
+                    </div>
+                  </div>
+                )}
                 </div>
                 {/* 右缘轮次导航（2026-11-21 重做）：收起态=一列短横，展开态=贴右缘的浮动轮次卡片。
                     刻度单位=用户提问（每一轮一条）；2 轮起才显示（1 轮没有导航价值）。
@@ -3736,7 +3677,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <>
                         {/* 上层只做追加 —— 非 add 条目在此层级置灰，并就地说明原因（铁律 12：说明只收不删） */}
                         {profLayer !== 'session' && (
-                          <div className="mt-1 text-[10.5px] text-[var(--text-muted)]">上层画像只做追加 —— 「修改 / 删除」类条目在此层级不可用（确要改上层，走顶栏「画像」跳编辑区直接改）。</div>
+                          <div className="mt-1 text-[10.5px] text-[var(--text-muted)]">上层画像只做追加 —— 「修改 / 删除」类条目在此层级不可用（确要改上层，去编辑器的对应 PROFILE.md，或走工作区选择页的「学习者画像」入口）。</div>
                         )}
                         <div className="mt-1.5 space-y-1">
                           {profRows.map((r, i) => {
@@ -3836,7 +3777,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       {courseReviewChapter
                         ? '本章知识点都学完了。把复习讨论整理成《复习讲义》，或按你的要求逐块回顾。'
                         : activeSegment
-                          ? '本段只围绕左侧列出的知识点推进。讲完可点「收尾本段」，系统会生成交接给同章下一段。'
+                          ? '本段只围绕左侧列出的知识点推进。讲完点左栏段行的 ✓（或对话流末尾那张卡）收尾，系统会生成交接给同章下一段。'
                           : assistantSid && activeId === assistantSid
                             ? '把资料和目标交给课程助手：它负责登记素材、给出章→知识点大纲、按章分配素材；开讲由你点知识点开段。'
                             : '从左侧点一个知识点开段，或点「课程助手」建课 / 改大纲。'}
@@ -4156,9 +4097,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     {composerFooter}
                   </div>
                 )}
-                {/* 卡下控件托盘（2026-11-20 对齐原型 subdock）：
+                {/* 卡下控件托盘（2026-11-20 对齐原型 subdock；2026-11-22 改「乙」折叠形态）：
                     负 margin 叠进卡底、只动 transform/opacity；收起后高度不变（不推挤上方对话区），
-                    只在卡下缘留一条 4px 抓手。槽位只放**已有能力**：思考强度 / 引用 / 模型。 */}
+                    只在卡下缘留一条 4px 抓手。
+                    折叠形态**乙**（用户拍板）：两枚文字 pill「画像 / 要求」固定在折叠区外，
+                    折叠时仍可见可点；只有「思考 / 引用 / 模型」这一段收进抽屉。
+                    甲（折叠成两枚图标行）不采用 —— pill 是唯一的本会话文件入口，识别成本优先。 */}
                 {!askVisible && (
                   <div className="relative z-0 -mt-2.5">
                     <button
@@ -4170,27 +4114,40 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       className="absolute -top-[6px] left-1/2 -translate-x-1/2 z-[2] h-[4px] w-9 rounded-full bg-[var(--border-color)] hover:bg-[var(--text-disabled)] transition-colors"
                     />
                     <div
-                      className={`w-full h-[34px] flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] px-1.5 transition-[transform,opacity] duration-[380ms] ${trayOpen ? 'translate-y-0 opacity-100' : 'translate-y-[38px] opacity-0 pointer-events-none'}`}
-                      style={{ background: 'color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary))', transitionTimingFunction: 'cubic-bezier(.34,1.56,.64,1)' }}
+                      className="w-full h-[34px] flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] px-1.5"
+                      style={{ background: 'color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary))' }}
                     >
-                      <span className="shrink-0 pl-0.5 text-[10.5px] text-[var(--text-muted)]">思考</span>
-                      {(['off', 'low', 'medium', 'high'] as Effort[]).map((e) => (
-                        <button key={e} type="button" disabled={!modelCapable} onClick={() => pickEffort(e)}
-                          className={`h-[24px] px-2 rounded-full text-[11px] transition-colors disabled:opacity-35 ${convoEffort === e ? 'bg-[var(--bg-primary)] text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-                          {EFFORT_LABEL[e]}
-                        </button>
-                      ))}
+                      {docPills}
                       <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
-                      <button type="button" disabled={quotes.length === 0} onClick={() => setQuotesOpen(v => !v)}
-                        data-tip={quotes.length ? '查看/管理本轮引用' : '本轮还没有引用'}
-                        className="h-[24px] px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35 transition-colors">
-                        {quotes.length > 0 ? `引用 ${quotes.length}` : '引用'}
-                      </button>
-                      <span className="flex-1" />
-                      <button type="button" onClick={(e) => openModelMenu(e.currentTarget)} data-tip="切换本对话模型"
-                        className="h-[24px] max-w-[180px] truncate px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                        {effModel ? effModelBare : '默认模型'}
-                      </button>
+                      <div
+                        className={`flex min-w-0 flex-1 items-center gap-1.5 transition-[transform,opacity] duration-[380ms] motion-reduce:transition-none ${trayOpen ? 'translate-y-0 opacity-100' : 'translate-y-[12px] opacity-0 pointer-events-none'}`}
+                        style={{ transitionTimingFunction: 'cubic-bezier(.34,1.56,.64,1)' }}
+                      >
+                        {/* 段已收尾 / 课程已结课：只压暗并禁点（pill 仍可点，文件只读查看）；压暗挂内层，
+                            避免与上面折叠动画的 opacity-100/0 抢同一个属性 */}
+                        <div className={`flex min-w-0 flex-1 items-center gap-1.5 ${courseReadonly || courseEnded ? 'opacity-45 pointer-events-none select-none' : ''}`}>
+                          <span className="shrink-0 pl-0.5 text-[10.5px] text-[var(--text-muted)]">思考</span>
+                          {(['off', 'low', 'medium', 'high'] as Effort[]).map((e) => (
+                            <button key={e} type="button" disabled={!modelCapable} onClick={() => pickEffort(e)}
+                              aria-pressed={convoEffort === e}
+                              className={`h-[24px] px-2 rounded-full text-[11px] transition-colors disabled:opacity-35 ${convoEffort === e ? 'bg-[var(--bg-primary)] text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                              {EFFORT_LABEL[e]}
+                            </button>
+                          ))}
+                          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+                          <button type="button" disabled={quotes.length === 0} onClick={() => setQuotesOpen(v => !v)}
+                            aria-pressed={quotesOpen && quotes.length > 0}
+                            data-tip={quotes.length ? '查看/管理本轮引用' : '本轮还没有引用'}
+                            className="h-[24px] px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35 transition-colors">
+                            {quotes.length > 0 ? `引用 ${quotes.length}` : '引用'}
+                          </button>
+                          <span className="flex-1" />
+                          <button type="button" onClick={(e) => openModelMenu(e.currentTarget)} data-tip="切换本对话模型"
+                            className="h-[24px] max-w-[180px] truncate px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                            {effModel ? effModelBare : '默认模型'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -4741,18 +4698,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         </div>
       )}
       {endReportWs && <CourseEndReportDrawer wsId={endReportWs} onClose={() => setEndReportWs(null)} />}
-      {reqOpen && activeWs && activeWs !== '__none__' && (
-        <RequirementsDrawer
-          wsId={activeWs}
-          wsName={wsActive?.name ?? '课程'}
-          unitId={activeUnitId}
-          segmentSessionId={activeSegmentSid}
-          reloadKey={reqTick}
-          layer={reqLayer}
-          onLayer={setReqLayer}
-          onClose={() => setReqOpen(false)}
-        />
-      )}
     </div>
   )
 }

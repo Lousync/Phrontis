@@ -1487,6 +1487,8 @@ export interface ResumeInfo {
 /** 建支线结果（agent:createSideLane）：只装上下文不调 LLM */
 export interface AgentSideLaneCreateResult {
   ok: boolean
+  /** 新支线 id（与 laneSessionId 同值；契约别名，新调用方可用） */
+  id?: string
   laneSessionId?: string
   title?: string
   /** 就地装载并展示给用户核对的上下文快照 */
@@ -1510,6 +1512,8 @@ export interface AgentSideLaneInfo extends AgentSessionInfo {
   excerpt?: string
   /** 来源回答标题（分叉点主线回答首行，供列表展示与搜索） */
   anchorTitle?: string
+  /** 父会话标题（跨对话旁问列表用；父会话已删则缺省） */
+  parentTitle?: string
   /** 旁问作用域（C8/C11 已拍板）：整段对话 / 锚定某条回答 / 锚定选区。旧支线一律按 anchor 读 */
   sideScope?: 'conversation' | 'anchor' | 'selection'
   /** 锚定的是主线第几条 AI 回答（从 1 起）；sideScope='conversation' 时缺省 */
@@ -3357,9 +3361,16 @@ export interface ElectronAPI {
   agentDeleteSession: (id: string) => Promise<boolean>
   agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>
   // ===== v3.1.2 条目11：支线旁问（createSideLane 只装上下文、不调 LLM）=====
-  agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) => Promise<AgentSideLaneCreateResult>
+  agentCreateSideLane: {
+    /** 新形态：父会话 + 分叉消息（null/空 = 整段对话），可选作用域与标题 */
+    (parentSessionId: string, branchFromMessageId?: string | null, sideScope?: 'conversation' | 'anchor' | 'selection', title?: string): Promise<AgentSideLaneCreateResult>
+    /** 旧形态（存量调用点，行为不变） */
+    (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }): Promise<AgentSideLaneCreateResult>
+  }
   /** 列某主线下的支线（含已升格）；带派生字段（unread/laneStatus/excerpt） */
   agentListSideLanes: (parentSessionId: string) => Promise<AgentSideLaneInfo[]>
+  /** 跨对话旁问列表：只取 lane='side' && source='aiTeaching'，updatedAt 倒序，带 parentTitle */
+  agentListAllSideLanes: () => Promise<AgentSideLaneInfo[]>
   /** 升格支线为正式会话（单向） */
   agentPromoteSideLane: (laneSessionId: string) => Promise<boolean>
   /** 打开支线详情即已读（写 lane_seen_at） */
@@ -3369,11 +3380,13 @@ export interface ElectronAPI {
   aiTeachSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachRenameSessionFolder: (id: string, title: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachDeleteSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
-  aiTeachReadConstraints: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; error?: string }>
+  aiTeachReadConstraints: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; mtimeMs?: number; error?: string }>
   aiTeachGlobalEnsureConstraints: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; created?: boolean; error?: string }>
   /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）——ensure 落骨架并返回 relPath 跳编辑区；本工作区会话每轮注入 */
   aiTeachWorkspaceEnsureConstraints: (wsId: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; created?: boolean; error?: string }>
-  aiTeachWriteConstraints: (id: string, text: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; error?: string }>
+  aiTeachWriteConstraints: (id: string, text: string, opts?: { expectedMtimeMs?: number }) => Promise<{ ok: boolean; text?: string; relPath?: string | null; mtimeMs?: number; conflict?: boolean; diskText?: string; error?: string }>
+  /** 懒建会话 CONSTRAINTS.md（目录 + 空文件）；已存在只读返回（created=false） */
+  aiTeachEnsureConstraints: (id: string) => Promise<{ ok: boolean; relPath?: string | null; created?: boolean; error?: string }>
   // N-5/N-7：助手独立要求 + 术语表（.assistant/）——ensure 落文件并返回仓库相对路径；写入走编辑器 ws:writeFile
   assistantConstraintsEnsureGlobal: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   assistantConstraintsEnsureSession: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
@@ -3482,8 +3495,8 @@ export interface ElectronAPI {
   aiTeachFavRemove: (wsId: string, rel: string) => Promise<AiTeachFavorite[]>
   aiTeachProfileReadGlobal: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
   aiTeachProfileWriteGlobal: (text: string) => Promise<{ ok: boolean; error?: string }>
-  aiTeachProfileReadSession: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
-  aiTeachProfileWriteSession: (id: string, text: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
+  aiTeachProfileReadSession: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; mtimeMs?: number; skeleton?: string; error?: string }>
+  aiTeachProfileWriteSession: (id: string, text: string, opts?: { expectedMtimeMs?: number }) => Promise<{ ok: boolean; text?: string; relPath?: string | null; mtimeMs?: number; conflict?: boolean; diskText?: string; error?: string }>
   aiTeachProfileReadWorkspace: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
   aiTeachProfileWriteWorkspace: (id: string, text: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachProfileEnsureGlobal: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>

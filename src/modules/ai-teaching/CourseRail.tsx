@@ -25,6 +25,17 @@ interface Props {
   hasOutline: boolean
   /** 已结课：未学知识点不可点、复习只能看历史讲义、段只读打开 */
   readOnly?: boolean
+  /**
+   * 「收尾本段」入口（2026-11-22）：仅当前打开的**进行中**段为 true ——
+   * 段行右侧出现 18×18 的 ✓；点它不直接冻结，而是在段行下方原位展开两段式确认条
+   * （状态归 index.tsx：Esc 取消与流末尾卡共用同一个 endConfirm，避免两处各存一份）。
+   */
+  segmentEndable?: boolean
+  /** 段行下方的确认条是否展开（由父层 endConfirm === 'rail' 决定） */
+  endConfirmOpen?: boolean
+  onEndRequest?: () => void
+  onEndCancel?: () => void
+  onEndConfirm?: () => void
 }
 
 export function CourseRail(props: Props) {
@@ -32,6 +43,7 @@ export function CourseRail(props: Props) {
     chapters, activeChapterId, collapsed, onToggleChapter, onActivateChapter,
     onUnit, onReview, onSegment, activeSegmentId,
     assistantActive, onAssistant, search, onSearch, hasOutline, readOnly = false,
+    segmentEndable = false, endConfirmOpen = false, onEndRequest, onEndCancel, onEndConfirm,
   } = props
   const [segOverride, setSegOverride] = useState<Record<string, boolean>>({})
   const searching = !!search.trim()
@@ -138,6 +150,8 @@ export function CourseRail(props: Props) {
                     {buildRailRows(ch.units).map((row) => {
                       if (row.kind === 'unit') return renderUnitButton(ch, row.unit)
                       const open = isSegmentOpen(row)
+                      /** 当前正在看的那一段且还在进行中：段行右侧才有收尾 ✓（复习行一律没有） */
+                      const endable = segmentEndable && row.sessionId === activeSegmentId && row.status === 'open'
                       return (
                         <div key={`seg:${row.sessionId}:${row.status}`} className="mb-0.5">
                           <div className={`flex items-center gap-0.5 pl-2 pr-1 rounded-md ${row.sessionId === activeSegmentId ? 'bg-[var(--bg-selected)] shadow-[inset_2px_0_0_var(--accent)]' : ''}`}>
@@ -167,7 +181,29 @@ export function CourseRail(props: Props) {
                               </span>
                               <span className="ml-auto shrink-0 text-[9px] text-[var(--text-muted)]">{row.units.length} 个</span>
                             </button>
+                            {/* 收尾入口：18×18 命中区，点它只进入确认态（不直接冻结） */}
+                            {endable && (
+                              <button
+                                type="button"
+                                onClick={() => onEndRequest?.()}
+                                aria-expanded={endConfirmOpen}
+                                data-tip="收尾本段（冻结并生成交接）" aria-label="收尾本段（冻结并生成交接）"
+                                className="shrink-0 w-[18px] h-[18px] inline-flex items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors"
+                              >
+                                <Check size={12} />
+                              </button>
+                            )}
                           </div>
+                          {/* 行内两段式确认：原位插在段行下方，不用模态（铁律 25） */}
+                          {endable && endConfirmOpen && (
+                            <div className="kb-item-in ml-5 mb-0.5 flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                              <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]">收尾后只读</span>
+                              <button type="button" onClick={() => onEndCancel?.()}
+                                className="shrink-0 rounded border border-[var(--border-color)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] transition-colors hover:border-[var(--text-muted)] hover:text-[var(--text-primary)]">取消</button>
+                              <button type="button" onClick={() => onEndConfirm?.()}
+                                className="shrink-0 rounded border border-[var(--accent)] bg-[var(--accent)] px-1.5 py-0.5 text-[10px] text-white transition-opacity hover:opacity-90">收尾</button>
+                            </div>
+                          )}
                           <div className={`kb-collapse ${open ? 'open' : ''}`}>
                             <div className="min-h-0">
                               <div className="ml-4 border-l border-[var(--border-color)] pl-0.5">

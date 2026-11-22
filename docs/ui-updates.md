@@ -2998,3 +2998,24 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **新增文件**：`src/modules/ai-teaching/TurnRail.tsx`（导航本体）、`src/modules/ai-teaching/turnRailPure.ts`（轮次抽取 / 采样 / 当前轮判定）、`.AGENT/scripts/ai-teaching/verify-turn-rail.mjs`（契约）。
 
 **验收**：双端 `tsc --noEmit` 0 错；`npm run build` 通过；`verify-turn-rail.mjs` 全 PASS。
+
+## 2026-11-22 · AI 教学 · 顶栏单图标 + 输入区工具条（乙折叠）+ 收尾/结课入口换位
+
+**现状 / 用户反馈**：AI 教学顶栏右侧堆了结课组、画像、工件、会话要求、进度，中栏额头又压着一条「段上下文条」（章名 · 第N段 · 知识点 · 已收尾 · 收尾 · 要求 · 进度），再下面还有一条「本会话要求」行内条 —— 三层同一批入口互相重复，中栏头部占掉半屏；「收尾本段」是一键冻结，点错不可逆；结课只能去选择页找入口。
+
+**根因**：入口按模块演进史一层层叠上去的（画像 chip、要求弹层、进度浮层、结课组各来自不同批次），没有一次统一的「谁该待在哪」的收敛；且模块内长期缺少与对话流同源的段/课级收尾落点。
+
+**改动点**（方案 `tmp/ai-teach-toolbar/PLAN.md`；原型 `tmp/ai-teach-toolbar/index.html`）：
+- **顶栏**：右侧只留一枚「打开右侧栏」图标（内联 SVG 18×14 / 外框 16×12 / rx 4 / 分隔线 x=10.9 / 描边 1.8；命中区 `p-1`；右栏打开时不渲染）。结课组 / 画像 / 工件分栏 chip / 会话要求 / 进度 / 收尾全部退出顶栏。
+- **输入区工具条（折叠形态乙）**：最左常驻两枚文字 pill「画像 / 要求」，其后 `│ 思考 四档 │ 引用 …… 模型`；折叠只收「思考 / 引用 / 模型」，两枚 pill 仍可见可点。沿用既有 `trayOpen` / `aiTeach.composerTray`，只动 transform + opacity（`translate-y-[12px]` + 淡出，380ms spring 曲线，`motion-reduce:transition-none`）。图片待确认圆点从旧顶栏「画像」迁到画像 pill。
+- **画像 / 要求 pill 只做本会话一层**：`aiTeachProfileEnsureSession` / 冻结接口 `aiTeachEnsureConstraints` → `requestViewer({ tab: 'notes', relPath })` 在右栏笔记页签就地编辑；没有层选择 UI（本课程 / 全局层由 AI 教学助手代改，人眼确认走编辑器或选择页）。会话夹未建立时 Toast「先发一条消息…」，不建空页签。
+- **收尾本段迁左栏 + 流末尾**：左栏当前进行中段行右侧 18×18 `✓`（点它**只进确认态**）→ 段行下方原位展开「收尾后只读 · 取消 / 收尾」；对话流末尾「本段学完了？」卡 → 原位换成「确认收尾本段？」。两处共用同一个 `endConfirm`，Esc 取消；已收尾后流末尾换成「本段已收尾 · 交接.md」。
+- **进度浮层退役**：顶栏「进度」按钮与 `CourseProgress` 锚定浮层删除（左栏课程树即进度）；`CourseProgress.tsx` 只保留给结课报告用。
+- **AI 结课卡**：正文剥离正则加 `endcourse`；新增 `endCourseFence` memo（倒序扫全部 assistant，取最后一条带围栏的回复），在**产生它的那条回复**里渲染行内卡「开始结课流程 →」→ `startEndFlow(activeWs, 1)`；守卫有工作区 + 未结课，全对话只渲染一张。流末尾新增「本课已结课」卡（结课报告 / 重新开课），承接退役的顶栏结课组。
+- **删除**：段上下文条整块、章末复习条里的「要求」、本会话要求行内条、560px「本会话约束」模态、`RequirementsDrawer` 挂载与 `reqOpen / reqLayer`、`AnchoredLayer` 进度浮层、`loadConstraints` / 保存约束的旧通道（约束正文不再由本模块持有副本）。
+
+**刻意不动**：章末复习条（只删「要求」）、工具条折叠机制本身、工件分栏（改由折叠贴边条点开）、选择页的画像 / 要求 / 结课入口、`RequirementsDrawer.tsx` 与 `CourseProgress.tsx` 文件本身（移出本模块使用）。
+
+**新增文件**：`.AGENT/scripts/ai-teaching/verify-teach-toolbar-ui.mjs`（69 条结构断言：顶栏单图标 / pill 折叠后可达 / 段条与行内要求条零残留 / endcourse 单卡）。
+
+**验收**：`tsc --noEmit -p tsconfig.web.json` 0 错；`verify-teach-toolbar-ui.mjs` 69 PASS / 0 FAIL。

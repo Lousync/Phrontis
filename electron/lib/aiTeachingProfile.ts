@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { app, ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcastTreeRefresh, rootDirName, ensureSessionFolder } from './aiTeachingFolders'
+import { detectConflict } from './workspaceManager'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { assertWorkspaceEditable, assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import { getSessionUnitFolderRels } from './aiTeachingCourse'
@@ -131,7 +132,9 @@ export const WORKSPACE_PROFILE_SKELETON = [
   '',
 ].join('\n')
 
-export interface ProfileResult { ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }
+export interface ProfileResult { ok: boolean; text?: string; relPath?: string | null; mtimeMs?: number; skeleton?: string; error?: string }
+/** 写结果：`conflict` 为 true 时**未写盘**，`diskText` / `mtimeMs` 是磁盘现状（交渲染层三选） */
+export interface ProfileWriteResult extends ProfileResult { conflict?: boolean; diskText?: string }
 export interface ProfileEnsureResult { ok: boolean; relPath?: string; created?: boolean; error?: string }
 
 /** 全局画像读取（仓库内 {aiTeachRootDir}/PROFILE.md；不存在=返回空文本；首次触发 userData 旧文件迁移） */
@@ -248,23 +251,50 @@ export function readSessionProfile(sessionId: string, getSetting: (key: string) 
     const dir = thirdProfileDir(sessionId, getSetting)
     if (!dir) return { ok: false, error: '会话/知识点文件夹不可用' }
     const p = join(dir.abs, PROFILE_FILE)
-    return { ok: true, text: existsSync(p) ? readFileSync(p, 'utf-8') : '', relPath: `${dir.rel}/${PROFILE_FILE}`, skeleton: SESSION_PROFILE_SKELETON }
+    const relPath = `${dir.rel}/${PROFILE_FILE}`
+    if (!existsSync(p)) return { ok: true, text: '', relPath, skeleton: SESSION_PROFILE_SKELETON }
+    const text = readFileSync(p, 'utf-8')
+    return { ok: true, text, relPath, mtimeMs: statSync(p).mtimeMs, skeleton: SESSION_PROFILE_SKELETON }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
 }
 
-export function writeSessionProfile(sessionId: string, text: string, getSetting: (key: string) => unknown): ProfileResult {
+/**
+ * 写会话画像。固定顺序（契约脚本 verify-doc-ipc 锁定）：
+ * 结课守卫 → detectConflict → 写盘 → statSync → broadcastTreeRefresh。
+ * `opts.expectedMtimeMs` **不传 = 旧行为**（`applyProfilePatch` 等老调用无条件覆盖）。
+ */
+export function writeSessionProfile(
+  sessionId: string,
+  text: string,
+  getSetting: (key: string) => unknown,
+  opts?: { expectedMtimeMs?: number },
+): ProfileWriteResult {
   try {
+    // ① 结课守卫
     assertCourseEditableBySession(sessionId)
+    // ② 目标路径（thirdProfileDir 内会懒建会话文件夹）
     const dir = thirdProfileDir(sessionId, getSetting)
     if (!dir) return { ok: false, error: '会话/知识点文件夹不可用' }
+    const abs = join(dir.abs, PROFILE_FILE)
+    const relPath = `${dir.rel}/${PROFILE_FILE}`
+    // ③ 冲突检测（未传基线 = 放行）
+    const chk = detectConflict(abs, opts?.expectedMtimeMs)
+    if (chk.conflict) {
+      let diskText = ''
+      try { diskText = existsSync(abs) ? readFileSync(abs, 'utf-8') : '' } catch { /* 读不出按空串 */ }
+      return { ok: false, relPath, conflict: true, diskText, mtimeMs: chk.diskMtimeMs }
+    }
+    // ④ 写盘
     mkdirSync(dir.abs, { recursive: true })
     const body = String(text ?? '').replace(/\r\n/g, '\n')
-    writeFileSync(join(dir.abs, PROFILE_FILE), body, 'utf-8')
-    // 画像文件即时可见：广播树刷新（与 CONSTRAINTS/SOURCE 同通道语义）
+    writeFileSync(abs, body, 'utf-8')
+    // ⑤ 回写 mtime（下一次写的基线）
+    const mtimeMs = statSync(abs).mtimeMs
+    // ⑥ 画像文件即时可见：广播树刷新（与 CONSTRAINTS/SOURCE 同通道语义）
     broadcastTreeRefresh(dir.rel)
-    return { ok: true, text: body, relPath: `${dir.rel}/${PROFILE_FILE}` }
+    return { ok: true, text: body, relPath, mtimeMs }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -370,7 +400,8 @@ export function registerAiTeachingProfileHandlers(getSetting: (key: string) => u
   ipcMain.handle('aiTeachProfile:readGlobal', () => readGlobalProfile(getSetting))
   ipcMain.handle('aiTeachProfile:writeGlobal', (_e, text: string) => writeGlobalProfile(String(text ?? ''), getSetting))
   ipcMain.handle('aiTeachProfile:readSession', (_e, sessionId: string) => readSessionProfile(String(sessionId ?? ''), getSetting))
-  ipcMain.handle('aiTeachProfile:writeSession', (_e, sessionId: string, text: string) => writeSessionProfile(String(sessionId ?? ''), String(text ?? ''), getSetting))
+  ipcMain.handle('aiTeachProfile:writeSession', (_e, sessionId: string, text: string, opts?: { expectedMtimeMs?: number }) =>
+    writeSessionProfile(String(sessionId ?? ''), String(text ?? ''), getSetting, opts))
   ipcMain.handle('aiTeachProfile:readWorkspace', (_e, wsId: string) => readWorkspaceProfile(String(wsId ?? ''), getSetting))
   ipcMain.handle('aiTeachProfile:writeWorkspace', (_e, wsId: string, text: string) => writeWorkspaceProfile(String(wsId ?? ''), String(text ?? ''), getSetting))
   ipcMain.handle('aiTeachProfile:ensureGlobal', () => ensureGlobalProfile(getSetting))

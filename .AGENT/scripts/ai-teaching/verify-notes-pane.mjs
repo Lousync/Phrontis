@@ -10,10 +10,14 @@
  *   1. pure functions in src/modules/ai-teaching/right-viewer/notesPanePure.ts
  *      (type-stripped and imported for real);
  *   2. static source contracts in NotesPane.tsx (mtime baseline / lazy editor /
- *      dirty reporting / no alert or confirm).
+ *      dirty reporting / no alert or confirm) + noteFileOps.ts (the one place that
+ *      derives the new note name and creates the file).
  *
  * Run: node .AGENT/scripts/ai-teaching/verify-notes-pane.mjs
  * Output is pure ASCII. Last line: `PASS -- N/N assertions passed` (exit 1 on failure).
+ *
+ * 2026-11-22 随动态多页签改造更新：一个笔记页签 = 一个文件，命名 / 落点逻辑移到
+ * noteFileOps.ts（壳与 NotesPane 共用），断言跟着新落点走。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -25,6 +29,7 @@ import { stripComments } from '../shared/strip-comments.mjs'
 const ROOT = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)))
 const PURE_REL = 'src/modules/ai-teaching/right-viewer/notesPanePure.ts'
 const PANE_REL = 'src/modules/ai-teaching/right-viewer/NotesPane.tsx'
+const OPS_REL = 'src/modules/ai-teaching/right-viewer/noteFileOps.ts'
 
 const checks = []
 const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
@@ -129,6 +134,7 @@ check('plain failure -> error', failed.state === 'error' && failed.mtimeMs === 1
 /* ---------------------------------------------------------------- 8. NotesPane source contracts */
 console.log('\n=== 8. NotesPane.tsx static contracts ===')
 const pane = stripComments(fs.readFileSync(path.join(ROOT, PANE_REL), 'utf8').replace(/\r\n/g, '\n'))
+const ops = stripComments(fs.readFileSync(path.join(ROOT, OPS_REL), 'utf8').replace(/\r\n/g, '\n'))
 check('writes with a 4th mtime baseline (expectedMtimeMs)', /workspaceWriteFile\([\s\S]{0,160}?expectedMtimeMs\)/.test(pane))
 check('conflict path re-reads disk and refreshes baseline', /merged\.state === 'conflict'/.test(pane) && /const disk = await workspaceReadFile/.test(pane))
 check('editor is lazy-loaded', /lazy\(\s*\(\)\s*=>/.test(pane) && /<Suspense/.test(pane))
@@ -138,7 +144,12 @@ check('no confirm() in pane', !/\bconfirm\s*\(/.test(pane))
 check('rescans on knowledge data change', /useDataChanged\('knowledge'/.test(pane))
 check('writing mode comes from the editorWritingMode setting', /getSetting\('editorWritingMode'\)/.test(pane))
 check('session folder resolved via aiTeachSessionFolder', /aiTeachSessionFolder\(/.test(pane))
-check('new note name derived through uniqueNotePath', /uniqueNotePath\(/.test(pane) && /产物/.test(pane))
+check('new note name derived through uniqueNotePath (noteFileOps.createSessionNote)',
+  /export async function createSessionNote\(/.test(ops)
+  && /uniqueNotePath\(/.test(ops)
+  && /NOTE_OUT_DIR = '\u4ea7\u7269'/.test(ops)
+  && /import \{ createSessionNote \} from '\.\/noteFileOps'/.test(pane)
+  && /createSessionNote\(rootId, sessionId\)/.test(pane))
 check('list capped by NOTE_LIMIT = 12', /const NOTE_LIMIT = 12/.test(pane) && /pickNoteFiles\(/.test(pane))
 check('save debounce is 1000ms', /const SAVE_DEBOUNCE_MS = 1000/.test(pane))
 check('request opens paths outside the list', /request\?\.relPath/.test(pane) && /isNoteFile\(rel\)/.test(pane))

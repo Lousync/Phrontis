@@ -34,3 +34,24 @@ export function deriveLaneStatus(
   if (lastRole === 'assistant') return 'done'
   return 'run'
 }
+
+/** 跨对话旁问列表的行形状（只需筛选 / 排序用到的字段） */
+export interface SideLaneListableRow {
+  lane?: 'main' | 'side'
+  source?: string
+  updated_at: string
+}
+
+/**
+ * 跨对话旁问列表的筛选 + 排序（右栏「旁问」历史页签，2026-11-22 契约）：
+ * - **只留未升格的教学支线**：`lane === 'side'` && `source === 'aiTeaching'`
+ *   （已升格为 `main` 的是正式会话，不属于旁问历史；非教学来源的支线不混进来）；
+ * - **`updated_at` 倒序**：时间串同格式可直接字典序比较；同一时刻由稳定排序保持传入顺序。
+ *
+ * 纯函数、零依赖：主进程落库查询与契约脚本共用同一份口径。
+ */
+export function selectAllSideLanes<T extends SideLaneListableRow>(rows: T[]): T[] {
+  return rows
+    .filter((r) => r.lane === 'side' && r.source === 'aiTeaching')
+    .sort((a, b) => (a.updated_at === b.updated_at ? 0 : a.updated_at < b.updated_at ? 1 : -1))
+}

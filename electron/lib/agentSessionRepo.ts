@@ -6,6 +6,7 @@ import { globalDataDir } from 'phrontis-core/globalJsonStore'
 import { writeAdoptNotice } from './agentAdoptNotice'
 import { adoptLegacyGlobalAgentStore, type AdoptResult } from './agentSessionMigrate'
 import { normalizeSessionFields } from './agentSessionNormalizePure'
+import { selectAllSideLanes } from './sideLaneMeta'
 // 类型专用导入（零运行时代价）：续跑现场的结构真源在 agentInterruptPure，仓库不另立一份
 import type { SessionResume } from './agentInterruptPure'
 import {
@@ -343,6 +344,15 @@ export function createSideLaneSession(opts: {
  */
 export function listSideLanes(parentSessionId: string): AgentSessionRow[] {
   return readSessions().filter((s) => s.parentSessionId === parentSessionId)
+}
+
+/**
+ * 跨对话的旁问列表（右栏「旁问」历史）：**只取未升格的教学支线**
+ * （`lane === 'side'` && `source === 'aiTeaching'`），按 `updated_at` 倒序。
+ * 筛选 / 排序口径在 `sideLaneMeta.selectAllSideLanes`（纯函数），主进程与契约脚本共用一份。
+ */
+export function listAllAiTeachingSideLanes(): AgentSessionRow[] {
+  return selectAllSideLanes(readSessions())
 }
 
 /**

@@ -1,21 +1,23 @@
 /**
- * 右侧查看器 · 笔记页签（D1：会话内速记，可编辑）。
+ * 右侧活动栏 · 笔记页签（D1：会话内速记 / 会话文件就地编辑）。
  *
- * 三个区域：32px 动作行 / 文件列表 / 编辑·预览。
- * 数据只有两处来源：会话文件夹本身与它下面的 `产物/`（F11 拍平后的产物落点）。
+ * 一个笔记页签 = 一个文件（壳按 relPath 去重，见 `viewerTabs.findNotesTab`）。
+ *   普通笔记       `fileKind='note'`        写盘 `workspaceWriteFile` + `expectedMtimeMs`
+ *   会话画像       `fileKind='profile'`     写盘 `aiTeachProfileWriteSession` + `expectedMtimeMs`
+ *   会话要求       `fileKind='constraints'` 写盘 `aiTeachWriteConstraints` + `expectedMtimeMs`
+ * 后两条**必须**走专用通道：结课后这两份文件只读（`assertCourseEditableBySession`），
+ * 裸用 `workspaceWriteFile` 会绕过产品规则、也不会 `broadcastTreeRefresh`。
  *
- * 保存口径照 `src/modules/knowledge/components/PageEditor.tsx`（:994-1069）抄，不自创：
- *   · 写盘走 `workspaceWriteFile(rootId, relPath, text, expectedMtimeMs)`，基线 = 打开时读到的 mtime；
- *   · 成功回填新 mtime 并标 `已保存 · HH:MM`，冲突走 Toast + 重读磁盘；
- *   · 与 PageEditor 唯一的差别：**冲突时保留用户输入**（本页签是速记面，输入不该被静默丢掉），
- *     重读只用来刷新基线，下一次保存才覆盖磁盘 —— Toast 里把这件事说清楚。
+ * 保存口径仍与 `PageEditor` 同一条（1s 防抖 + 打开时记 mtime 基线 + 冲突检测），
+ * 与它唯一的差别：**冲突时保留用户输入**，只把基线刷新成磁盘现状 —— 本页签是速记面，
+ * 输入不该被静默丢掉；是否覆盖磁盘由用户在行内条上选（保存态三态见 `saveStateLabel`）。
  *
- * 这一步是「编辑器 = 唯一正式正文写入方」的会话内例外（plan §12 D1）；正式改正文仍走
- * `onOpenInEditor` 跳知识库编辑器，本页签不替代它。
+ * 保活 / 关闭纪律：脏页签上报 `onDirtyChange`（壳据此不淘汰它）；关页签前壳会 await
+ * `registerFlush` 注册的 flush，冲突未决时 flush 返回 false，壳拦住关闭。
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Copy, ExternalLink, Eye, FileText, Pencil, Plus, Search, X } from 'lucide-react'
+import { ChevronDown, Copy, ExternalLink, Eye, FileText, List, Pencil, Plus, Search, User, X } from 'lucide-react'
 import type { NotesPaneProps } from './paneContracts'
 import {
   isNoteFile,
@@ -24,18 +26,19 @@ import {
   pickNoteFiles,
   relativeTime,
   saveStateLabel,
-  uniqueNotePath,
   type NoteFileRef,
   type NoteSaveState,
 } from './notesPanePure'
+import { createSessionNote } from './noteFileOps'
+import { noteTabTitle, baseName, type NotesFileKind } from './viewerTabs'
 import {
-  aiTeachEnsureSessionFolder,
+  aiTeachProfileWriteSession,
   aiTeachSessionFolder,
+  aiTeachWriteConstraints,
   getSetting,
   onAiTeachTreeRefresh,
   onWsExternalChange,
   workspaceListDir,
-  workspaceMkdir,
   workspaceReadFile,
   workspaceStat,
   workspaceWriteFile,
@@ -67,6 +70,9 @@ interface OpenNote {
   savedText: string
   /** 冲突检测基线（毫秒）；0 = 没有基线（文件曾经不存在） */
   mtimeMs: number
+  fileKind: NotesFileKind
+  /** 画像 / 要求所属会话：写盘按它走，不按当前 `sessionId` */
+  ownerSessionId: string | null
 }
 
 /** 仓库相对路径拼接：会话夹与 `产物/` 一律用 `/`（主进程侧再归一） */
@@ -94,8 +100,20 @@ function makeDoc(relPath: string, content: string): PaneDoc {
   }
 }
 
+function normalizeRel(rel: string): string {
+  return String(rel ?? '').replace(/\\/g, '/')
+}
+
 export function NotesPane(props: NotesPaneProps) {
-  const { rootId, sessionId, width, active, open, request, onOpenInEditor, onDirtyChange } = props
+  const {
+    rootId, sessionId, width, active, open, request,
+    initialRelPath, fileKind, ownerSessionId, displayName,
+    onOpenInEditor, onDirtyChange, onTitleChange, onRelPathChange,
+    registerFlush, onRequestOpenNote, onRequestNewNote,
+  } = props
+
+  const kind: NotesFileKind = fileKind === 'profile' || fileKind === 'constraints' ? fileKind : 'note'
+  const isSessionDoc = kind !== 'note'
 
   const [folder, setFolder] = useState<string | null>(null)
   const [files, setFiles] = useState<NoteFileRef[]>([])
@@ -104,6 +122,7 @@ export function NotesPane(props: NotesPaneProps) {
   const [saveState, setSaveState] = useState<NoteSaveState>('clean')
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
+  const [conflict, setConflict] = useState(false)
   const [preview, setPreview] = useState(false)
   const [mode, setMode] = useState<NoteEngineId>('source')
   const [search, setSearch] = useState('')
@@ -120,12 +139,44 @@ export function NotesPane(props: NotesPaneProps) {
   const saveChainRef = useRef<Promise<void>>(Promise.resolve())
   const scanSeqRef = useRef(0)
   const openSeqRef = useRef(0)
+  /** 冲突未决（flush 判据；state 是给界面用的，ref 是给异步闭包用的） */
+  const conflictRef = useRef(false)
   const dirtyCbRef = useRef(onDirtyChange)
   dirtyCbRef.current = onDirtyChange
+  const titleCbRef = useRef(onTitleChange)
+  titleCbRef.current = onTitleChange
+  const relCbRef = useRef(onRelPathChange)
+  relCbRef.current = onRelPathChange
+  /** 已上报过的身份（避免每次渲染都回调壳、把壳推进重渲染环） */
+  const reportedRef = useRef('')
 
   const narrow = width > 0 && width < NARROW_WIDTH
 
+  const setConflictState = useCallback((v: boolean) => {
+    conflictRef.current = v
+    if (aliveRef.current) setConflict(v)
+  }, [])
+
   /* ------------------------------------------------------------ 保存 */
+
+  /** 按 fileKind 选写盘通道（会话文件绝不裸用 workspaceWriteFile） */
+  const writeBody = useCallback(async (
+    cur: OpenNote,
+    body: string,
+  ): Promise<{ ok: boolean; mtimeMs?: number; conflict?: boolean; error?: string }> => {
+    const expectedMtimeMs = cur.mtimeMs > 0 ? cur.mtimeMs : undefined
+    const opts = expectedMtimeMs !== undefined ? { expectedMtimeMs } : undefined
+    if (cur.fileKind === 'note') {
+      const r = await workspaceWriteFile(cur.rootId, cur.relPath, body, expectedMtimeMs).catch(() => null)
+      return r ? { ok: !!r.ok, mtimeMs: r.mtimeMs, conflict: r.conflict, error: r.error } : { ok: false }
+    }
+    const owner = cur.ownerSessionId || sessionId
+    if (!owner) return { ok: false, error: '会话文件缺少所属会话，无法保存' }
+    const r = cur.fileKind === 'profile'
+      ? await aiTeachProfileWriteSession(owner, body, opts).catch(() => null)
+      : await aiTeachWriteConstraints(owner, body, opts).catch(() => null)
+    return r ? { ok: !!r.ok, mtimeMs: r.mtimeMs, conflict: r.conflict, error: r.error } : { ok: false }
+  }, [sessionId])
 
   const saveNow = useCallback((): Promise<void> => {
     if (timerRef.current) {
@@ -139,14 +190,7 @@ export function NotesPane(props: NotesPaneProps) {
       if (aliveRef.current) setSaveState('saving')
 
       const body = cur.text
-      const expectedMtimeMs = cur.mtimeMs > 0 ? cur.mtimeMs : undefined
-      let res: Awaited<ReturnType<typeof workspaceWriteFile>> | null = null
-      try {
-        res = await workspaceWriteFile(cur.rootId, cur.relPath, body, expectedMtimeMs)
-      } catch (e) {
-        console.error('[NotesPane] save failed:', e)
-        res = null
-      }
+      const res = await writeBody(cur, body)
       const merged = mergeSaveResult(
         { mtimeMs: cur.mtimeMs },
         res ? { ok: !!res.ok, mtimeMs: res.mtimeMs, conflict: res.conflict } : { ok: false },
@@ -154,20 +198,22 @@ export function NotesPane(props: NotesPaneProps) {
 
       if (merged.state === 'conflict') {
         // 磁盘被外部改过。与 PageEditor 的「放弃本地并重读」不同：这里保留用户输入，
-        // 只把基线刷新为磁盘当前 mtime；用户继续编辑后下一次保存才会覆盖磁盘版本。
-        if (aliveRef.current) {
-          showToast({
-            type: 'warning',
-            message: '文件已被外部修改',
-            detail: '你写的版本仍保留在这里；继续编辑并保存会覆盖磁盘上的版本',
-          })
-        }
+        // 只把基线刷新为磁盘当前 mtime；用户继续编辑后下一次保存才会覆盖磁盘版本，
+        // 或者在行内条上显式选「重新载入」。
         const disk = await workspaceReadFile(cur.rootId, cur.relPath).catch(() => null)
         if (openRef.current === cur) {
           if (disk && !disk.error && typeof disk.mtimeMs === 'number' && disk.mtimeMs > 0) {
             cur.mtimeMs = disk.mtimeMs
           }
-          if (aliveRef.current) setSaveState('conflict')
+          setConflictState(true)
+          if (aliveRef.current) {
+            setSaveState('conflict')
+            showToast({
+              type: 'warning',
+              message: '文件已被外部修改',
+              detail: '你写的版本仍保留在这里；选「保留我的版本」写盘，或「重新载入」丢弃本地改动',
+            })
+          }
         }
         return
       }
@@ -180,6 +226,7 @@ export function NotesPane(props: NotesPaneProps) {
             setSaveState('saved')
             setSavedAt(clockLabel(Date.now()))
             setDirty(false)
+            setConflictState(false)
           }
         } else if (aliveRef.current) {
           setSaveState('dirty')
@@ -197,7 +244,7 @@ export function NotesPane(props: NotesPaneProps) {
       /* 单笔失败不阻断后续保存；错误已在 run 里 Toast 过 */
     })
     return next
-  }, [])
+  }, [writeBody, setConflictState])
 
   const scheduleSave = useCallback(
     (value: string) => {
@@ -213,19 +260,35 @@ export function NotesPane(props: NotesPaneProps) {
     [saveNow],
   )
 
+  /**
+   * 关闭前 flush（壳在关页签时 await）：
+   * 写一次 → 只有「已经把缓冲全部落盘且没有未决冲突」才允许关。
+   */
+  useEffect(() => {
+    if (!registerFlush) return
+    registerFlush(async () => {
+      await saveNow()
+      const cur = openRef.current
+      const clean = !cur || cur.text === cur.savedText
+      return clean && !conflictRef.current
+    })
+    return () => registerFlush(null)
+  }, [registerFlush, saveNow])
+
   /* ------------------------------------------------------------ 打开文件 */
 
   const openFile = useCallback(
     async (relPath: string) => {
       if (!rootId || !relPath) return
-      pendingOpenRef.current = relPath
-      setLoadingRel(relPath)
+      const target = normalizeRel(relPath)
+      pendingOpenRef.current = target
+      setLoadingRel(target)
       const seq = ++openSeqRef.current
       await saveNow()
       if (seq !== openSeqRef.current) return
       // 读盘期间先卸掉编辑器：避免用户在这几毫秒里继续敲字、随后被新文件覆盖
       setDoc(null)
-      const res = await workspaceReadFile(rootId, relPath).catch(() => null)
+      const res = await workspaceReadFile(rootId, target).catch(() => null)
       if (seq !== openSeqRef.current) return
       pendingOpenRef.current = ''
       setLoadingRel(null)
@@ -243,19 +306,29 @@ export function NotesPane(props: NotesPaneProps) {
       const text = res.content
       openRef.current = {
         rootId,
-        relPath,
+        relPath: target,
         text,
         savedText: text,
         mtimeMs: typeof res.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : 0,
+        fileKind: kind,
+        ownerSessionId: kind === 'note' ? null : (ownerSessionId || sessionId || null),
       }
-      setDoc(makeDoc(relPath, text))
-      setCurrentRel(relPath)
+      setDoc(makeDoc(target, text))
+      setCurrentRel(target)
       setDirty(false)
+      setConflictState(false)
       setSaveState('clean')
       setSavedAt(null)
       setPreview(false)
+      // 身份上报：空 relPath 起家的页签靠这里补上文件身份（壳据此去重 / 持久化）
+      if (reportedRef.current !== target) {
+        reportedRef.current = target
+        relCbRef.current?.(target)
+        // 普通笔记按真实文件名报（壳给的 title 只是兜底）；画像 / 要求用人话
+        titleCbRef.current?.(kind === 'note' ? noteTabTitle(target, kind) : (displayName || noteTabTitle(target, kind)))
+      }
     },
-    [rootId, saveNow],
+    [rootId, saveNow, kind, ownerSessionId, sessionId, displayName, setConflictState],
   )
 
   /* ------------------------------------------------------------ 列表 */
@@ -269,7 +342,7 @@ export function NotesPane(props: NotesPaneProps) {
     }
     const folderRes = await aiTeachSessionFolder(sessionId).catch(() => null)
     if (seq !== scanSeqRef.current) return
-    const folderRel = folderRes?.ok && folderRes.relPath ? folderRes.relPath : null
+    const folderRel = folderRes?.ok && folderRes.relPath ? normalizeRel(folderRes.relPath) : null
     setFolder(folderRel)
     if (!folderRel) {
       setFiles([])
@@ -297,7 +370,7 @@ export function NotesPane(props: NotesPaneProps) {
     }
     const picked = pickNoteFiles(collected, NOTE_LIMIT)
     setFiles(picked)
-    // 没有打开任何文件时默认落到最近改过的一篇（打开即编辑，D1）
+    // 空页签（没有指定文件）落到最近改过的一篇；有指定文件时由 reset 直接开，不在这里抢
     if (!openRef.current && !pendingOpenRef.current && picked.length > 0) void openFile(picked[0].relPath)
   }, [rootId, sessionId, openFile])
 
@@ -311,48 +384,23 @@ export function NotesPane(props: NotesPaneProps) {
 
   /* ------------------------------------------------------------ 新建笔记 */
 
+  /** 走壳（一个文件一个页签）；壳没接这个出口时退回到本实例内开新文件 */
   const createNote = useCallback(async () => {
-    if (!rootId || !sessionId) return
-    let base = folder
-    if (!base) {
-      const ensured = await aiTeachEnsureSessionFolder(sessionId).catch(() => null)
-      if (ensured?.ok && ensured.relPath) base = ensured.relPath
-    }
-    if (!base) {
-      showToast({ type: 'error', message: '无法新建笔记', detail: '会话文件夹不可用' })
+    if (onRequestNewNote) {
+      onRequestNewNote()
       return
     }
-    const outDir = joinRel(base, '产物')
-    const listed = await workspaceListDir(rootId, base).catch(() => null)
-    const hasOut =
-      (listed?.entries ?? []).some((e) => e.type === 'dir' && e.name === '产物') ||
-      (listed?.softNames ?? []).includes('产物')
-    let targetDir = outDir
-    if (!hasOut) {
-      const made = await workspaceMkdir(rootId, outDir).catch(() => null)
-      if (made?.ok) {
-        targetDir = made.relPath ? made.relPath.replace(/\\/g, '/') : outDir
-      } else {
-        // 建目录失败就退级到会话文件夹根：宁可贵一层，也不让「新建笔记」变死按钮。
-        // （F11 拍平后的正式落点是 `产物/`，这里是环境不允许时的兜底，不是新口径。）
-        targetDir = base
-      }
-    }
-    const names = ((await workspaceListDir(rootId, targetDir).catch(() => null))?.entries ?? []).map((e) =>
-      joinRel(targetDir, e.name),
-    )
-    const relPath = uniqueNotePath(names, joinRel(targetDir, '笔记.md'))
-    const res = await workspaceWriteFile(rootId, relPath, '', undefined)
-    if (!res?.ok) {
-      showToast({ type: 'error', message: '新建笔记失败', detail: res?.error })
+    const made = await createSessionNote(rootId, sessionId)
+    if (!made.ok) {
+      showToast({ type: 'error', message: '新建笔记失败', detail: made.error })
       return
     }
     await scan()
-    await openFile(relPath)
+    await openFile(made.relPath)
     setSearch('')
     setSearchOpen(false)
     setPreview(false)
-  }, [rootId, sessionId, folder, scan, openFile])
+  }, [onRequestNewNote, rootId, sessionId, scan, openFile])
 
   /* ------------------------------------------------------------ 输入 */
 
@@ -360,15 +408,43 @@ export function NotesPane(props: NotesPaneProps) {
     (relPath: string, value: string) => {
       const cur = openRef.current
       // 迟到的旧引擎回调不能污染刚切过来的文件
-      if (!cur || cur.relPath !== relPath || value === cur.text) return
+      if (!cur || cur.relPath !== normalizeRel(relPath) || value === cur.text) return
       cur.text = value
-      setDoc((d) => (d && d.relPath === relPath ? { ...d, content: value, size: value.length } : d))
+      setDoc((d) => (d && d.relPath === cur.relPath ? { ...d, content: value, size: value.length } : d))
       if (!dirty) setDirty(true)
       setSaveState('dirty')
       scheduleSave(value)
     },
     [dirty, scheduleSave],
   )
+
+  /* ------------------------------------------------------------ 冲突 / 只读条 */
+
+  /** 保留我的版本：基线已刷新成磁盘现状，直接再写一次 */
+  const keepMine = useCallback(() => {
+    setConflictState(false)
+    setSaveState('dirty')
+    void saveNow()
+  }, [saveNow, setConflictState])
+
+  /** 重新载入：丢弃本地改动，读磁盘版本 */
+  const reloadFromDisk = useCallback(async () => {
+    const cur = openRef.current
+    if (!cur) return
+    const res = await workspaceReadFile(cur.rootId, cur.relPath).catch(() => null)
+    if (!res || res.error || typeof res.content !== 'string') {
+      showToast({ type: 'error', message: '重新载入失败', detail: res?.error })
+      return
+    }
+    cur.text = res.content
+    cur.savedText = res.content
+    cur.mtimeMs = typeof res.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : 0
+    setDoc(makeDoc(cur.relPath, res.content))
+    setDirty(false)
+    setConflictState(false)
+    setSaveState('clean')
+    setSavedAt(null)
+  }, [setConflictState])
 
   /* ------------------------------------------------------------ 设置 */
 
@@ -387,11 +463,17 @@ export function NotesPane(props: NotesPaneProps) {
   }, [loadMode])
   useDataChanged('settings', loadMode)
 
-  /* ------------------------------------------------------------ 切换会话：先落盘再重置 */
+  /* ------------------------------------------------------------ 打开目标 / 切换会话：先落盘再重置 */
 
   useEffect(() => {
     let cancelled = false
     const reset = async () => {
+      const target = normalizeRel(initialRelPath ?? '')
+      // 壳把 relPath 回填之后会带着同一个值再跑一次 —— 已经开着就别再读一遍盘
+      if (target && openRef.current?.rootId === rootId && openRef.current?.relPath === target) {
+        if (kind === 'note') await scan()
+        return
+      }
       await saveNow()
       if (cancelled) return
       openRef.current = null
@@ -399,18 +481,24 @@ export function NotesPane(props: NotesPaneProps) {
       setDoc(null)
       setCurrentRel('')
       setDirty(false)
+      setConflictState(false)
       setSaveState('clean')
       setSavedAt(null)
       setPreview(false)
       setSearch('')
       setLoadingRel(null)
-      await scan()
+      if (target) {
+        await openFile(target)
+        if (cancelled) return
+      }
+      // 会话文件的文件列表没有意义（一个文件一个页签），只扫普通笔记
+      if (kind === 'note') await scan()
     }
     void reset()
     return () => {
       cancelled = true
     }
-  }, [rootId, sessionId, scan, saveNow])
+  }, [rootId, sessionId, initialRelPath, kind, scan, saveNow, openFile, setConflictState])
 
   // 切页签 / 关面板时落盘一次（失败只 Toast，由 saveNow 内部兜住，不阻塞切换）
   useEffect(() => {
@@ -447,7 +535,7 @@ export function NotesPane(props: NotesPaneProps) {
     dirtyCbRef.current?.(dirty)
   }, [dirty])
 
-  // 壳的「请打开这个文件」请求：路径不必在列表里（产物 / 本次改动点进来都算）
+  // 壳的「请打开这个文件」请求（老入口兼容）：路径不必在列表里
   const requestSeq = request?.seq
   useEffect(() => {
     const rel = request?.relPath
@@ -489,6 +577,11 @@ export function NotesPane(props: NotesPaneProps) {
         : saveState === 'saving'
           ? 'text-[var(--text-secondary)]'
           : 'text-[var(--text-muted)]'
+  const fileIcon = kind === 'profile'
+    ? <User size={12} />
+    : kind === 'constraints'
+      ? <List size={12} />
+      : <FileText size={12} />
 
   /* ------------------------------------------------------------ 空态 */
 
@@ -502,13 +595,13 @@ export function NotesPane(props: NotesPaneProps) {
     )
   }
 
-  const showList = !narrow || listOpen
+  const showList = !isSessionDoc && (!narrow || listOpen)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* 动作行：32px，只放动作与当前文件，不另加标题 */}
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-1.5">
-        {narrow && (
+        {!isSessionDoc && narrow && (
           <button
             onClick={() => setListOpen((v) => !v)}
             data-tip={listOpen ? '收起笔记列表' : '展开笔记列表'}
@@ -519,17 +612,29 @@ export function NotesPane(props: NotesPaneProps) {
             <ChevronDown size={13} className={`kb-chevron ${listOpen ? 'rotate-180' : ''}`} />
           </button>
         )}
-        <button
-          onClick={() => void createNote()}
-          data-tip="在会话文件夹的 产物/ 下新建一篇笔记"
-          aria-label="新建笔记"
-          className="kb-press kb-micro-pop shrink-0 flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <Plus size={12} />
-          {!narrow && <span>新建笔记</span>}
-        </button>
+        {!isSessionDoc && (
+          <button
+            onClick={() => void createNote()}
+            data-tip="在会话文件夹的 产物/ 下新建一篇笔记"
+            aria-label="新建笔记"
+            className="kb-press kb-micro-pop shrink-0 flex items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <Plus size={12} />
+            {!narrow && <span>新建笔记</span>}
+          </button>
+        )}
 
-        {narrow && !searchOpen ? (
+        {isSessionDoc ? (
+          /* 会话文件：文件身份常显（320px 下也不只剩一个图标） */
+          <span
+            className="flex min-w-0 items-center gap-1 text-[11.5px] text-[var(--text-primary)]"
+            data-tip={currentRel}
+            aria-label={currentRel}
+          >
+            <span className="shrink-0 text-[var(--text-muted)]">{fileIcon}</span>
+            <span className="min-w-0 max-w-[46%] truncate">{currentRel ? baseName(currentRel) : noteTabTitle('', kind)}</span>
+          </span>
+        ) : narrow && !searchOpen ? (
           <button
             onClick={() => setSearchOpen(true)}
             data-tip="搜索笔记"
@@ -612,13 +717,15 @@ export function NotesPane(props: NotesPaneProps) {
             >
               <Copy size={12} />
             </button>
-            <span
-              className="min-w-0 max-w-[40%] truncate text-[11.5px] text-[var(--text-primary)]"
-              data-tip={currentRel}
-              aria-label={currentRel}
-            >
-              {noteNameOf(currentRel)}
-            </span>
+            {!isSessionDoc && (
+              <span
+                className="min-w-0 max-w-[40%] truncate text-[11.5px] text-[var(--text-primary)]"
+                data-tip={currentRel}
+                aria-label={currentRel}
+              >
+                {noteNameOf(currentRel)}
+              </span>
+            )}
             <span className={`shrink-0 whitespace-nowrap text-[10.5px] tabular-nums ${statusClass}`} aria-live="polite">
               {saveLabel}
             </span>
@@ -626,7 +733,26 @@ export function NotesPane(props: NotesPaneProps) {
         )}
       </div>
 
-      {/* 文件列表：最近修改倒序，最多 12 条 */}
+      {/* 冲突：行内条（不弹模态，不遮挡正文）——铁律 25 */}
+      {conflict && (
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--danger)]/40 bg-[var(--bg-secondary)] px-2 py-1">
+          <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--danger)]">文件已被外部修改，你的版本仍在这里</span>
+          <button
+            onClick={keepMine}
+            className="kb-press shrink-0 rounded px-1.5 py-0.5 text-[10.5px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+          >
+            保留我的版本
+          </button>
+          <button
+            onClick={() => void reloadFromDisk()}
+            className="kb-press shrink-0 rounded px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            重新载入
+          </button>
+        </div>
+      )}
+
+      {/* 文件列表：最近修改倒序，最多 12 条（会话文件没有列表） */}
       {showList && (
         <div className="kb-view-fade max-h-[40%] shrink-0 overflow-y-auto border-b border-[var(--border-color)]">
           {rows.length === 0 ? (
@@ -650,7 +776,9 @@ export function NotesPane(props: NotesPaneProps) {
                 <button
                   key={f.relPath}
                   onClick={() => {
-                    void openFile(f.relPath)
+                    // 一个页签 = 一个文件：点列表交给壳去重 / 开新页签，不在这里换文件
+                    if (onRequestOpenNote) onRequestOpenNote(f.relPath)
+                    else void openFile(f.relPath)
                     if (narrow) setListOpen(false)
                   }}
                   data-tip={f.relPath}
@@ -702,7 +830,7 @@ export function NotesPane(props: NotesPaneProps) {
           )
         ) : (
           <div className="flex h-full items-center justify-center px-4 text-center text-[12px] text-[var(--text-muted)]">
-            {loadingRel ? '打开中…' : '从上面选一篇笔记开始记'}
+            {loadingRel ? '打开中…' : isSessionDoc ? '文件还没有创建' : '从上面选一篇笔记开始记'}
           </div>
         )}
       </div>

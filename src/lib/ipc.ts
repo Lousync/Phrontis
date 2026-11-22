@@ -773,9 +773,31 @@ export const agentDeleteSession = (id: string): Promise<boolean> => a().agentDel
 export const agentSetSessionPinned = (id: string, pinned: boolean): Promise<boolean> => a().agentSetSessionPinned(id, pinned)
 // ===== v3.1.2 条目11：支线旁问（sidetrack）=====
 /** 建支线：只装上下文快照、不调 LLM（点按钮/装载阶段零请求） */
-export const agentCreateSideLane = (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }): Promise<AgentSideLaneCreateResult> => a().agentCreateSideLane(payload)
+/** 新形态（2026-11-22 契约）：传父会话 id + 分叉消息 id（null/空 = 整段对话），可选作用域与标题 */
+export function agentCreateSideLane(
+  parentSessionId: string,
+  branchFromMessageId?: string | null,
+  sideScope?: 'conversation' | 'anchor' | 'selection',
+  title?: string,
+): Promise<AgentSideLaneCreateResult>
+/** 旧形态（存量调用点）：payload 对象，行为完全不变 */
+export function agentCreateSideLane(
+  payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number },
+): Promise<AgentSideLaneCreateResult>
+export function agentCreateSideLane(
+  first: string | { parentSessionId: string; anchorMessageId: string; contextTurns?: number },
+  branchFromMessageId?: string | null,
+  sideScope?: 'conversation' | 'anchor' | 'selection',
+  title?: string,
+): Promise<AgentSideLaneCreateResult> {
+  return typeof first === 'string'
+    ? a().agentCreateSideLane(first, branchFromMessageId, sideScope, title)
+    : a().agentCreateSideLane(first)
+}
 /** 列某主线下的支线（含已升格）；带派生字段（unread/laneStatus/excerpt），右栏支线中心与删除前计数共用 */
 export const agentListSideLanes = (parentSessionId: string): Promise<AgentSideLaneInfo[]> => a().agentListSideLanes(parentSessionId)
+/** 跨对话旁问列表（右栏「旁问」历史）：只取教学支线（lane='side' && source='aiTeaching'），updatedAt 倒序 */
+export const agentListAllSideLanes = (): Promise<AgentSideLaneInfo[]> => a().agentListAllSideLanes()
 /** 升格支线为正式会话（单向，不可降级） */
 export const agentPromoteSideLane = (laneSessionId: string): Promise<boolean> => a().agentPromoteSideLane(laneSessionId)
 /** 打开支线详情即已读（写 lane_seen_at）；返回是否命中 */
@@ -791,11 +813,16 @@ export const aiTeachRenameSessionFolder = (id: string, title: string): Promise<A
 /** 会话文件夹移入系统回收站 */
 export const aiTeachDeleteSessionFolder = (id: string): Promise<AiTeachFolderResult> => a().aiTeachDeleteSessionFolder(id)
 // ===== AI教学 P2：会话约束文件 CONSTRAINTS.md =====
-export interface AiTeachConstraintsResult { ok: boolean; text?: string; relPath?: string | null; error?: string }
+/** 读：`mtimeMs` 是下一次写的冲突基线 */
+export interface AiTeachConstraintsResult { ok: boolean; text?: string; relPath?: string | null; mtimeMs?: number; error?: string }
+/** 写：`conflict=true` 时未写盘，`diskText` / `mtimeMs` 是磁盘现状 */
+export interface AiTeachConstraintsWriteResult extends AiTeachConstraintsResult { conflict?: boolean; diskText?: string }
 /** 读会话 CONSTRAINTS.md（无文件夹/无文件 → text 空串） */
 export const aiTeachReadConstraints = (id: string): Promise<AiTeachConstraintsResult> => a().aiTeachReadConstraints(id)
-/** 写会话 CONSTRAINTS.md（懒建文件夹；不再写 DB sessionInstructions） */
-export const aiTeachWriteConstraints = (id: string, text: string): Promise<AiTeachConstraintsResult> => a().aiTeachWriteConstraints(id, text)
+/** 保证会话 CONSTRAINTS.md 存在（懒建目录 + 空文件；已存在只读返回，created=false） */
+export const aiTeachEnsureConstraints = (id: string): Promise<{ ok: boolean; relPath?: string | null; created?: boolean; error?: string }> => a().aiTeachEnsureConstraints(id)
+/** 写会话 CONSTRAINTS.md（懒建文件夹；不再写 DB sessionInstructions）；不传 opts = 旧行为（无条件覆盖） */
+export const aiTeachWriteConstraints = (id: string, text: string, opts?: { expectedMtimeMs?: number }): Promise<AiTeachConstraintsWriteResult> => a().aiTeachWriteConstraints(id, text, opts)
 /** 全局约束文档（AI教学产物根 CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区；跨会话每轮注入 */
 export const aiTeachGlobalEnsureConstraints = (): Promise<AiTeachConstraintsResult & { created?: boolean }> => a().aiTeachGlobalEnsureConstraints()
 /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区；本工作区会话每轮注入 */
@@ -904,7 +931,8 @@ export const onAiTeachWebProgress = (cb: (p: { sessionId: string; no: number; do
 export const aiTeachProfileReadGlobal = () => a().aiTeachProfileReadGlobal()
 export const aiTeachProfileWriteGlobal = (text: string) => a().aiTeachProfileWriteGlobal(text)
 export const aiTeachProfileReadSession = (id: string) => a().aiTeachProfileReadSession(id)
-export const aiTeachProfileWriteSession = (id: string, text: string) => a().aiTeachProfileWriteSession(id, text)
+/** 写会话画像；不传 opts = 旧行为（无条件覆盖），传 expectedMtimeMs 时冲突即拒写并回磁盘内容 */
+export const aiTeachProfileWriteSession = (id: string, text: string, opts?: { expectedMtimeMs?: number }) => a().aiTeachProfileWriteSession(id, text, opts)
 export const aiTeachProfileReadWorkspace = (id: string) => a().aiTeachProfileReadWorkspace(id)
 export const aiTeachProfileWriteWorkspace = (id: string, text: string) => a().aiTeachProfileWriteWorkspace(id, text)
 export const aiTeachProfileEnsureGlobal = () => a().aiTeachProfileEnsureGlobal()

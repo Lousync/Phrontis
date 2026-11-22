@@ -1,29 +1,39 @@
 /**
  * 右侧查看器 · 页签契约（冻结层）
  *
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §3 / §6，决策 C5（四页签）与 D1–D8。
+ * 方案：`docs/ai-teaching-right-viewer-plan.md` §3 / §6；本轮改版：`tmp/ai-teach-right-viewer/PLAN.md`
+ *   （四固定页签 → 动态实例页签；同一 kind 可多开；旁问草稿；文件页签就地编辑）
  *
- * 为什么先冻结这一层：四个页签由四条并行线各自实现，壳由第五条线实现。
+ * 为什么先冻结这一层：四个 kind 的 pane 由不同批次实现，壳由另外的批次实现。
  * 如果各方各写一套 props，最后接线时必然出现「壳传 A、pane 等 B」的返工；
  * 更糟的是**静默失配**（可选属性漏传 → 页签永远空态，编译不报错）。
  * 所以本文件是唯一真相源：**只允许追加可选字段，不允许改已有字段的类型**。
  *
- * 本文件零运行时依赖（只有 `import type`），可被契约脚本直接读取。
+ * 本文件零运行时依赖（只有 `import type` + 纯常量），可被契约脚本直接读取。
  */
+
+import type { NotesFileKind, ViewerPaneType } from './viewerTabs'
 
 /* ============================== 页签 ============================== */
 
-/** 四个固定页签（C5 已拍板：网页 / 笔记 / 书架 / 旁问；进度与素材不进来） */
-export type ViewerTabKey = 'web' | 'notes' | 'books' | 'ask'
+/**
+ * 能力标识（网页 / 笔记 / 书架 / 旁问）。**不是实例 id**：
+ * 每个实例的 id 在 `viewerTabs.ts` 的 `ViewerTab.id` 上，一个 kind 可以有多实例。
+ */
+export type { NotesFileKind, ViewerPaneType } from './viewerTabs'
 
-export const VIEWER_TABS: ReadonlyArray<{ key: ViewerTabKey; label: string }> = [
+/** 兼容期别名：老代码 import `ViewerTabKey` 的地方语义不变，但它现在表示「类型」。 */
+export type ViewerTabKey = ViewerPaneType
+
+/** 四个 kind 的固定顺序（图标 / `+` 菜单兜底文案共用；页签条由实例数组驱动） */
+export const VIEWER_TABS: ReadonlyArray<{ key: ViewerPaneType; label: string }> = [
   { key: 'web', label: '网页' },
   { key: 'notes', label: '笔记' },
   { key: 'books', label: '书架' },
   { key: 'ask', label: '旁问' },
 ]
 
-export function isViewerTabKey(v: unknown): v is ViewerTabKey {
+export function isViewerTabKey(v: unknown): v is ViewerPaneType {
   return v === 'web' || v === 'notes' || v === 'books' || v === 'ask'
 }
 
@@ -33,8 +43,8 @@ export function isViewerTabKey(v: unknown): v is ViewerTabKey {
  * 壳 → pane 的公共上下文。
  *
  * `active` 与 `open` 是两件事，别合并：
- *   · `open=false` = 面板宽度收敛为 0（内容被 overflow 裁掉），pane 仍挂载 → 原生视图必须 hide；
- *   · `active=false` = 用户切到了别的页签，pane 保活（D5：切页签只隐藏不卸载）→ 也必须 hide。
+ *   · `open=false` = 面板宽度收敛为 0（内容被 overflow 裁掉），pane 可能还挂载 → 原生视图必须 hide；
+ *   · `active=false` = 用户切到了别的页签，pane 可能保活 → 也必须 hide。
  * 网页页签尤其依赖这两个值：`WebContentsView` 永远盖在 DOM 上，漏一次 hide 就会在别处留下白块。
  */
 export interface ViewerPaneContext {
@@ -52,24 +62,36 @@ export interface ViewerPaneContext {
   active: boolean
   /** 面板是否打开 */
   open: boolean
+  /** 本实例的页签 id（aria / 调试 / 去重都靠它；老调用方不传也能跑） */
+  tabId?: string
+  /** 本实例的能力类型（pane 内部不需要再猜） */
+  type?: ViewerPaneType
 }
 
 /**
  * 跨页签导航出口：由壳注入。
  *
  * 为什么不让 pane 直接改壳的状态：页签之间会互相唤起（笔记里的链接 → 网页；
- * 素材里的 PDF → 书架），如果每个 pane 各自 `setTab` + 传参，顺序与"先切页签再打开"
- * 的时序会在四个地方各写一遍。统一成四个动作，壳里只实现一次。
+ * 素材里的 PDF → 书架），如果每个 pane 各自 `setTab` + 传参，顺序与「先切页签再打开」
+ * 的时序会在几个地方各写一遍。统一成几个动作，壳里只实现一次（去重也在壳里）。
  */
 export interface ViewerActions {
-  /** 在网页页签打开 http(s) 链接（外链默认行为，C2） */
-  openWeb: (url: string) => void
-  /** 在笔记页签打开仓库内的 md / txt（D1：可编辑） */
-  openNote: (relPath: string, name?: string) => void
-  /** 在书架页签打开仓库内的书（PDF / EPUB / FB2 / FBZ / CBZ / TXT） */
-  openBook: (relPath: string, name?: string) => void
-  /** 切换页签（不改变已打开的页签内容） */
-  setTab: (tab: ViewerTabKey) => void
+  /** 打开 / 聚焦网页（本批只允许一个网页页签：已开则聚焦并导航） */
+  openWeb: (url: string) => string
+  /** 打开 / 聚焦仓库内的 md / txt（D1：可编辑）；同文件去重 */
+  openNote: (relPath: string, meta?: {
+    title?: string
+    fileKind?: NotesFileKind
+    ownerSessionId?: string | null
+  }) => string
+  /** 打开 / 聚焦一本书（同一本书去重，不同书可多开） */
+  openBook: (relPath: string, name?: string) => string
+  /** 打开 / 聚焦已落库的旁问（同 lane 去重） */
+  openAsk: (laneId: string) => string
+  /** 关闭页签（脏笔记先 flush；冲突未决时拦住） */
+  closeTab: (tabId: string) => void
+  /** 按实例 id 切换页签 */
+  setTab: (tabId: string) => void
   /** 关闭整个查看器 */
   close: () => void
 }
@@ -88,32 +110,82 @@ export interface PaneOpenRequest {
 export interface WebPaneProps extends ViewerPaneContext {
   /** 壳转发的外链 / 「打开网址」请求（已保证是 http/https） */
   request?: PaneOpenRequest | null
+  /** 恢复 / 外部打开时的初始地址；空串 = 起始页 */
+  initialUrl?: string
   /** 标题变化上报（页签条显示当前站点标题） */
   onTitleChange?: (title: string) => void
+  /** 地址变化上报（壳把它写回页签对象，重启后仍是这一页） */
+  onUrlChange?: (url: string) => void
   /** 原生视图 bounds 失效时上报（壳可据此收起浮层，避免被原生视图盖住） */
   onOverlayRisk?: (risk: boolean) => void
+  /**
+   * 可见性重算令牌：壳在浮层打开时 `webPaneHideAll()`，
+   * 浮层关闭后 bump 这个值让 pane 重新 show（原生视图不会自己回来）。
+   */
+  syncToken?: number
 }
 
 export interface NotesPaneProps extends ViewerPaneContext {
   /** 从「本次改动」/ 产物 / 素材点进来的文件 */
   request?: PaneOpenRequest | null
-  /** 脏标记上报（壳在切页签 / 关面板前 flush） */
+  /** 本实例要编辑的文件（一个笔记页签 = 一个文件）；空串 = 还没定文件 */
+  initialRelPath?: string
+  /** 普通笔记 / 会话画像 / 会话要求（只影响标题、列表显隐与写盘通道） */
+  fileKind?: NotesFileKind
+  /** 画像 / 要求所属会话；普通笔记为空。**写盘按它走，不按当前 sessionId** */
+  ownerSessionId?: string | null
+  /** 动作行里的文件名 / 页签名（缺省从 relPath 推） */
+  displayName?: string
+  /** 标题变化上报（文件名 / 画像 / 要求 → 页签条） */
+  onTitleChange?: (title: string) => void
+  /** 文件真正打开后回填实际 relPath（空串页签据此补上文件身份） */
+  onRelPathChange?: (relPath: string) => void
+  /** 脏标记上报（壳据此保护页签不被保活窗口淘汰） */
   onDirtyChange?: (dirty: boolean) => void
+  /**
+   * 注册/注销「关闭前 flush」：壳在关页签前 await 它。
+   * 返回 `false` = 有未处理的冲突（或保存失败），壳应拦住关闭。
+   */
+  registerFlush?: (flush: (() => Promise<boolean>) | null) => void
   /** 「在编辑器中打开」出口（D1 保留正式编辑入口） */
   onOpenInEditor: (relPath: string) => void
+  /** 文件切换器点击 → 交给外壳去重 / 开新页签（pane 不自己开第二个实例） */
+  onRequestOpenNote?: (relPath: string) => void
+  /** 「新建笔记」→ 交给外壳建文件并开页签（一个文件一个页签） */
+  onRequestNewNote?: () => void
 }
 
 export interface BooksPaneProps extends ViewerPaneContext {
   /** 从素材 / 产物点进来的书 */
   request?: PaneOpenRequest | null
+  /** 本页签当前在读的书；null = 书架视图（书架 → 书 → 回书架都在同一个页签里） */
+  initialRelPath?: string | null
+  /** 书名缓存（清单未回来时先显示） */
+  displayName?: string
+  /** 标题变化上报（书架 / 书名） */
+  onTitleChange?: (title: string) => void
+  /** 书架点书 → 壳决定是聚焦已开的书页签，还是让当前页签进入 reader */
+  onOpenBook?: (relPath: string, name: string) => void
+  /** 返回书架（同一个页签内切回 shelf） */
+  onBackToShelf?: () => void
   /** 全屏阅读（D8：右侧给「全屏」把当前书与位置带过去） */
   onOpenFullscreen?: (relPath: string) => void
 }
 
 export interface AskPaneProps extends ViewerPaneContext {
-  /** 支线中心的一次性请求（锚点 chip「就这点追问」） */
+  /** 支线中心的一次性请求（锚点 chip「就这点追问」）——新模型下由壳消费，pane 可忽略 */
   request?: { kind: string; [k: string]: unknown } | null
   requestSeq?: number
+  /** 已落库的旁问会话 id；null = 草稿（未发第一问） */
+  laneId?: string | null
+  /** 草稿参数（laneId 为空时才有）；首问成功后由壳清空 */
+  draft?: import('./viewerTabs').AskDraft | null
+  /** 草稿的首问已落库 → 壳写回 laneId / 标题并持久化 */
+  onLaneReady?: (laneId: string, title: string) => void
+  /** 标题变化上报（首问生成的标题 / 改名） */
+  onTitleChange?: (title: string) => void
+  /** 关闭本页签（草稿 = 丢弃，不写库；已落库 = 只关视图，lane 仍在历史里） */
+  onRequestClose?: () => void
   /** 主线会话最后一条 AI 回答的 messageId（作为「锚定第 N 条」的落点） */
   anchorMessageId?: string
   /** 引用回主线（只塞胶囊队列，不自动发送） */
@@ -127,11 +199,18 @@ export interface AskPaneProps extends ViewerPaneContext {
 
 /**
  * localStorage 键（与现有 `aiTeach.*` 口径一致；宽度走 SETTINGS，见 `aiTeachRightViewerWidth`）。
- * 迁移：旧右栏的 `aiTeach.railTab === 'lanes'` → `ask`，其余（progress / sources）→ `web`。
+ *
+ * 页签状态：`aiTeach.rightTabs.v2` 为唯一写入键（全部页签 + 顺序 + 活动页签；草稿不写）。
+ * 旧键 `aiTeach.rightTab` / `aiTeach.webTabs.<sid>` / `aiTeach.railTab` **只读迁移**，不再写入。
  */
 export const VIEWER_LS_KEYS = {
   open: 'aiTeach.rightOpen',
+  /** 动态页签状态（v2） */
+  tabsV2: 'aiTeach.rightTabs.v2',
+  /** 旧：单个页签类型。只读迁移，一个版本后删除 */
   tab: 'aiTeach.rightTab',
+  /** 更旧：右栏分区。只读迁移 */
   legacyRailTab: 'aiTeach.railTab',
+  /** 旧：网页页签的内层结构。只读迁移 */
   webTabs: (sessionId: string) => `aiTeach.webTabs.${sessionId}`,
 } as const

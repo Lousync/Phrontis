@@ -416,6 +416,28 @@ export function WebPane(props: WebPaneProps) {
     void navigate(req.url)
   }, [props.request, props.sessionId, navigate])
 
+  /**
+   * 壳的页签模型带着地址恢复时（重启 / 休眠后重建）：内部没有页签才导航一次。
+   * 等一帧再看页签数 —— 上面那个旧的 `aiTeach.webTabs.<sid>` 恢复是同步排在 effect 队列里的，
+   * 直接读会拿到空数组、把恢复出来的页面顶掉。
+   */
+  const initialUrl = String(props.initialUrl ?? '').trim()
+  useEffect(() => {
+    if (!initialUrl) return
+    const raf = requestAnimationFrame(() => {
+      if (latestRef.current.tabs.length === 0) void navigate(initialUrl)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [initialUrl, navigate])
+
+  // 地址上报：壳把 url 写回页签对象（持久化 / 重启后还是这一页）
+  const reportUrl = props.onUrlChange
+  useEffect(() => {
+    if (!reportUrl) return
+    const url = activeTab?.url ?? ''
+    if (url) reportUrl(url)
+  }, [activeTab?.url, reportUrl])
+
   useEffect(() => {
     const off = onWebPaneChanged(({ id, state }) => {
       setRuntime((prev) => ({
@@ -475,10 +497,12 @@ export function WebPane(props: WebPaneProps) {
     }
   }, [scheduleSync])
 
-  // 可见性 / 页签 / 失败态的显式触发（ResizeObserver 看不到这些）
+  // 可见性 / 页签 / 失败态的显式触发（ResizeObserver 看不到这些）。
+  // `syncToken`：壳在浮层（`+` 菜单 / 全部页签 / 旁问历史）打开时 `webPaneHideAll()`，
+  // 浮层关掉后 bump 这个值让原生视图回来 —— 它不会自己重新 show。
   useEffect(() => {
     scheduleSync()
-  }, [props.width, props.active, props.open, activeTab?.id, activeTab?.url, activeRuntime.error, scheduleSync])
+  }, [props.width, props.active, props.open, props.syncToken, activeTab?.id, activeTab?.url, activeRuntime.error, scheduleSync])
 
   // 卸载只关自己建的 view：disposeAll 是全局的，会把别的会话正在用的页面一起关掉
   useEffect(

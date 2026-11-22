@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { getAgentSession } from './agentSessionRepo'
-import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
+import { detectConflict, renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
@@ -221,8 +221,17 @@ export function ensureSessionFolderAt(sessionId: string, rel: string, getSetting
  * P2 约束读写（§2.3 文件为唯一真相源）：
  * - 写路径懒建文件夹（2-5）后落 CONSTRAINTS.md，不再写 DB 字段（2-6 写只写文件）；
  * - 读路径只认文件。旧 DB sessionInstructions 的兼容回退只发生在注入解析处（见下）。
+ *
+ * 2026-11-22（AI 教学 UI 批次 C 线）：读回 `mtimeMs`、写接受可选 `expectedMtimeMs`，
+ * 让「查看器笔记页签就地编辑」与编辑器共用同一套冲突口径（铁律 4）。
  */
-export interface ConstraintsResult { ok: boolean; text?: string; relPath?: string | null; error?: string }
+export interface ConstraintsResult { ok: boolean; text?: string; relPath?: string | null; mtimeMs?: number; error?: string }
+
+/** 写结果：`conflict` 为 true 时**未写盘**，`diskText` / `mtimeMs` 是磁盘现状（交渲染层三选） */
+export interface ConstraintsWriteResult extends ConstraintsResult {
+  conflict?: boolean
+  diskText?: string
+}
 
 export function readConstraints(sessionId: string, getSetting: (key: string) => unknown): ConstraintsResult {
   try {
@@ -233,29 +242,96 @@ export function readConstraints(sessionId: string, getSetting: (key: string) => 
     const rel = findSessionFolderRel(vault.rootPath, rootDir, sessionId)
     if (!rel) return { ok: true, text: '', relPath: null } // 无文件夹：无约束文件
     const p = join(vault.rootPath, rel, CONSTRAINTS_FILE)
-    const text = existsSync(p) ? readFileSync(p, 'utf-8') : ''
-    return { ok: true, text, relPath: `${rel}/${CONSTRAINTS_FILE}` }
+    const relPath = `${rel}/${CONSTRAINTS_FILE}`
+    if (!existsSync(p)) return { ok: true, text: '', relPath }
+    const text = readFileSync(p, 'utf-8')
+    return { ok: true, text, relPath, mtimeMs: statSync(p).mtimeMs }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
 }
 
-/** 写会话 CONSTRAINTS.md（懒建文件夹后落盘；空文本=写空文件保留编辑入口） */
-export function writeConstraints(sessionId: string, text: string, getSetting: (key: string) => unknown): ConstraintsResult {
+/**
+ * 写会话 CONSTRAINTS.md（懒建文件夹后落盘；空文本=写空文件保留编辑入口）。
+ *
+ * 固定顺序（契约脚本 verify-doc-ipc 锁定）：
+ * 结课守卫 → detectConflict → 写盘 → statSync → broadcastTreeRefresh。
+ * `opts.expectedMtimeMs` **不传 = 旧行为**（无条件覆盖）；传了且磁盘 mtime 已变 → 不写盘，回磁盘内容。
+ */
+export function writeConstraints(
+  sessionId: string,
+  text: string,
+  getSetting: (key: string) => unknown,
+  opts?: { expectedMtimeMs?: number },
+): ConstraintsWriteResult {
   try {
+    // ① 结课守卫：已结课课程的产物一律只读
     assertCourseEditableBySession(sessionId)
+    // ② 目标路径（懒建文件夹；这里只建目录/锚点，不碰 CONSTRAINTS.md 本身）
     const ensured = ensureSessionFolder(sessionId, getSetting)
     if (!ensured.ok || !ensured.relPath) return { ok: false, error: ensured.error ?? '会话文件夹不可用' }
     const vault = getCurrentVault()
     if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const abs = join(vault.rootPath, ensured.relPath, CONSTRAINTS_FILE)
+    const relPath = `${ensured.relPath}/${CONSTRAINTS_FILE}`
+    // ③ 冲突检测（未传基线时 detectConflict 恒放行 = 旧行为）
+    const chk = detectConflict(abs, opts?.expectedMtimeMs)
+    if (chk.conflict) {
+      let diskText = ''
+      try { diskText = existsSync(abs) ? readFileSync(abs, 'utf-8') : '' } catch { /* 读不出按空串 */ }
+      return { ok: false, relPath, conflict: true, diskText, mtimeMs: chk.diskMtimeMs }
+    }
+    // ④ 写盘
     const body = String(text ?? '').replace(/\r\n/g, '\n')
-    writeFileSync(join(vault.rootPath, ensured.relPath, CONSTRAINTS_FILE), body, 'utf-8')
+    writeFileSync(abs, body, 'utf-8')
+    // ⑤ 回写 mtime 作下一次写的基线
+    const mtimeMs = statSync(abs).mtimeMs
+    // ⑥ 树刷新（编辑器 / 文件树即时可见）
     broadcastTreeRefresh(rootDirName(getSetting))
-    return { ok: true, text: body, relPath: `${ensured.relPath}/${CONSTRAINTS_FILE}` }
+    return { ok: true, text: body, relPath, mtimeMs }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
 }
+
+/** ensure 结果：`created` 区分「本次建了空文件」与「已存在只读返回」 */
+export interface EnsureConstraintsResult extends FolderResult { created?: boolean }
+
+/**
+ * 懒建会话 CONSTRAINTS.md（目录 + 空文件）：查看器「笔记」页签的编辑入口用。
+ * 幂等：已存在只读返回，不碰文件、不广播；创建前过结课守卫（已结课 → 不建）。
+ */
+export function ensureConstraints(sessionId: string, getSetting: (key: string) => unknown): EnsureConstraintsResult {
+  try {
+    if (typeof sessionId !== 'string' || !sessionId) return { ok: false, error: '会话 id 非法' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const rootDir = rootDirName(getSetting)
+    const folderRel = findSessionFolderRel(vault.rootPath, rootDir, sessionId)
+    if (folderRel) {
+      const relPath = `${folderRel}/${CONSTRAINTS_FILE}`
+      const abs = join(vault.rootPath, folderRel, CONSTRAINTS_FILE)
+      if (existsSync(abs)) return { ok: true, relPath, created: false }
+      assertCourseEditableBySession(sessionId)
+      writeFileSync(abs, '', 'utf-8')
+      broadcastTreeRefresh(folderRel)
+      return { ok: true, relPath, created: true }
+    }
+    // 无文件夹：先过守卫再懒建（ensureSessionFolder 只写锚点，不播种要求文件）
+    assertCourseEditableBySession(sessionId)
+    const ensured = ensureSessionFolder(sessionId, getSetting)
+    if (!ensured.ok || !ensured.relPath) return { ok: false, error: ensured.error ?? '会话文件夹不可用' }
+    const relPath = `${ensured.relPath}/${CONSTRAINTS_FILE}`
+    const abs = join(vault.rootPath, ensured.relPath, CONSTRAINTS_FILE)
+    if (existsSync(abs)) return { ok: true, relPath, created: false }
+    writeFileSync(abs, '', 'utf-8')
+    broadcastTreeRefresh(ensured.relPath)
+    return { ok: true, relPath, created: true }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 
 // ===== 全局约束层（.claude/plans/global-constraints.md）=====
 // {产物根}/CONSTRAINTS.md：跨工作区/跨会话共同要求，AgentRunner 每轮重读注入（与画像全局层同哲学）。
@@ -659,7 +735,10 @@ export function registerAiTeachingFolderHandlers(getSetting: (key: string) => un
   ipcMain.handle('aiTeach:deleteSessionFolder', (_e, sessionId: string) => deleteSessionFolder(String(sessionId ?? ''), getSetting))
   // P2：会话约束文件（CONSTRAINTS.md）读写
   ipcMain.handle('aiTeach:readConstraints', (_e, sessionId: string) => readConstraints(String(sessionId ?? ''), getSetting))
-  ipcMain.handle('aiTeach:writeConstraints', (_e, sessionId: string, text: string) => writeConstraints(String(sessionId ?? ''), String(text ?? ''), getSetting))
+  // 查看器「笔记」页签的编辑入口：懒建目录 + 空文件（已存在只读返回）
+  ipcMain.handle('aiTeach:ensureConstraints', (_e, sessionId: string) => ensureConstraints(String(sessionId ?? ''), getSetting))
+  ipcMain.handle('aiTeach:writeConstraints', (_e, sessionId: string, text: string, opts?: { expectedMtimeMs?: number }) =>
+    writeConstraints(String(sessionId ?? ''), String(text ?? ''), getSetting, opts))
   // 全局约束层（global-constraints 方案）：ensure=入口点击落骨架并返回 relPath 跳编辑区；写入走编辑器现有通道
   ipcMain.handle('aiTeachGlobal:ensureConstraints', () => ensureGlobalConstraints(getSetting))
   // v3.1.2 条目6：工作区约束层（{工作区}/CONSTRAINTS.md）——ensure=入口点击落骨架并返回 relPath 跳编辑区

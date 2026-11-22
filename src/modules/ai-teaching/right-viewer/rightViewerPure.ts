@@ -67,9 +67,10 @@ export function tabLabel(tab: ViewerTabKey): string {
  *
  * 为什么这条要独立成函数：`WebContentsView` **永远盖在 DOM 之上**，
  * 漏一次 hide 就会在别的页签 / 关闭后的空白处留下白块，而且不报错。
- * 判据只有两个来源：面板关了，或者用户切到了别的页签（pane 保活但不可见）。
+ * 判据只有两个来源：面板关了，或者当前页签不是网页（pane 保活但不可见）。
+ * `tab = null` = 一个页签都没有，同样必须 hide。
  */
-export function shouldHideWebViewer(open: boolean, tab: ViewerTabKey): boolean {
+export function shouldHideWebViewer(open: boolean, tab: ViewerTabKey | null): boolean {
   return !open || tab !== 'web'
 }
 

@@ -420,9 +420,13 @@ const api = {
   agentDeleteSession: (id: string) => ipcRenderer.invoke('agent:deleteSession', id),
   agentSetSessionPinned: (id: string, pinned: boolean) => ipcRenderer.invoke('agent:setSessionPinned', id, pinned),
   // v3.1.2 条目11：支线旁问（sidetrack）。createSideLane 只装上下文、不调 LLM
-  agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) =>
-    ipcRenderer.invoke('agent:createSideLane', payload),
+  // 两种形态：位置参数 `(parentSessionId, branchFromMessageId, sideScope?, title?)`（2026-11-22 契约）
+  // 与旧 payload 对象 `{ parentSessionId, anchorMessageId, contextTurns }`（原样转发，主进程侧兼容）
+  agentCreateSideLane: (first: unknown, branchFromMessageId?: unknown, sideScope?: unknown, title?: unknown) =>
+    ipcRenderer.invoke('agent:createSideLane', first, branchFromMessageId, sideScope, title),
   agentListSideLanes: (parentSessionId: string) => ipcRenderer.invoke('agent:listSideLanes', parentSessionId),
+  /** 跨对话旁问列表（右栏「旁问」历史）：只取教学支线，updatedAt 倒序 */
+  agentListAllSideLanes: () => ipcRenderer.invoke('agent:listAllSideLanes'),
   agentPromoteSideLane: (laneSessionId: string) => ipcRenderer.invoke('agent:promoteSideLane', laneSessionId),
   agentMarkSideLaneRead: (laneId: string) => ipcRenderer.invoke('agent:markSideLaneRead', laneId),
   // AI教学 P1：会话 ⇄ 文件夹绑定
@@ -431,11 +435,13 @@ const api = {
   aiTeachRenameSessionFolder: (id: string, title: string) => ipcRenderer.invoke('aiTeach:renameSessionFolder', id, title),
   aiTeachDeleteSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:deleteSessionFolder', id),
   aiTeachReadConstraints: (id: string) => ipcRenderer.invoke('aiTeach:readConstraints', id),
+  /** 查看器「笔记」页签的编辑入口：懒建目录 + 空 CONSTRAINTS.md（已存在只读返回） */
+  aiTeachEnsureConstraints: (id: string) => ipcRenderer.invoke('aiTeach:ensureConstraints', id),
   /** 全局约束文档（AI教学产物根 CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区打开 */
   aiTeachGlobalEnsureConstraints: () => ipcRenderer.invoke('aiTeachGlobal:ensureConstraints'),
   /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区打开 */
   aiTeachWorkspaceEnsureConstraints: (wsId: string) => ipcRenderer.invoke('aiTeachWorkspace:ensureConstraints', wsId),
-  aiTeachWriteConstraints: (id: string, text: string) => ipcRenderer.invoke('aiTeach:writeConstraints', id, text),
+  aiTeachWriteConstraints: (id: string, text: string, opts?: { expectedMtimeMs?: number }) => ipcRenderer.invoke('aiTeach:writeConstraints', id, text, opts),
   // N-5/N-7：助手独立要求 + 术语表（.assistant/）——ensure 落文件并返回 relPath 跳知识库打开；
   // 写入走编辑器既有 ws:writeFile，主进程 agentService 每轮直读注入
   assistantConstraintsEnsureGlobal: () => ipcRenderer.invoke('assistantConstraints:ensureGlobal'),
@@ -532,7 +538,7 @@ const api = {
   aiTeachProfileReadGlobal: () => ipcRenderer.invoke('aiTeachProfile:readGlobal'),
   aiTeachProfileWriteGlobal: (text: string) => ipcRenderer.invoke('aiTeachProfile:writeGlobal', text),
   aiTeachProfileReadSession: (id: string) => ipcRenderer.invoke('aiTeachProfile:readSession', id),
-  aiTeachProfileWriteSession: (id: string, text: string) => ipcRenderer.invoke('aiTeachProfile:writeSession', id, text),
+  aiTeachProfileWriteSession: (id: string, text: string, opts?: { expectedMtimeMs?: number }) => ipcRenderer.invoke('aiTeachProfile:writeSession', id, text, opts),
   aiTeachProfileReadWorkspace: (id: string) => ipcRenderer.invoke('aiTeachProfile:readWorkspace', id),
   aiTeachProfileWriteWorkspace: (id: string, text: string) => ipcRenderer.invoke('aiTeachProfile:writeWorkspace', id, text),
   aiTeachProfileEnsureGlobal: () => ipcRenderer.invoke('aiTeachProfile:ensureGlobal'),

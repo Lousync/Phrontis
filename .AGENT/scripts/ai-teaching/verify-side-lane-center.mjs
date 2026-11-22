@@ -9,6 +9,9 @@
  * 运行（项目根目录）：
  *   node .AGENT/scripts/ai-teaching/verify-side-lane-center.mjs [仓库路径]
  * 期望：全部 PASS 且 exit=0
+ *
+ * 2026-11-22 随动态多页签改造更新：旁问列表搬进壳的 `+ -> 旁问` 浮层（AskHistoryMenu），
+ * 页签只剩详情（SideLanePanel），本脚本按新分工断言。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -79,10 +82,17 @@ check('详情复用 SideLanePanel 且带 onBack/onQuote/onFloat', center.include
 const idx = read('src/modules/ai-teaching/index.tsx')
 // P4（2026-11-19）：右栏退役，支线中心并入查看器「旁问」页签 —— 断言跟着落点走。
 check('index 挂 RightViewer', idx.includes("import { RightViewer } from './right-viewer/RightViewer'") && idx.includes('<RightViewer'))
-// 旁问页签自建列表（按 scope 分组 / 徽标），详情仍复用 SideLanePanel —— 断言钉行为而不是钉组件
+// 旁问列表已移进壳的 `+ -> 旁问` 浮层，页签只剩详情 —— 断言钉新分工，而不是钉旧组件
 const ask = read('src/modules/ai-teaching/right-viewer/AskPane.tsx')
-check('旁问页签：列表 + 已读 + 详情复用 SideLanePanel',
-  ask.includes('agentListSideLanes(') && ask.includes('agentMarkSideLaneRead(') && ask.includes("from '../SideLanePanel'"))
+const askHistory = read('src/modules/ai-teaching/right-viewer/AskHistoryMenu.tsx')
+const chrome = read('src/modules/ai-teaching/right-viewer/ViewerChrome.tsx')
+check('旁问页签：列表在 AskHistoryMenu、详情复用 SideLanePanel',
+  !ask.includes('agentListSideLanes(')
+  && ask.includes('agentMarkSideLaneRead(')
+  && ask.includes("from '../SideLanePanel'")
+  && ask.includes('openLaneId={laneId}') && ask.includes('quotePerMessage')
+  && askHistory.includes('agentListAllSideLanes(') && chrome.includes('<AskHistoryMenu')
+  && !idx.includes('<SideLaneCenter'))
 check('锚点映射由会话库派生（不再 localStorage）', idx.includes('const anchorLanes = useMemo') && !idx.includes('ANCHOR_LANES_KEY'))
 check('锚点 chip 走 openCenter（open/create）', idx.includes("openCenter(al ? { kind: 'open', laneId: al.laneId } : { kind: 'create'"))
 check('引用回主线接 setQuotes', idx.includes('const quoteFromLane = useCallback') && idx.includes('setQuotes(prev'))

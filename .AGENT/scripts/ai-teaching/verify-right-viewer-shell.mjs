@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Contract check: AI teaching right viewer shell
- * (`src/modules/ai-teaching/right-viewer/{rightViewerPure.ts, viewerResize.ts, RightViewer.tsx}`).
+ * (`src/modules/ai-teaching/right-viewer/{rightViewerPure.ts, viewerResize.ts, viewerTabs.ts,
+ *   RightViewer.tsx, ViewerChrome.tsx}`).
  *
  * Plan: docs/ai-teaching-right-viewer-plan.md sections 3.2 / 3.3 / 5.1 / 9
  *       kernel decisions doc (2026-11-19) C5 / C6 / C7 / D5
@@ -11,10 +12,15 @@
  *   - pure: width clamp (dead values -> 480, viewportless upper bound, innerWidth - 300);
  *   - pure: web native view must be hidden when closed or when another tab is active;
  *   - pure: tab labels + tab key guard, cross-checked against the frozen pane contracts;
- *   - static: four panes wired, webPaneHideAll called, tablist a11y, .kb-view-in keep-alive,
+ *   - static: pane kinds come from paneContracts and the tab strip is rendered by ViewerChrome,
+ *             one PaneSlot per instance id, tablist a11y on both sides of the id scheme,
+ *             webPaneHideAll called, .kb-view-in keep-alive,
  *             no alert()/confirm(), width + tab persistence keys present;
  *   - static: resize gesture keeps the four-way teardown (capture, dead zone, cancel,
  *             lostpointercapture) and never leaves select-none on body.
+ *
+ * 2026-11-22 随动态多页签改造更新：页签条搬进 ViewerChrome.tsx（壳不再持有四固定页签），
+ * 槽位改为按实例 id 渲染 —— 本节断言跟着新落点走。
  *
  * Run (repo root): node .AGENT/scripts/ai-teaching/verify-right-viewer-shell.mjs [repo-path]
  * Output is pure ASCII (AGENTS.md); exit 0 only when every assertion passes.
@@ -36,9 +42,11 @@ const DIR = 'src/modules/ai-teaching/right-viewer'
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
 const shellSrc = read(`${DIR}/RightViewer.tsx`)
+const chromeSrc = read(`${DIR}/ViewerChrome.tsx`)
 const resizeSrc = read(`${DIR}/viewerResize.ts`)
 const pureSrc = read(`${DIR}/rightViewerPure.ts`)
 const contractsSrc = read(`${DIR}/paneContracts.ts`)
+const tabsSrc = read(`${DIR}/viewerTabs.ts`)
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'right-viewer-shell-'))
 const loadStripped = async (src, name) => {
@@ -49,6 +57,7 @@ const loadStripped = async (src, name) => {
 
 const pure = await loadStripped(pureSrc, 'rightViewerPure')
 const contracts = await loadStripped(contractsSrc, 'paneContracts')
+const tabsModel = await loadStripped(tabsSrc, 'viewerTabs')
 
 const {
   migrateRailTab, clampViewerWidth, initialViewerWidth, viewerWidthStyle,
@@ -113,20 +122,45 @@ check('migration output is always a viewer tab key',
   ['lanes', 'ask', 'progress', 'sources', 'web', 'notes', 'books', 'nope', null, undefined]
     .every((v) => isViewerTabKey(migrateRailTab(v))),
   '')
+// 页签条改由实例数组驱动后，`+` 菜单是唯一还按 kind 枚举的地方 —— 必须与冻结契约同集合
+check('new-tab menu covers exactly the frozen VIEWER_TABS kinds',
+  tabsModel.VIEWER_NEW_TAB_ORDER.length === contracts.VIEWER_TABS.length
+  && contracts.VIEWER_TABS.every((t) => tabsModel.VIEWER_NEW_TAB_ORDER.some((o) => o.type === t.key))
+  && tabsModel.VIEWER_NEW_TAB_ORDER.every((o) => contracts.isViewerTabKey(o.type)),
+  tabsModel.VIEWER_NEW_TAB_ORDER.map((o) => o.type).join('|'))
 
 // ---------------------------------------------------------------- 5. static: shell
-console.log('\n=== 5. static: RightViewer.tsx wiring ===')
-check('shell imports the frozen tab list from paneContracts', /import[\s\S]{0,300}VIEWER_TABS[\s\S]{0,200}from '\.\/paneContracts'/.test(shellSrc), '')
-check('all four pane slots are wired', ['web', 'notes', 'books', 'ask']
-  .every((k) => shellSrc.includes(`<PaneSlot tab="${k}"`)), '')
+console.log('\n=== 5. static: RightViewer.tsx + ViewerChrome.tsx wiring ===')
+// 壳只管模型与槽位：kind 类型从 paneContracts 取，页签条整套渲染搬进 ViewerChrome
+check('shell takes pane kinds from paneContracts, ViewerChrome renders the strip',
+  /import \{[\s\S]{0,240}type ViewerPaneType[\s\S]{0,80}from '\.\/paneContracts'/.test(shellSrc)
+  && shellSrc.includes('isViewerTabKey')
+  && /import type \{ ViewerPaneType \} from '\.\/paneContracts'/.test(chromeSrc)
+  && chromeSrc.includes('role="tablist"')
+  && !shellSrc.includes('VIEWER_TABS') && !chromeSrc.includes('VIEWER_TABS'),
+  'fixed tab list still referenced')
+check('one PaneSlot per tab instance, all four kinds dispatched',
+  (shellSrc.match(/<PaneSlot key=\{tab\.id\} tabId=\{tab\.id\} active=\{active\}>/g) || []).length === 4
+  && ['web', 'notes', 'books', 'ask'].every((k) =>
+    shellSrc.includes(`tab.type === '${k}'`) || (k === 'ask' && shellSrc.includes('<AskPane'))),
+  String((shellSrc.match(/<PaneSlot key=\{tab\.id\}/g) || []).length))
 check('panes are lazy loaded', (shellSrc.match(/lazyPane\(\(\) => import\('\.\/\w+'\)/g) || []).length === 4,
   String((shellSrc.match(/lazyPane/g) || []).length))
+check('panes are mounted from the live-window ids (LRU), not from a fixed kind list',
+  /tabs\.filter\(\(t\) => liveIds\.includes\(t\.id\)\)\.map\(paneFor\)/.test(shellSrc),
+  '')
 check('webPaneHideAll is imported and called', shellSrc.includes('webPaneHideAll')
   && shellSrc.includes('void webPaneHideAll()'), '')
-check('tablist a11y: role=tablist / role=tab / aria-selected',
-  shellSrc.includes('role="tablist"') && shellSrc.includes('role="tab"') && shellSrc.includes('aria-selected={active}'), '')
-check('tab panels carry role=tabpanel + aria-controls link',
-  shellSrc.includes('role="tabpanel"') && shellSrc.includes('aria-controls={`rv-panel-${key}`}'), '')
+check('tablist a11y: role=tablist / role=tab / aria-selected (ViewerChrome)',
+  chromeSrc.includes('role="tablist"') && chromeSrc.includes('role="tab"')
+  && chromeSrc.includes('aria-selected={active}')
+  && chromeSrc.includes('id={`rv-tab-${tab.id}`}')
+  && chromeSrc.includes('aria-controls={`rv-panel-${tab.id}`}'), '')
+check('tab panels carry role=tabpanel + aria-labelledby on the same instance id',
+  shellSrc.includes('role="tabpanel"')
+  && shellSrc.includes('id={`rv-panel-${tabId}`}')
+  && shellSrc.includes('aria-labelledby={`rv-tab-${tabId}`}')
+  && shellSrc.includes('aria-hidden={!active}'), '')
 check('tab switch animation uses the shared .kb-view-in token', shellSrc.includes('kb-view-in'), '')
 check('keep-alive: inactive panes stay mounted via display:none',
   shellSrc.includes("display: active ? 'flex' : 'none'"), '')

@@ -35,7 +35,7 @@ import {
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages, getAgentMessagesAll,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, updateAgentSessionScope, backfillSessionSources,
-  createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
+  createSideLaneSession, listSideLanes, listAllAiTeachingSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
   setSideLaneStatus, markSideLaneSeen, updateSessionResume, nowLocal,
   normalizeSessionScope, updateAgentSessionPreferences,
 } from './agentSessionRepo'
@@ -59,6 +59,7 @@ import {
 } from './artifactClaimGuardPure'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { isCourseEnded } from './aiTeachingCourseEndGuard'
 import { buildCourseInjection, buildAiTeachSourcesHint } from './aiTeachingCourse'
 import { listFavorites } from './aiTeachingFavorites'
 import { findSkillPrompt } from './skillService'
@@ -1512,6 +1513,17 @@ async function runAgentLoopInner(
   const outlineRuleHint = source === 'aiTeaching'
     ? '\n\n【大纲草稿协议（AI教学）】当你把课程大纲给用户过目时，除正文说明外，输出一个 ```outline 围栏代码块，块内是一个 JSON 对象（不要注释）：{"title":"课程名","goal":"一句话目标","chapters":[{"name":"章名","units":[{"name":"知识点名","goal":"该点学习目标","source":"出处"}]}]}。规则：**一次给全量章 → 知识点**（不要"先只给第一章"；每段开讲前由用户在客户端确认）；用户满意后由客户端「正式生成」按钮落盘（你也可调 course.outline.write）；**落盘 / 更新成功即终止建课流程**：下一步只引导用户去左栏点知识点开段（先做素材预检），不要问「开讲第 N 章」，也不要继续在助手会话里开讲；用户要改就更新草稿、重新发这个围栏。围栏语言必须是 outline（\u0060\u0060\u0060outline）。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号『』或“”。另外，知识点粒度：拆到「一个可独立讲解、可出题检验的最小概念」为止（如一个定义、一条定理、一种方法）；依据里的一小节/一段通常对应多个知识点，**不要**把一整节压成一个。**不要**把章节导语、教学目标、考试目标 / 考情分析、重难点提示、学习要求、知识结构总览、复习建议这类元信息当作知识点——某份素材整篇只是导语 / 框架就跳过它，只从其余素材抽取实质内容。'
     : ''
+  // 2026-11-22（AI 教学 UI 批次）：用户明确要结课时输出 ```endcourse 围栏 → 客户端渲染结课确认卡。
+  // 只在整门课**未结课**时给协议；「收尾本段」不是结课（段收尾走既有「收尾本段」流程）。
+  const courseEndedForHint = (() => {
+    try {
+      const wsId = getWorkspaceOfSession(sessionId) || (laneRow?.parentSessionId ? getWorkspaceOfSession(laneRow.parentSessionId) : '')
+      return !!wsId && isCourseEnded(wsId)
+    } catch { return false }
+  })()
+  const endcourseRuleHint = source === 'aiTeaching' && !isSideLane && !courseEndedForHint
+    ? '\n\n【结课协议（AI教学）】当用户**明确**表达想结课 / 这门课学完了 / 可以正式结课收尾时，**不要调用任何工具、不要写结课报告**，直接在回答正文末尾输出一个 ```endcourse 围栏代码块，块内是一个 JSON 对象（不要注释）：{"note":"一句话收尾说明"}。规则：① 只在整门课**尚未结课**时输出；② 「收尾本段 / 这段结束 / 本章结束」不是结课，不要输出 endcourse；③ 一次回答最多一个 endcourse 块；④ 客户端会把它渲染成结课确认卡，用户确认后才真正结课（归档与提示词摘要由客户端完成），你不需要也不能自行结课。围栏语言必须是 endcourse（\u0060\u0060\u0060endcourse），写成 json 不会被识别。'
+    : ''
   // 3.14：素材注入按角色（助手摘要 / 段快照 / 复习章级）；旧零散会话不注入
   const sourcesHint = source === 'aiTeaching' ? (() => {
     const cat = buildAiTeachSourcesHint(sessionId, getSettingReader())
@@ -1691,7 +1703,7 @@ async function runAgentLoopInner(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint + hookStartHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + endcourseRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint + hookStartHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1790,7 +1802,7 @@ async function runAgentLoopInner(
         explicitSkill: explicitSkillHint,
         toolsHint,
         // 教学协议：与旧 ruleChars 的 12 段同源（范围 / 落点纪律另列，计入「工作区」）
-        protocols: titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + teachStyleHint + visualHint + mindmapHint + constraintsToolHint + sideLaneHint,
+        protocols: titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + endcourseRuleHint + teachStyleHint + visualHint + mindmapHint + constraintsToolHint + sideLaneHint,
         scopeRule: scopeRuleHint,
         writeScope: writeScopeHint,
         permissions: executionHint + deniedHint + vaultFileHint + vaultScopeHint,
@@ -2511,9 +2523,12 @@ function buildSideLaneInfo(row: AgentSessionRow): Record<string, unknown> {
   const anchorTitle = (anchorMsg?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 40)
   // 旁问作用域（C8/C11）：旧数据没有 sideScope 字段，按有无锚点推断 —— 有锚点=anchor，无=conversation。
   const sideScope = row.sideScope ?? (row.branchFromMessageId ? 'anchor' : 'conversation')
+  // 跨对话旁问列表用：join 父会话标题（父会话已删则 undefined，不阻断列表）
+  const parentTitle = row.parentSessionId ? (getAgentSession(row.parentSessionId)?.title || undefined) : undefined
   return {
     ...row,
     sideScope,
+    parentTitle,
     anchorOrdinal: sideScope === 'anchor' ? anchorOrdinalOf(row.parentSessionId ?? '', row.branchFromMessageId ?? '') : undefined,
     // camel 别名（与 camelRow 口径一致，渲染层按 camel 消费）
     createdAt: row.created_at,
@@ -2753,30 +2768,41 @@ export function registerAgentHandlers(): void {
 
   // ===== v3.1.2 条目11：支线旁问（sidetrack）=====
   // 建支线：只做「固化上下文快照 + 建独立会话」，**不调 LLM**（点按钮与装载阶段零请求）。
-  ipcMain.handle('agent:createSideLane', (_e, payload: { parentSessionId?: unknown; anchorMessageId?: unknown; contextTurns?: unknown }) => {
-    const p = (payload ?? {}) as { parentSessionId?: unknown; anchorMessageId?: unknown; contextTurns?: unknown }
-    const parentSessionId = String(p.parentSessionId ?? '')
+  // 两种调用形态共存（2026-11-22 契约）：位置参数 `(parentSessionId, branchFromMessageId, sideScope?, title?)`
+  // 与旧的 payload 对象 `{ parentSessionId, anchorMessageId, contextTurns }`。旧形态行为逐字不变。
+  ipcMain.handle('agent:createSideLane', (_e, first: unknown, b?: unknown, c?: unknown, d?: unknown) => {
+    const legacy = !!first && typeof first === 'object'
+    const payload = (legacy ? first : {}) as { parentSessionId?: unknown; anchorMessageId?: unknown; contextTurns?: unknown }
+    const parentSessionId = String((legacy ? payload.parentSessionId : first) ?? '')
     if (!parentSessionId || !sessionExists(parentSessionId)) return { ok: false, error: '主线会话不存在' }
-    const anchorMessageId = String(p.anchorMessageId ?? '')
+    const anchorMessageId = String((legacy ? payload.anchorMessageId : b) ?? '')
     const anchor = anchorMessageId ? getMessageById(parentSessionId, anchorMessageId) : null
-    const turns = Math.min(5, Math.max(1, Math.floor(Number(p.contextTurns)) || 3))
+    const turns = Math.min(5, Math.max(1, Math.floor(Number(legacy ? payload.contextTurns : 3)) || 3))
     // C9（P4）：整段对话作用域不落快照 —— 每轮现算，否则旁问永远停在建支线那一刻
-    const sideScope: 'conversation' | 'anchor' = anchor ? 'anchor' : 'conversation'
+    const scopeIn = legacy ? undefined : String(c ?? '')
+    const sideScope: 'conversation' | 'anchor' | 'selection' = anchor
+      ? (scopeIn === 'selection' ? 'selection' : 'anchor')
+      : 'conversation'
     const snapshotText = anchor ? buildSideLaneSnapshot(parentSessionId, anchor, turns) : ''
+    // 显式标题优先（新支线中心「首问文本」直接给标题）；不传保持原生成规则
+    const titleIn = legacy ? '' : String(d ?? '').trim()
     const titleCore = (anchor?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 16)
     const lane = createSideLaneSession({
       parentSessionId,
       branchFromMessageId: anchor?.id ?? '',
       sideContext: snapshotText,
       sideScope,
-      title: titleCore ? `支线·${titleCore}` : '旁问·整段对话',
+      title: titleIn || (titleCore ? `支线·${titleCore}` : '旁问·整段对话'),
       source: 'aiTeaching',
     })
-    return { ok: true, laneSessionId: lane.id, title: lane.title, snapshotText, turns }
+    // laneSessionId 是既有消费口径；id 是契约新别名（两者同值，避免老调用点回改）
+    return { ok: true, id: lane.id, laneSessionId: lane.id, title: lane.title, snapshotText, turns }
   })
   // 列某主线下的支线（含已升格）：右栏支线中心 + 左栏缩进渲染 + 删除前计数；带派生字段（unread/laneStatus/excerpt）
   ipcMain.handle('agent:listSideLanes', (_e, parentSessionId: string) =>
     listSideLanes(String(parentSessionId ?? '')).map(buildSideLaneInfo))
+  // 跨对话旁问列表（右栏「旁问」历史页签）：只取 lane='side' && source='aiTeaching'，updatedAt 倒序，带 parentTitle
+  ipcMain.handle('agent:listAllSideLanes', () => listAllAiTeachingSideLanes().map(buildSideLaneInfo))
   // 升格支线为正式会话（单向）：lane 置 'main' → 进左栏列表
   ipcMain.handle('agent:promoteSideLane', (_e, laneSessionId: string) =>
     promoteSideLane(String(laneSessionId ?? '')))

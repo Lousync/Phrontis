@@ -54,7 +54,10 @@ function isExternalRequest(req: PaneOpenRequest): boolean {
 }
 
 export function BooksPane(props: BooksPaneProps) {
-  const { rootId, width, request, onOpenFullscreen } = props
+  const {
+    rootId, width, request, onOpenFullscreen,
+    initialRelPath, displayName, onTitleChange, onOpenBook, onBackToShelf,
+  } = props
 
   const [books, setBooks] = useState<BookListItem[] | null>(null)
   /** 封面缓存命中集（coverList 索引 + mtime 对账通过）—— 与书架模块同一判据 */
@@ -62,13 +65,27 @@ export function BooksPane(props: BooksPaneProps) {
   const [loadErr, setLoadErr] = useState('')
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
-  /** 当前打开的书（null = 书架视图）。换书 = 这个值变 → 旧阅读器卸载（D5 允许的卸载点之一） */
-  const [openRelPath, setOpenRelPath] = useState<string | null>(null)
+  /** 当前打开的书（null = 书架视图）。真源在壳的页签上（`initialRelPath`），这里只是它的镜像 */
+  const [openRelPath, setOpenRelPath] = useState<string | null>(initialRelPath ?? null)
   const [openName, setOpenName] = useState('')
   /** 防抖定时器（防抖窗口清空必须置 null，铁律 4 的同款纪律） */
   const reloadTimer = useRef<number | null>(null)
   /** 最近一次消费过的 request.seq（同一 seq 不重复打开，seq 递增才动作） */
   const lastReqSeq = useRef(0)
+
+  /** 打开某本书的唯一入口：先交给壳（同书去重 / 让当前书页签进 reader），没有壳回调时才自管 */
+  const requestOpen = useCallback((relPath: string, name: string) => {
+    setOpenRelPath(relPath)
+    setOpenName(String(name ?? ''))
+    onOpenBook?.(relPath, name)
+  }, [onOpenBook])
+
+  const backToShelf = useCallback(() => {
+    // 只切视图，不动 books —— 进度由 scheduleReload 在后台刷新，返回即见（D7）
+    setOpenRelPath(null)
+    setOpenName('')
+    onBackToShelf?.()
+  }, [onBackToShelf])
 
   /**
    * 清单加载。`pdfReader:listBooks` 本身是**当前仓库口径**（主进程 `listBooksImpl` 读
@@ -135,27 +152,30 @@ export function BooksPane(props: BooksPaneProps) {
       showToast({ type: 'info', message: '仓库外文件下一批支持' })
       return
     }
-    setOpenRelPath(relPath)
-    setOpenName(String(req.name ?? '').trim())
-  }, [request])
+    requestOpen(relPath, String(req.name ?? '').trim())
+  }, [request, requestOpen])
 
-  const openBook = useCallback((b: BookListItem) => {
-    setOpenRelPath(b.relPath)
-    setOpenName(b.displayName)
-  }, [])
+  // 页签对象是真相源：壳改 relPath（历史恢复 / 书架点书去重命中别的页签）时跟着走
+  useEffect(() => {
+    setOpenRelPath(initialRelPath ?? null)
+    if (!initialRelPath) setOpenName('')
+  }, [initialRelPath])
 
-  const backToShelf = useCallback(() => {
-    // 只切视图，不动 books —— 进度由 scheduleReload 在后台刷新，返回即见（D7）
-    setOpenRelPath(null)
-    setOpenName('')
-  }, [])
-
-  /** 书名以清单为准（书市 meta 的 displayName 优先），request / 文件名只作兜底 —— 与书架同口径 */
+  // 标题上报：书架 / 书名（壳据此更新页签条与持久化缓存）
   const openBookName = useMemo(() => {
     if (!openRelPath) return ''
     const hit = books?.find((b) => b.relPath === openRelPath)
     return hit?.displayName || openName || (openRelPath.split('/').pop() ?? '')
   }, [books, openRelPath, openName])
+
+  const titleCb = onTitleChange
+  useEffect(() => {
+    titleCb?.(openRelPath ? (openBookName || displayName || '电子书') : '书架')
+  }, [openRelPath, openBookName, displayName, titleCb])
+
+  const openBook = useCallback((b: BookListItem) => {
+    requestOpen(b.relPath, b.displayName)
+  }, [requestOpen])
 
   const visibleBooks = useMemo(() => sortBooks(filterBooks(books ?? [], query)), [books, query])
   const cols = columnsForWidth(width)

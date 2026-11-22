@@ -9,11 +9,15 @@
  * Two kinds of assertions:
  *   A. Real implementation of src/modules/ai-teaching/right-viewer/askPanePure.ts
  *      (strip types, then import) -- badges / subtitle / filter / sort / request / quote gate.
- *   B. Static wiring assertions -- no agentChat, no alert/confirm, empty anchor for
- *      "ask whole conversation", per-message quote prop present.
+ *   B. Static wiring assertions -- the three-way split of the dynamic tab model:
+ *      chrome (AskHistoryMenu) owns the list, AskDraftPane creates the lane on the first
+ *      question (whole conversation = empty anchor), AskPane is detail-only via SideLanePanel.
  *
  * Run (repo root): node .AGENT/scripts/ai-teaching/verify-ask-pane.mjs [repoPath]
  * Output is pure ASCII (no emoji, AGENTS.md); exit 0 only when everything passes.
+ *
+ * 2026-11-22 随动态多页签改造更新：列表移进壳的 `+ -> 旁问` 浮层，lanes 由首问才落库，
+ * 本脚本的接线断言按新分工重写（纯函数层断言不变）。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -32,6 +36,10 @@ const ascii = (s) => String(s === undefined ? '' : s).replace(/[^\x20-\x7e]/g, '
 
 const PURE_REL = 'src/modules/ai-teaching/right-viewer/askPanePure.ts'
 const PANE_REL = 'src/modules/ai-teaching/right-viewer/AskPane.tsx'
+const DRAFT_REL = 'src/modules/ai-teaching/right-viewer/AskDraftPane.tsx'
+const HISTORY_REL = 'src/modules/ai-teaching/right-viewer/AskHistoryMenu.tsx'
+const CHROME_REL = 'src/modules/ai-teaching/right-viewer/ViewerChrome.tsx'
+const SHELL_REL = 'src/modules/ai-teaching/right-viewer/RightViewer.tsx'
 const PANEL_REL = 'src/modules/ai-teaching/SideLanePanel.tsx'
 
 /* ---------------------------------------------------------------- A. pure layer */
@@ -131,20 +139,56 @@ check('cut -> true', canQuoteFromLane({ laneStatus: 'cut' }) === true)
 check('missing status (legacy) -> true', canQuoteFromLane({}) === true)
 
 /* ---------------------------------------------------------------- B. static wiring */
-console.log('\n=== 7. AskPane.tsx static wiring ===')
+console.log('\n=== 7. ask tab wiring: chrome list / draft pane / detail pane ===')
 const pane = read(PANE_REL)
-check('creates whole-conversation lane with empty anchor', /agentCreateSideLane\(\{[^}]*anchorMessageId: ''/.test(pane))
-check('never calls agentChat', !/\bagentChat\s*\(/.test(pane))
+const draft = read(DRAFT_REL)
+const history = read(HISTORY_REL)
+const chrome = read(CHROME_REL)
+const shell = read(SHELL_REL)
+const panel = read(PANEL_REL)
+check('draft pane creates the lane on the first question (whole conversation = empty anchor)',
+  /agentCreateSideLane\(/.test(draft)
+  && /draft\.anchorMessageId \|\| null/.test(draft)
+  && /draft\.sideScope/.test(draft)
+  && /firstQuestionTitle\(/.test(draft)
+  && /onLaneReady\(laneId, laneTitle\)/.test(draft)
+  && /anchorMessageId: ''/.test(shell) && /sideScope: 'conversation'/.test(shell),
+  'lane creation not where it is expected')
+check('never calls agentChat from the tab chrome', !/\bagentChat\s*\(/.test(pane) && !/\bagentChat\s*\(/.test(chrome))
 check('no alert() outside the inline cards', !/\balert\s*\(/.test(pane))
 check('no confirm() outside the inline cards', !/\bconfirm\s*\(/.test(pane))
 check('no promote-to-session entry (C10 read-only)', !/agentPromoteSideLane/.test(pane))
-check('quote gate uses canQuoteFromLane', pane.includes('canQuoteFromLane('))
-check('list/detail are exclusive via activeId', pane.includes('if (activeId)') && pane.includes('openLane'))
+// 引用门禁：运行时态纯函数仍锁「run 中不可引用」；接线侧的下放到每条回答（非空正文才出现按钮）
+check('quote gate is per-message in SideLanePanel (non-empty content only)',
+  pane.includes('quotePerMessage') && pane.includes('onQuote={onQuote}')
+  && panel.includes("quotePerMessage && onQuote && m.content.trim() !== ''"),
+  'quote gate moved')
+// 列表 / 详情分工：列表在壳的 `+ -> 旁问` 浮层，pane 只按 laneId / draft 二选一
+check('history list lives in ViewerChrome/AskHistoryMenu, pane is detail-or-draft only',
+  !/agentListSideLanes\(/.test(pane)
+  && chrome.includes('<AskHistoryMenu')
+  && history.includes('agentListAllSideLanes(')
+  && history.includes('onOpenLane(lane)')
+  && history.includes('onNewWhole')
+  && /if \(laneId\)/.test(pane) && /if \(draft\)/.test(pane),
+  'list still in the pane')
 check('empty repo/session inline card', pane.includes('\u5148\u8fdb\u5165\u4e00\u4e2a AI \u6559\u5b66\u5bf9\u8bdd'))
-check('uses existing motion tokens only', pane.includes('kb-item-in') && pane.includes('kb-view-fade'))
+// 动效：只用既有令牌，禁 transition-all（铁律 13）
+const MOTION_TOKENS = new Set([
+  'kb-view-in', 'kb-view-fade', 'kb-overlay', 'kb-pop', 'kb-collapse', 'kb-chevron',
+  'kb-item-in', 'kb-item-out', 'kb-micro-pop', 'kb-toast-in', 'kb-toast-out',
+])
+const MOTIONISH = /kb-(?:view|overlay|pop|collapse|chevron|item|micro|toast|slide|fade|zoom|bounce)[a-z-]*/g
+const askFiles = { AskPane: pane, AskDraftPane: draft, AskHistoryMenu: history, ViewerChrome: chrome }
+const strayTokens = Object.entries(askFiles).flatMap(([name, src]) =>
+  (src.match(MOTIONISH) || []).filter((t) => !MOTION_TOKENS.has(t)).map((t) => name + ':' + t))
+check('uses existing motion tokens only, and no transition-all',
+  strayTokens.length === 0
+  && Object.values(askFiles).every((src) => !/transition-all/.test(src))
+  && pane.includes('kb-view-fade') && history.includes('kb-pop') && chrome.includes('kb-view-in'),
+  strayTokens.join(','))
 
 console.log('\n=== 8. SideLanePanel.tsx additive prop ===')
-const panel = read(PANEL_REL)
 check('quotePerMessage is optional', /quotePerMessage\?:\s*boolean/.test(panel))
 check('quotePerMessage defaults to false', /quotePerMessage\s*=\s*false/.test(panel))
 check('per-message quote button calls onQuote only', /quotePerMessage && onQuote && [\s\S]{0,600}?onClick=\{\(\) => onQuote\(m\.content\)\}/.test(panel))
