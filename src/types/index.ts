@@ -1825,6 +1825,10 @@ export interface WebProbeResult {
   title?: string
   chapters?: WebCrawlChapter[]
   candidates?: Array<{ title: string; url: string }>
+  /** 该素材已抓取的目录（仓库相对，带尾斜杠） */
+  dirRel?: string
+  /** 目录里已有的章节文件名（断点续抓的既有成果） */
+  existing?: string[]
 }
 
 /** 网页批量抓取结果 */
@@ -3468,6 +3472,11 @@ export interface ElectronAPI {
     error?: string
     skipped?: boolean
   }>
+  /** 网页素材（url）：探测门户 / 目录 / 单文章（零 token 纯程序）；anchorUrl = 门户候选二次探测 */
+  aiTeachCourseWebProbe: (wsId: string, sourceId: string, anchorUrl?: string) => Promise<WebProbeResult>
+  /** 网页素材（url）：批量抓取勾选章节 → 写 sources.json 的 extractRel（目录）+ 00-目录.md */
+  aiTeachCourseWebCrawl: (wsId: string, sourceId: string, chapters: Array<{ url: string; title?: string }>) => Promise<WebCrawlResult>
+  aiTeachCourseWebCancel: (wsId: string, sourceId: string) => Promise<{ ok: boolean; error?: string }>
   // L2 课时生命周期（3.13 兼容）
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => Promise<{ ok: boolean; sessionId?: string; order?: number; kind?: string; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
   aiTeachCourseEndLesson: (sessionId: string) => Promise<{ ok: boolean; wsId?: string; unitId?: string; error?: string }>
@@ -3503,9 +3512,6 @@ export interface ElectronAPI {
   aiTeachSrcSofficeProbe: (settingPath?: string) => Promise<{ ok: boolean; path?: string; source?: string }>
   aiTeachSrcPdfBytes: (id: string, no: number) => Promise<{ ok: boolean; base64?: string; error?: string }>
   aiTeachSrcTranscribe: (id: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => Promise<{ ok: boolean; relPath?: string; model?: string; done?: number[]; skipped?: number[]; failed?: number[]; error?: string }>
-  aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => Promise<WebProbeResult>
-  aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => Promise<WebCrawlResult>
-  aiTeachSrcWebCancel: (id: string) => Promise<{ ok: boolean; error?: string }>
   /** v3.1.1：把对话级登记（含原件/提取稿复制）上收到工作区主库；nos 给了=只上收这些合并编号的条目（粒度下放到单条） */
   aiTeachSrcPromote: (id: string, nos?: number[]) => Promise<AiTeachSourcesResult>
   /** AI教学·左栏「收藏」：按工作区列出 / 钉住 / 取消（rel = 仓库相对路径） */
@@ -3525,7 +3531,7 @@ export interface ElectronAPI {
   aiTeachProfileApplyPatch: (layer: 'global' | 'workspace' | 'session', id: string | null, entries: AiTeachProfileEntry[]) => Promise<AiTeachProfilePatchResult>
   llmReasoningCapable: (model: string) => Promise<boolean>
   onAiTeachTreeRefresh: (cb: (p: { dirRel: string }) => void) => () => void
-  onAiTeachWebProgress: (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => () => void
+  onAiTeachWebProgress: (cb: (p: { wsId: string; sourceId: string; done: number; total: number; current: string }) => void) => () => void
   onAiTeachNotice: (cb: (msg: string) => void) => () => void
   /** N-1 手册通道：助手侧提示（升格 Toast 等），载荷 `{ sessionId, message }` */
   onAssistantNotice: (cb: (p: { sessionId: string; message: string }) => void) => () => void

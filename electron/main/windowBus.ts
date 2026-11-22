@@ -90,7 +90,7 @@ export const BROADCAST_CHANNEL = {
   aiTeachTreeRefresh: 'aiTeach:tree-refresh',
   /** AI教学：模块内提示条，载荷 `string` */
   aiTeachNotice: 'aiTeach:notice',
-  /** AI教学：网页抓取进度，载荷 `{ sessionId, no, done, total, current }` */
+  /** AI教学：网页抓取进度，载荷 `{ wsId, sourceId, done, total, current }` */
   aiTeachWebCrawlProgress: 'aiTeach:web-crawl-progress',
   /** AI教学·课程模式：课程大纲/进度变化，载荷 `{ wsId: string }`（课程主页据此重拉） */
   aiTeachCourseRefresh: 'aiTeach:course-refresh',

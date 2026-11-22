@@ -495,6 +495,10 @@ const api = {
   aiTeachCourseRemoveSource: (wsId: string, sourceId: string) => ipcRenderer.invoke('aiTeachCourse:removeSource', wsId, sourceId),
   aiTeachCourseRemoveAssignment: (wsId: string, chapterId: string, sourceId: string) => ipcRenderer.invoke('aiTeachCourse:removeAssignment', wsId, chapterId, sourceId),
   aiTeachCourseExtractSource: (wsId: string, sourceId: string, anchor: unknown) => ipcRenderer.invoke('aiTeachCourse:extractSource', wsId, sourceId, anchor),
+  // 网页素材（url）：探测目录/单文章/门户候选 → 批量抓取（进度走 onAiTeachWebProgress）→ 取消
+  aiTeachCourseWebProbe: (wsId: string, sourceId: string, anchorUrl?: string) => ipcRenderer.invoke('aiTeachCourse:webProbe', wsId, sourceId, anchorUrl),
+  aiTeachCourseWebCrawl: (wsId: string, sourceId: string, chapters: Array<{ url: string; title?: string }>) => ipcRenderer.invoke('aiTeachCourse:webCrawl', wsId, sourceId, chapters),
+  aiTeachCourseWebCancel: (wsId: string, sourceId: string) => ipcRenderer.invoke('aiTeachCourse:webCancel', wsId, sourceId),
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => ipcRenderer.invoke('aiTeachCourse:openUnit', wsId, unitId, kind),
   aiTeachCourseEndLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:endLesson', sessionId),
   aiTeachCourseFinalizeLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:finalizeLesson', sessionId),
@@ -527,10 +531,6 @@ const api = {
   aiTeachSrcSofficeProbe: (settingPath?: string) => ipcRenderer.invoke('aiTeachSrc:sofficeProbe', settingPath),
   aiTeachSrcPdfBytes: (id: string, no: number) => ipcRenderer.invoke('aiTeachSrc:pdfBytes', id, no),
   aiTeachSrcTranscribe: (id: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => ipcRenderer.invoke('aiTeachSrc:transcribe', id, no, pages, modelSpec),
-  /** 网页素材：探测目录/单文章/门户候选 → 批量抓取（进度走 onAiTeachWebProgress）→ 取消 */
-  aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => ipcRenderer.invoke('aiTeachSrc:webProbe', id, no, anchorUrl),
-  aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => ipcRenderer.invoke('aiTeachSrc:webCrawl', id, no, urls),
-  aiTeachSrcWebCancel: (id: string) => ipcRenderer.invoke('aiTeachSrc:webCancel', id),
   aiTeachSrcPromote: (id: string, nos?: number[]) => ipcRenderer.invoke('aiTeachSrc:promote', id, nos),
   aiTeachFavList: (wsId: string) => ipcRenderer.invoke('aiTeachFav:list', wsId),
   aiTeachFavAdd: (wsId: string, rel: string, name: string) => ipcRenderer.invoke('aiTeachFav:add', wsId, rel, name),
@@ -552,9 +552,9 @@ const api = {
     ipcRenderer.on('aiTeach:tree-refresh', handler)
     return () => { ipcRenderer.removeListener('aiTeach:tree-refresh', handler) }
   },
-  /** 网页抓取进度（AI教学素材库） */
-  onAiTeachWebProgress: (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => {
-    const handler = (_e: unknown, p: { sessionId: string; no: number; done: number; total: number; current: string }) => cb(p)
+  /** 网页抓取进度（AI教学素材库；按 wsId + sourceId 认领，同一素材同时只允许一条抓取） */
+  onAiTeachWebProgress: (cb: (p: { wsId: string; sourceId: string; done: number; total: number; current: string }) => void) => {
+    const handler = (_e: unknown, p: { wsId: string; sourceId: string; done: number; total: number; current: string }) => cb(p)
     ipcRenderer.on('aiTeach:web-crawl-progress', handler)
     return () => { ipcRenderer.removeListener('aiTeach:web-crawl-progress', handler) }
   },

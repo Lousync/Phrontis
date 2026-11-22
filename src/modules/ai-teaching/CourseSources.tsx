@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BookOpen, Check, FilePlus2, FolderOpen, Link2, Loader2, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { AlertTriangle, BookOpen, Check, FilePlus2, FolderOpen, Globe, Link2, Loader2, Plus, RefreshCw, Trash2, X } from 'lucide-react'
 import type { AiTeachCourseOutline, AiTeachLessonInfo, AiTeachSource, AiTeachSourcesPayload } from '../../types'
 import {
   aiTeachCourseAssignSources, aiTeachCourseExtractSource, aiTeachCourseGetSources,
@@ -8,6 +8,7 @@ import {
 } from '../../lib/ipc'
 import { anchorLabel, detectLongMaterial } from '../../lib/aiTeachingSourcesPure'
 import { showToast } from '../../lib/toast'
+import { WebSourceDialog } from './components/WebSourceDialog'
 
 /**
  * AI教学 3.14 右栏「素材」：本段快照 / 本章分配 / 未分配。
@@ -44,6 +45,8 @@ export function CourseSources(props: Props) {
   const [anchorEdit, setAnchorEdit] = useState<{ sourceId: string; label: string; from: string; to: string; kind: 'pages' | 'lines' } | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
+  /** 网页素材「展开网页」对话框（url 类型行） */
+  const [webSource, setWebSource] = useState<AiTeachSource | null>(null)
 
   const chapters = useMemo(() => outline?.chapters ?? [], [outline])
   const hasOutline = chapters.length > 0
@@ -92,8 +95,12 @@ export function CourseSources(props: Props) {
 
   const openSource = (src: AiTeachSource): void => {
     if (src.extractRel && !/\/$/.test(src.extractRel)) { onOpenFile(src.extractRel); return }
+    if (src.type === 'url' && src.extractRel) {
+      showToast({ type: 'info', message: '网页素材已抓取章节：点「展开网页」查看/续抓，AI 按章节清单按需读单章' })
+      return
+    }
     if (src.rel && (/\.(md|markdown|txt|html?|png|jpe?g|webp|gif|svg)$/i.test(src.rel))) { onOpenFile(src.rel); return }
-    if (src.url) { showToast({ type: 'info', message: '网页素材：让 AI 用网页读取工具打开，或先抓取为 md（后续入口）' }); return }
+    if (src.url) { showToast({ type: 'info', message: '网页素材还没有提取稿：点「展开网页」抓取章节后再阅读' }); return }
     showToast({ type: 'info', message: '该素材还没有可打开的提取稿，先点「提取」' })
   }
 
@@ -234,6 +241,14 @@ export function CourseSources(props: Props) {
           )}
           {!readOnly && (src.type === 'pdf' || src.type === 'pptx' || src.type === 'docx' || src.type === 'code') && (
             <button onClick={() => beginExtract(src)} disabled={busy} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">提取</button>
+          )}
+          {!readOnly && !opts.seg && src.type === 'url' && (
+            <button onClick={() => setWebSource(src)} disabled={busy}
+              data-tip={src.extractRel ? '查看已抓取章节 / 续抓' : '探测网页目录 → 勾选章节 → 抓取为 md'}
+              aria-label={src.extractRel ? '查看已抓取章节 / 续抓' : '探测网页目录 → 勾选章节 → 抓取为 md'}
+              className="inline-flex items-center gap-0.5 text-[var(--text-secondary)] hover:text-[var(--accent)] transition-colors">
+              <Globe size={9} />{src.extractRel ? '网页章节' : '展开网页'}
+            </button>
           )}
           {!readOnly && !opts.seg && (
             <button onClick={() => void removeSource(src.id)} disabled={busy} data-tip={confirmRemove === src.id ? '再点一次确认删除登记（原文件不删）' : '删除素材登记'} aria-label={confirmRemove === src.id ? '再点一次确认删除登记（原文件不删）' : '删除素材登记'}
@@ -393,6 +408,16 @@ export function CourseSources(props: Props) {
 
       {payload && !payload.ok && (
         <div className="flex items-start gap-1 text-[10px] text-[var(--danger)]"><AlertTriangle size={10} className="mt-0.5" />{payload.error}</div>
+      )}
+
+      {/* 网页素材：探测 → 勾选章节 → 抓取（结果写进 sources.json 的 extractRel 目录） */}
+      {webSource && (
+        <WebSourceDialog
+          wsId={wsId}
+          source={{ id: webSource.id, title: webSource.title, url: webSource.url ?? '' }}
+          onClose={() => setWebSource(null)}
+          onDone={() => { void reload(); onReloadCourse() }}
+        />
       )}
     </div>
   )

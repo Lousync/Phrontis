@@ -29,7 +29,8 @@ import { extractPdfRangeChunked, extractPdfWhole, extractPptxPages } from './doc
 import { convertToPdf, findSoffice } from './sofficeConvert'
 import { uniqueFileName } from './workspaceManager'
 import { sanitizeTitle } from './aiTeachingFolders'
-import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
+import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../main/windowBus'
+import { probeWeb, crawlQueue, type CrawlOutcome, type ProbeResult, type TocChapter } from './webCrawler'
 import { AI_TEXT_CODE_EXTS } from '../../src/lib/aiTextExts'
 import {
   anchorLabel,
@@ -52,6 +53,12 @@ const KEY = 'sources.json'
 const SOURCE_FILE = 'SOURCE.md'
 const MAX_INDEX = 1000 // 长资料方案 §5.7：按页索引要够 600 页教材
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
+/** url 素材抓取稿目录名（沿用旧管线 `SOURCES/web/{slug}/` 习惯） */
+const WEB_DIR = 'web'
+/** 网页素材目录索引文件名（注入章节清单时排除） */
+const WEB_TOC_FILE = '00-目录.md'
+/** 段注入里最多列出的网页章节条数（超量给「其余 N 章见 00-目录.md」） */
+const MAX_WEB_CHAPTERS = 120
 
 type GetSetting = (key: string) => unknown
 
@@ -722,10 +729,30 @@ export async function extractSource(wsId: string, sourceId: string, anchor: Sour
   if (!s) return { ok: false, error: '没有素材注册表' }
   const src = s.sources.find((x) => x.id === String(sourceId ?? '').trim())
   if (!src) return { ok: false, error: '素材不存在' }
+  if (src.type === 'url') {
+    const dir = webDirRelOf(src, vault.rootPath)
+    if (dir) {
+      return {
+        ok: true,
+        relPath: dir,
+        skipped: true,
+        hint: `网页素材已抓取章节（目录 ${dir}，含 00-目录.md）：按需读单章，不需要再提取`,
+      }
+    }
+  }
   if (src.extractRel && src.type !== 'pdf' && src.type !== 'pptx' && src.type !== 'docx' && src.type !== 'code') {
     return { ok: true, relPath: src.extractRel, skipped: true }
   }
-  if (src.type === 'md' || src.type === 'dir' || src.type === 'url') {
+  if (src.type === 'url') {
+    // url 没有「原件文件」可提取：章节抓取走「展开网页」（probeWebSource / crawlWebSource），
+    // 抓取结果写进 extractRel（目录）。这里明确指路，别让模型以为提取一次就能读到正文。
+    return {
+      ok: false,
+      error: '网页素材需要先抓取章节：在右栏素材行点「展开网页」抓取后，本段注入会列出章节清单（按需读单章）',
+      hint: '抓取后直接按路径读提取稿，不需要再调用 course.sources.extract',
+    }
+  }
+  if (src.type === 'md' || src.type === 'dir') {
     return src.rel ? { ok: true, relPath: src.rel, skipped: true } : { ok: false, error: '该素材不需要提取' }
   }
   const abs = sourceAbs(src)
@@ -874,6 +901,222 @@ export async function extractSource(wsId: string, sourceId: string, anchor: Sour
   }
 }
 
+// ===== 网页素材（url）抓取：章节落盘进提取目录 =====
+
+/**
+ * url 素材的「提取目录」用 `SourceEntry.extractRel`（**尾斜杠** = 目录）。
+ *
+ * 为什么复用而不是新开字段：`sources.json` 里 url 素材的 extractRel 一直按目录解释
+ * （`buildSourceIndex` 对 `(dir|url) && extractRel` 走目录列举分支；旧 SOURCE.md 的指针
+ * 也是 `✓ → web/{slug}/` 这一形状）。新开 `dirRel` 会引出第二套「提取目录」口径，
+ * 读取 / 迁移 / 索引三条链路都要各记一次。
+ */
+export interface WebProbeSourceResult extends ProbeResult {
+  /** 该素材已抓取的目录（仓库相对，带尾斜杠） */
+  dirRel?: string
+  /** 目录里已有的章节文件名（断点续抓的既有成果） */
+  existing?: string[]
+}
+
+export interface WebCrawlSourceResult {
+  ok: boolean
+  dirRel?: string
+  done?: number
+  failed?: Array<{ url: string; title: string; reason: string }>
+  skipped?: number
+  error?: string
+}
+
+const crawlAborts = new Map<string, AbortController>()
+
+function abortKey(wsId: string, sourceId: string): string {
+  return `${wsId}\u0000${sourceId}`
+}
+
+/** 文件名段取 URL 末段去 .html（稳定可续抓：同一 URL 重爬命中 exists 跳过） */
+function urlStemName(u: string): string {
+  try {
+    const p = new URL(u).pathname
+    const seg = decodeURIComponent(p.slice(p.lastIndexOf('/') + 1)).replace(/\.html?$/i, '')
+    return sanitizeTitle(seg).replace(/\s+/g, '-').slice(0, 40)
+  } catch { return '' }
+}
+
+/** 章节文件名：`NN-词干.md`（词干优先用章节标题，取不到退回 URL 末段） */
+function webChapterFileName(no: number, title: string | undefined, url: string): string {
+  const stem = (title ? sanitizeTitle(title).replace(/\s+/g, '-') : '') || urlStemName(url) || `p${no}`
+  return `${String(no).padStart(2, '0')}-${stem.slice(0, 40)}.md`
+}
+
+/** 抓取目录里的章节文件名（顶层 md，排除 00-目录.md，按文件名排序） */
+function listWebChapterFiles(dirAbs: string): string[] {
+  let names: string[] = []
+  try {
+    names = readdirSync(dirAbs, { withFileTypes: true })
+      .filter((d) => d.isFile() && /\.md$/i.test(d.name) && d.name !== WEB_TOC_FILE)
+      .map((d) => d.name)
+  } catch { return [] }
+  return names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+}
+
+function webDirRelOf(source: SourceEntry, rootPath?: string): string | null {
+  const raw = typeof source.extractRel === 'string' ? source.extractRel : ''
+  if (isWebExtractDir(raw)) return raw
+  // 迁移自旧 SOURCE.md 的指针（`✓ → web/{slug}/` 经 slash() 归一后丢了尾斜杠）：
+  // 磁盘上确实是目录就按目录认，否则当普通提取稿文件。
+  if (!raw || !rootPath) return null
+  try {
+    return statSync(join(rootPath, raw)).isDirectory() ? `${raw.replace(/\/+$/, '')}/` : null
+  } catch { return null }
+}
+
+/** url 素材的 extractRel 是不是抓取目录（约定尾斜杠；纯函数，契约脚本直接断言） */
+export function isWebExtractDir(rel: unknown): boolean {
+  return typeof rel === 'string' && /\/$/.test(rel) && rel.replace(/\/+$/, '').length > 0
+}
+
+/** 抓取目录（仓库相对）：已有目录复用；否则 `{工作区}/SOURCES/web/{slug}`，与其它素材不撞名 */
+function webDirRelFor(w: { rel: string; root: string }, source: SourceEntry, all: SourceEntry[]): string {
+  const cur = webDirRelOf(source, w.root)
+  if (cur) return cur
+  const base = `${w.rel}/SOURCES/${WEB_DIR}/${sanitizeTitle(source.title).replace(/\s+/g, '-') || source.id.slice(-8)}`
+  const claimed = (rel: string): boolean =>
+    all.some((x) => x.id !== source.id && webDirRelOf(x, w.root) === rel)
+  let rel = `${base}/`
+  let n = 1
+  while (claimed(rel)) rel = `${base}-${n++}/`
+  return rel
+}
+
+/** 探测：门户（候选锚点）/ 目录（章节清单）/ 单文章 三形态（零 token 纯程序）。 */
+export async function probeWebSource(wsId: string, sourceId: string, getSetting: GetSetting, anchorUrl?: string): Promise<WebProbeSourceResult> {
+  try {
+    const id = String(sourceId ?? '').trim()
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const s = readFile().workspaces[String(wsId ?? '').trim()]
+    const src = s?.sources.find((x) => x.id === id)
+    if (!src) return { ok: false, error: '素材不存在' }
+    if (src.type !== 'url') return { ok: false, error: '仅 url 类型素材支持展开网页' }
+    const target = String(anchorUrl ?? '').trim() || src.url || ''
+    if (!target) return { ok: false, error: '素材未登记网址' }
+    const dirRel = webDirRelOf(src, vault.rootPath) ?? undefined
+    const existing = dirRel ? listWebChapterFiles(join(vault.rootPath, dirRel)) : []
+    const r = await probeWeb(target, `${src.title} ${src.note ?? ''}`)
+    return { ...r, dirRel, existing }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/**
+ * 批量抓取勾选章节 → 落盘 `{提取目录}/NN-*.md` + `00-目录.md` → 回写 sources.json 的 extractRel。
+ * 断点续抓 = 同名文件已存在即跳过；`webCrawlMaxPages` / `webCrawlDelayMs` 设置项生效。
+ */
+export async function crawlWebSource(
+  wsId: string,
+  sourceId: string,
+  chaptersInput: Array<{ url: string; title?: string }>,
+  getSetting: GetSetting,
+): Promise<WebCrawlSourceResult> {
+  const id = String(wsId ?? '').trim()
+  const sid = String(sourceId ?? '').trim()
+  try { assertWorkspaceEditable(id) } catch (e) { return { ok: false, error: (e as Error).message } }
+  const vault = getCurrentVault()
+  const w = workspaceAbs(id, getSetting)
+  if (!vault || !w) return { ok: false, error: '尚未打开仓库或工作区不存在' }
+  const f = readFile()
+  const s = f.workspaces[id]
+  const src = s?.sources.find((x) => x.id === sid)
+  if (!s || !src) return { ok: false, error: '素材不存在' }
+  if (src.type !== 'url') return { ok: false, error: '仅 url 类型素材支持批量抓取' }
+  const list = (Array.isArray(chaptersInput) ? chaptersInput : [])
+    .map((x) => ({ url: String(x?.url ?? '').trim(), title: String(x?.title ?? '').trim() }))
+    .filter((x) => /^https?:\/\//i.test(x.url))
+    .slice(0, 200)
+  if (list.length === 0) return { ok: false, error: '没有要抓取的页面（请先在勾选清单选择章节）' }
+  const dirRel = webDirRelFor(w, src, s.sources)
+  const dirAbs = join(vault.rootPath, dirRel)
+  try { mkdirSync(dirAbs, { recursive: true }) } catch (e) { return { ok: false, error: (e as Error).message } }
+  const maxPages = Math.max(1, Math.min(Number(getSetting('webCrawlMaxPages')) || 80, 200))
+  const delayMs = Math.max(0, Number(getSetting('webCrawlDelayMs')) || 300)
+  const chapters: TocChapter[] = list.map((x, i) => ({ no: i + 1, title: x.title, url: x.url, group: '', defaultChecked: true }))
+  const key = abortKey(id, sid)
+  const abort = new AbortController()
+  crawlAborts.set(key, abort)
+  let outcome: CrawlOutcome
+  try {
+    outcome = await crawlQueue(chapters, {
+      maxPages,
+      delayMs,
+      signal: abort.signal,
+      fileName: (ch) => webChapterFileName(ch.no, ch.title, ch.url),
+      exists: (rel) => existsSync(join(dirAbs, rel)),
+      write: (_ch, rel, md) => { writeFileSync(join(dirAbs, rel), md, 'utf-8') },
+      onProgress: (info) => broadcast(BROADCAST_CHANNEL.aiTeachWebCrawlProgress, {
+        wsId: id, sourceId: sid, done: info.done, total: info.total, current: info.current,
+      }),
+    })
+  } catch (e) {
+    return { ok: false, dirRel, error: (e as Error).message }
+  } finally {
+    crawlAborts.delete(key)
+  }
+  // 00-目录.md：列全部已落盘章节（含历史续抓），标题 / 源链从文件头解析；失败项如实列出
+  let totalChars = 0
+  const rows: string[] = []
+  for (const file of listWebChapterFiles(dirAbs)) {
+    let body = ''
+    try { body = readFileSync(join(dirAbs, file), 'utf-8') } catch { /* 单文件读失败不阻断目录生成 */ }
+    totalChars += body.length
+    const t = /^#\s+(.+)$/m.exec(body)
+    const u = /^>\s*来源：(\S+)/m.exec(body)
+    const title = (t ? t[1] : file.replace(/\.md$/i, '').replace(/^\d+-/, '').replace(/-/g, ' ')).trim()
+    rows.push(`| ${file.replace(/\.md$/i, '').split('-')[0]} | ${title} | ${dirRel}${file} | ${u ? u[1] : '-'} | ✓ |`)
+  }
+  const failedRows = (outcome.failed ?? []).map((x) => `| - | ${x.title || x.url} | - | ${x.url} | ✗ ${x.reason} |`)
+  if (rows.length === 0 && abort.signal.aborted) {
+    return { ok: false, dirRel, failed: outcome.failed, error: '已取消（未抓到任何章节）' }
+  }
+  const tocMd = [
+    `# ${src.title} · 网页抓取目录`,
+    '',
+    `> 素材：「${src.title}」（${src.url ?? '-'}） · 更新：${today()} · 抓取工具：Defuddle 正文清洗`,
+    '> 每章一个 md 可直接编辑修正；AI 按「提取稿」清单按需读单章。',
+    '',
+    '| 章 | 标题 | 本地文件 | 源 URL | 状态 |',
+    '| --- | --- | --- | --- | --- |',
+    ...rows,
+    ...failedRows,
+    '',
+  ].join('\n')
+  try { writeFileSync(join(dirAbs, WEB_TOC_FILE), tocMd, 'utf-8') } catch (e) { return { ok: false, dirRel, error: (e as Error).message } }
+  // 抓取可能持续数分钟：落库前重读一次，别拿开跑前的快照覆盖这期间用户改的登记
+  const fresh = readFile()
+  const freshWs = fresh.workspaces[id]
+  const freshSrc = freshWs?.sources.find((x) => x.id === sid)
+  if (freshWs && freshSrc && rows.length > 0) {
+    freshSrc.extractRel = dirRel
+    freshSrc.status = 'ready'
+    freshSrc.chars = totalChars
+    freshSrc.index = buildSourceIndex(freshSrc)
+    freshSrc.indexUpdatedAt = nowIso()
+    writeFile(fresh)
+  }
+  broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: dirRel.replace(/\/+$/, '') })
+  broadcastDataChanged('knowledge')
+  broadcastSources(id)
+  return { ok: true, dirRel, done: outcome.done.length, failed: outcome.failed, skipped: outcome.skipped.length }
+}
+
+/** 取消进行中的抓取（同一素材同时只允许一条抓取） */
+export function cancelWebSource(wsId: string, sourceId: string): { ok: boolean; error?: string } {
+  const a = crawlAborts.get(abortKey(String(wsId ?? '').trim(), String(sourceId ?? '').trim()))
+  if (!a) return { ok: false, error: '没有进行中的抓取' }
+  a.abort()
+  return { ok: true }
+}
+
 // ===== 章 ID 重映射（大纲重排/重命名时保住分配） =====
 
 export function remapChapterAssignments(wsId: string, oldOutline: CourseOutline | null, newOutline: CourseOutline, getSetting: GetSetting): void {
@@ -910,6 +1153,10 @@ export interface HintSourceItem {
   extractPath?: string
   /** 提取稿与本段区间的匹配度（长资料方案 §8.1） */
   extractMatch?: 'exact' | 'fallback' | 'missing'
+  /** url 素材的抓取目录（仓库相对，带尾斜杠）；与 chapters 同时出现 */
+  chapterDir?: string
+  /** url 素材已抓取的章节文件（仓库相对路径，已排除 00-目录.md；只列不读） */
+  chapters?: string[]
   pages?: number
   chars?: number
   textLayer?: SourceTextLayer
@@ -958,8 +1205,12 @@ export function renderSourcesHint(input: SourcesHintInput): string {
     if (items.length) {
       lines.push(SOURCE_CITATION_RULE)
       // 提取稿 / 未提取的行为指引（判定沿用条目自身的 extractMatch，不在此改口径）
-      if (items.some((it) => !!it.extractPath)) lines.push('有提取稿的条目优先读提取稿，引用时仍按原件标页码/行号。')
-      if (items.some((it) => !it.extractPath)) lines.push('未提取的条目不要假装引用，先让用户提取本段区间。')
+      const hasExtract = (it: HintSourceItem): boolean => !!it.extractPath || (it.chapters?.length ?? 0) > 0
+      if (items.some(hasExtract)) lines.push('有提取稿的条目优先读提取稿，引用时仍按原件标页码/行号。')
+      if (items.some((it) => !hasExtract(it) && it.type !== 'url')) lines.push('未提取的条目不要假装引用，先让用户提取本段区间。')
+      if (items.some((it) => it.type === 'url' && !hasExtract(it))) {
+        lines.push('未抓取的网页素材不要假装引用：可先用 builtin.web.read 在线读单页；读到的只是目录/导航页时，提示用户在右栏素材点「展开网页」抓取后再引用。')
+      }
     }
     items.forEach((it, i) => {
       const bits = [`- [${i + 1}] ${it.title}`, `类型 ${it.type}`, `区间 ${it.anchor}`]
@@ -969,8 +1220,32 @@ export function renderSourcesHint(input: SourcesHintInput): string {
       else if (it.textLayer === 'partial') bits.push(`部分扫描（${(it.emptyPages ?? []).length} 页无文本，需转写空页）`)
       if (it.mode) bits.push(it.mode === 'exact' ? '逐知识点匹配' : it.mode === 'narrow' ? '按标题/文件名缩窄' : '回退本章分配')
       bits.push(`路径 ${it.path}`)
+      // 网页素材（url）：有抓取目录 → 章节清单（每章一个 md，按需读单章，勿整目录塞进上下文）
+      const chapters = it.chapters ?? []
+      if (it.chapterDir && chapters.length) {
+        bits.push(`网页抓取稿 ${it.chapterDir}（共 ${chapters.length} 章，按需读单章，勿一次读全部）`)
+        lines.push(bits.join(' · '))
+        // 条数上限 120；同时按剩余字符预算收敛，保证「其余 N 章见 00-目录.md」不会被整串截断吞掉
+        const budget = Math.max(0, max - lines.join('\n').length - 160)
+        const shown: string[] = []
+        let used = 0
+        for (const c of chapters) {
+          if (shown.length >= MAX_WEB_CHAPTERS) break
+          if (used + c.length + 6 > budget) break
+          shown.push(c)
+          used += c.length + 6
+        }
+        if (!shown.length) {
+          lines.push(`  - （章节清单过长，请直接读 ${WEB_TOC_FILE} 选章）`)
+          return
+        }
+        for (const c of shown) lines.push(`  - ${c}`)
+        if (chapters.length > shown.length) lines.push(`  - …（其余 ${chapters.length - shown.length} 章，见 ${WEB_TOC_FILE}）`)
+        return
+      }
       if (it.extractMatch === 'exact' && it.extractPath) bits.push(`本章提取稿 ${it.extractPath}`)
       else if (it.extractMatch === 'fallback' && it.extractPath) bits.push(`提取稿 ${it.extractPath}（非本章区间，请先提取本章）`)
+      else if (it.type === 'url') bits.push('网页未抓取（右栏素材点「展开网页」）')
       else bits.push('未提取（先 course.sources.extract 本段区间）')
       lines.push(bits.join(' · '))
     })
@@ -984,6 +1259,7 @@ export function renderSourcesHint(input: SourcesHintInput): string {
 export function resolveSegmentSources(wsId: string, segmentSources: Array<{ sourceId: string; label: string; anchor: SourceAnchor; mode?: string }>, getSetting: GetSetting): HintSourceItem[] {
   const s = ensureSources(wsId, getSetting)
   if (!s) return []
+  const vault = getCurrentVault()
   const out: HintSourceItem[] = []
   for (const seg of segmentSources) {
     const src = s.sources.find((x) => x.id === seg.sourceId)
@@ -991,15 +1267,24 @@ export function resolveSegmentSources(wsId: string, segmentSources: Array<{ sour
       out.push({ title: seg.label, type: 'other', path: '（素材已移除）', anchor: anchorLabel(seg.anchor), mode: seg.mode })
       continue
     }
-    const pick = pickExtract(src, seg.anchor)
+    // url 素材：extractRel 是抓取目录（尾斜杠）→ 列出章节文件，注入端按需读单章
+    const chapterDir = src.type === 'url' ? webDirRelOf(src, vault?.rootPath) ?? undefined : undefined
+    let chapters: string[] | undefined
+    if (chapterDir && vault) {
+      const files = listWebChapterFiles(join(vault.rootPath, chapterDir))
+      if (files.length) chapters = files.map((name) => `${chapterDir}${name}`)
+    }
+    const pick = chapterDir ? null : pickExtract(src, seg.anchor)
     out.push({
       title: src.title,
       type: src.type,
       path: src.rel || src.url || '（无路径）',
       anchor: anchorLabel(seg.anchor),
       mode: seg.mode,
-      extractPath: pick.extract?.rel,
-      extractMatch: pick.match,
+      extractPath: pick?.extract?.rel,
+      extractMatch: pick?.extract ? pick.match : undefined,
+      chapterDir: chapters ? chapterDir : undefined,
+      chapters,
       pages: src.pages,
       chars: src.chars,
       textLayer: src.textLayer,
@@ -1055,4 +1340,11 @@ export function registerAiTeachingSourceRegistryHandlers(getSetting: GetSetting)
     removeAssignment(String(wsId ?? ''), String(chapterId ?? ''), String(sourceId ?? ''), getSetting))
   ipcMain.handle('aiTeachCourse:extractSource', (_e, wsId: string, sourceId: string, anchor: SourceAnchor) =>
     extractSource(String(wsId ?? ''), String(sourceId ?? ''), anchor, getSetting))
+  // 网页素材（url）：探测门户/目录/单文章 → 勾选章节批量抓取（进度走 aiTeach:web-crawl-progress）→ 取消
+  ipcMain.handle('aiTeachCourse:webProbe', (_e, wsId: string, sourceId: string, anchorUrl?: string) =>
+    probeWebSource(String(wsId ?? ''), String(sourceId ?? ''), getSetting, anchorUrl ? String(anchorUrl) : undefined))
+  ipcMain.handle('aiTeachCourse:webCrawl', (_e, wsId: string, sourceId: string, chapters: Array<{ url: string; title?: string }>) =>
+    crawlWebSource(String(wsId ?? ''), String(sourceId ?? ''), Array.isArray(chapters) ? chapters : [], getSetting))
+  ipcMain.handle('aiTeachCourse:webCancel', (_e, wsId: string, sourceId: string) =>
+    cancelWebSource(String(wsId ?? ''), String(sourceId ?? '')))
 }
