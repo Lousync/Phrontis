@@ -498,7 +498,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, onMana
               )}
               {showDrawer && drawerMounted && (
                 <div
-                  className={`absolute inset-y-0 left-0 ${isNarrow ? 'w-48' : 'w-52'} z-10 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col transition-transform duration-200 ease-out ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
+                  className={`absolute inset-y-0 left-0 ${isNarrow ? 'w-48' : 'w-52'} z-10 bg-[var(--bg-secondary)] kb-glass-chrome border-r border-[var(--border-color)] flex flex-col transition-transform duration-200 ease-out ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
                 >
                   <button onClick={() => { void newSession() }}
                     className="flex items-center gap-1.5 m-2 px-2.5 py-1.5 rounded-md text-[12px] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity">

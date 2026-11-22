@@ -2960,3 +2960,24 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`verify-artifact-tabs.mjs` 增原地刷新断言；新增 `verify-artifact-inplace.mjs`。
 
 **验收**：双端 `tsc --noEmit` 0 错；新增/更新契约脚本全绿。
+
+## 2026-11-21 · 昼夜主题：博客 / AI 助手 / 阅读器工具条并入「通透玻璃」
+
+**现状 / 用户反馈**：同一套昼夜主题下，页面条（标签栏）是透明露出天空的，但**紧贴它下面的阅读器工具条**、**AI 助手整页**、**博客正文区**各自铺实色，于是出现了「透明标签栏 → 实心奶油条 → 内容」三层硬切；博客与 AI 助手整块不透，和笔记 / 书架等透明模块放在一起显得违和。三处截图（EPUB 阅读器 / 博客文章列表 / AI 助手对话）指向同一个根因。
+
+**根因**：`.kb-theme-surface` 只作用在**模块根节点**，壳内已被置为透明；但这些模块**内部**又各自铺了一层 `bg-[var(--bg-primary)]` / `bg-[var(--bg-secondary)]`：
+- 博客：`Sidebar`（`--bg-secondary`）、`EntryList` 与 `MarkdownEditor` 根 / 内容区（`--bg-primary`）、月切换条与写作工具条（`--bg-secondary`）；
+- AI 助手：模块根与变更面板根（`--bg-primary`）、顶行（`--bg-secondary`）；
+- 阅读器：EPUB / PDF / TXT 三个工具栏（`--bg-secondary`），PDF 还有「书桌」底色（`--bg-tertiary`）与扫描提示条。
+
+**改动点**：
+- 新增 `.kb-chrome-flat`（`src/styles/index.css`）：**顶部结构条**专用，昼夜主题 + 壳内 → `background-color: transparent`。与 `.kb-glass-chrome` 的分工写进注释：后者是**内部**结构面（侧栏 / 抽屉 / 面板头，需要 14px 模糊压住滚过的内容），前者与页面条同排、底下就是页面条的天空，不再垫一层。
+- 阅读器「书桌」用 `.kb-reader-desk` 归入同一类：只让 PDF 页间底色透出天空，**书页 canvas 本身仍是纸**（不透明，对比度不变）。
+- 内容面一律改 `kb-theme-surface`（其它主题仍是 `--bg-primary` 实底 + 主题渐变，零变化）。
+- 挂点：博客 `Sidebar` → `kb-glass-chrome`；月切换条 / 写作工具条 → `kb-chrome-flat`；`EntryList` / `MarkdownEditor` / 标签条 → `kb-theme-surface`。AI 助手根 + 变更面板根 → `kb-theme-surface`，顶行 → `kb-chrome-flat`，变更面板文件切换条 / 会话抽屉 → `kb-glass-chrome`。EPUB / PDF / TXT 工具栏、TXT 搜索行、PDF 扫描提示 → `kb-chrome-flat`；PDF 内置侧栏 → `kb-glass-chrome`；PDF 根 → `kb-reader-desk`。
+- 无障碍：`prefers-reduced-transparency: reduce` 下 `.kb-chrome-flat` 回落 `--bg-secondary`、`.kb-reader-desk` 回落 `--bg-tertiary`（与页面条一起落回实底）。
+- 契约 `.AGENT/scripts/daycycle/verify-daycycle.mjs` 增 C9m：CSS 规则 + 六处 `kb-chrome-flat` / 四处内容面 / PDF 书桌的接线断言。
+
+**刻意不动**：输入框、消息卡、文章卡、弹层、Monaco 编辑区、书页本身 —— 它们是「纸」和可读面，进玻璃化会掉对比度。
+
+**验收**：`tsc --noEmit -p tsconfig.web.json` 0 错；`verify-daycycle.mjs` 全绿；真机 devbridge 截图复查（正午 13:03：博客列表 / 博客写作 / EPUB 阅读器 / PDF 阅读器 / AI 助手，页面条与工具条已连成一片天空，纸面仍为实底）。

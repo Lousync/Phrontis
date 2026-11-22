@@ -1251,7 +1251,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const paperLabel = paper === 'sepia' ? '护眼' : paper === 'green' ? '绿纸' : paper === 'dark' ? '暗色' : '默认'
 
   const toolbar = (
-    <div className="kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)]">
+    <div className="kb-fit kb-fit-pdfread kb-chrome-flat flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)]">
       {onBack && (
         <>
           <button onClick={onBack} data-tip={backLabel ?? '返回书架'} aria-label={backLabel ?? '返回书架'} data-wb="epubBack"

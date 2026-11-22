@@ -611,7 +611,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
         : {}
 
   const toolbar = (
-    <div className="kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)]">
+    <div className="kb-fit kb-fit-pdfread kb-chrome-flat flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)]">
       {onBack && (
         <>
           <button onClick={onBack} data-tip={backLabel ?? '返回书架'} aria-label={backLabel ?? '返回书架'}
@@ -649,7 +649,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     <div data-wb="txtReader" data-reader-surface data-sel-float-ignore className="kb-theme-surface flex h-full min-h-0 flex-col">
       {toolbar}
       {searchOpen && (
-        <div key="search" className="kb-view-in flex items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px]">
+        <div key="search" className="kb-view-in flex items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] kb-chrome-flat px-2 py-1 text-[12px]">
           <Search size={13} className="text-[var(--text-tertiary)]" />
           <input
             value={searchQuery}

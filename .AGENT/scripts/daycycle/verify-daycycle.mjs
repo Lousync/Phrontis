@@ -265,6 +265,30 @@ function mixRgb(c1, c2, t) {
     'C9l 笔记分组条挂语义类（底色 / 计数 / 横线可被昼夜主题单独接管）')
   assert(/html\.theme-daycycle \.kb-feed-group\s*\{[^}]*position:\s*static[^}]*background-color:\s*transparent/.test(css),
     'C9l 昼夜主题分组条去底色 / 去吸顶（不再是一条实心奶油横条）')
+  // 顶部结构条与页面条同档（2026-11-21 用户反馈「标签栏和正文中间的工具条栏不融洽」）：
+  // 页面条是透明的，紧贴它的工具条若铺实色就会切成「透明 → 奶油 → 内容」三层。
+  assert(/\[data-wb='shell'\] \.kb-chrome-flat,[\s\S]{0,120}?\.kb-reader-desk\s*\{[^}]*background-color:\s*transparent/.test(css),
+    'C9m .kb-chrome-flat / .kb-reader-desk 在壳内让出底色（与页面条连成一片天空）')
+  for (const [file, hint] of [
+    ['src/components/shared/epub/EpubReaderView.tsx', 'EPUB 阅读器工具条'],
+    ['src/components/shared/pdf/PdfReaderView.tsx', 'PDF 阅读器工具条 / 扫描提示'],
+    ['src/components/shared/txt/TxtReaderView.tsx', 'TXT 阅读器工具条 / 搜索行'],
+    ['src/modules/ai-assistant/index.tsx', 'AI 助手顶行'],
+    ['src/modules/blog/index.tsx', '博客月切换条'],
+    ['src/modules/blog/components/MarkdownEditor.tsx', '博客写作工具条'],
+  ]) {
+    assert(read(file).includes('kb-chrome-flat'), `C9m ${hint} 挂 kb-chrome-flat`)
+  }
+  for (const [file, hint] of [
+    ['src/modules/ai-assistant/index.tsx', 'AI 助手模块面'],
+    ['src/modules/ai-assistant/ReviewPane.tsx', 'AI 助手变更面板'],
+    ['src/modules/blog/views/EntryList.tsx', '博客文章列表'],
+    ['src/modules/blog/components/MarkdownEditor.tsx', '博客编辑器'],
+  ]) {
+    assert(read(file).includes('kb-theme-surface'), `C9m ${hint} 改为壳内透明内容面（kb-theme-surface）`)
+  }
+  assert(read('src/components/shared/pdf/PdfReaderView.tsx').includes('kb-reader-desk'),
+    'C9m PDF 阅读器「书桌」挂语义类（壳内让天空透上来，书页纸面不变）')
 
   const app = read('src/App.tsx')
   assert(app.includes('startDaycycleEngine()') && app.includes('stopDaycycleEngine()'),

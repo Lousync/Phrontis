@@ -256,7 +256,7 @@ export function Sidebar({ entries, starredEntries, selectedDate, onSelectDate, a
   }
 
   return (
-    <aside className="w-full bg-[var(--bg-secondary)] flex flex-col h-full shrink-0 overflow-x-hidden">
+    <aside className="w-full bg-[var(--bg-secondary)] kb-glass-chrome flex flex-col h-full shrink-0 overflow-x-hidden">
       {/* 「文章」标题行已删（2026-09-19 反馈）：写作/全部文章两钮上移到左栏模块态头部最右
           （blog/index.tsx portal 到 modActionsEl），侧栏直接从收藏/归档开始 */}
 

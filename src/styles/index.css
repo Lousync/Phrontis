@@ -3253,6 +3253,22 @@ html.theme-daycycle .kb-glass-chrome {
   backdrop-filter: blur(14px) saturate(1.04);
   -webkit-backdrop-filter: blur(14px) saturate(1.04);
 }
+/* ===== 昼夜主题 · 「顶部结构条」与页面条同档（2026-11-21 用户反馈）=====
+   页面条在壳内本来就是透明的（天空透上来），但紧贴它下面的阅读器工具条 / AI 助手顶行 /
+   博客月切换条各自铺 `--bg-secondary` 实色，于是「透明标签栏 → 实心奶油条 → 内容」三层硬切，
+   看起来像一条突兀的蓝带压着一条奶油条。
+   这类**与页面条同排、合起来构成一条 chrome** 的结构条，昼夜主题下直接让出底色：
+   不加玻璃、不加模糊，与页面条连成同一片天空；分隔仍靠元素自己的 `border-b`。
+   ★ 与 `.kb-glass-chrome` 的分工：那是**内部**结构面（侧栏 / 抽屉 / 面板头），需要在滚过来的
+     内容上压一层模糊；这里是**顶部**条，底下就是页面条的天空，不需要再垫。
+   ★ `.kb-reader-desk` 是同一手势的另一半：PDF 阅读器的「书桌」底色也铺实色（--bg-tertiary），
+     留着它就是一块实心奶油压在标签栏下面；书页本身仍是不透明的纸（canvas），对比度不变。
+   ★ 只作用于壳内：popout / 独立窗口没有页面条可连，仍由自己的底色承担。 */
+html.theme-daycycle [data-wb='shell'] .kb-chrome-flat,
+html.theme-daycycle [data-wb='shell'] .kb-reader-desk {
+  background-color: transparent;
+}
+
 html.theme-daycycle .kb-dc-center,
 html.theme-daycycle .kb-dc-empty,
 html.theme-daycycle .kb-dc-side {
@@ -3319,6 +3335,17 @@ html.theme-daycycle .kb-edge-tab-active::after {
     background-color: var(--bg-primary);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+  /* 顶部结构条在常态下就是「页面条的延续」，这里随页面条一起落回实底；
+     它原本的颜色是 --bg-secondary，比页面条的 --bg-primary 深一档，故单独给色。
+     ★ 选择器必须带 [data-wb='shell'] 与上面那条**同特异性** —— 少了它就会被
+       上面更高特异性的 transparent 规则压住，开关等于没生效。 */
+  html.theme-daycycle [data-wb='shell'] .kb-chrome-flat {
+    background-color: var(--bg-secondary);
+  }
+  /* 阅读器「书桌」原本是 --bg-tertiary（比正文面深），保持它自己的层级。 */
+  html.theme-daycycle [data-wb='shell'] .kb-reader-desk {
+    background-color: var(--bg-tertiary);
   }
 }
 

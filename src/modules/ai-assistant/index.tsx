@@ -563,9 +563,9 @@ export function AiAssistantModule({
         modActionsEl,
       )}
 
-      <div ref={layoutRef} className="flex h-full min-w-0 bg-[var(--bg-primary)]">
+      <div ref={layoutRef} className="flex h-full min-w-0 kb-theme-surface">
         <div className="flex h-full min-w-0 flex-1 flex-col">
-        <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3">
+        <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-secondary)] kb-chrome-flat px-3">
           <span className="flex min-w-0 items-center gap-2">
             <AiAssistantIcon size={13} style={{ color: BOOKMARK_COLORS.aiAssistant.fg }} />
             <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)]">{api.active?.title || 'AI助手'}</span>
