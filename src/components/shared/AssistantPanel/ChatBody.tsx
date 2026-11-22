@@ -498,7 +498,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, onMana
               )}
               {showDrawer && drawerMounted && (
                 <div
-                  className={`absolute inset-y-0 left-0 ${isNarrow ? 'w-48' : 'w-52'} z-10 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col transition-transform duration-200 ease-out ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
+                  className={`absolute inset-y-0 left-0 ${isNarrow ? 'w-48' : 'w-52'} z-10 bg-[var(--bg-secondary)] kb-glass-chrome border-r border-[var(--border-color)] flex flex-col transition-transform duration-200 ease-out ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
                 >
                   <button onClick={() => { void newSession() }}
                     className="flex items-center gap-1.5 m-2 px-2.5 py-1.5 rounded-md text-[12px] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity">
@@ -905,7 +905,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, onMana
                     <ChevronDown size={10} />
                   </button>
                   {/* F-12：上下文占用指示（与 AI 教学同口径，档位设置 ctxUsageDetail / 窗口 ctxWindow 共用） */}
-                  {ctxUsageDetail !== 'off' && (
+                  {/* 与本模块同口径：还没有任何消耗时不摆空圆环（新会话只剩噪音） */}
+                  {ctxUsageDetail !== 'off' && ctxUsed > 0 && (
                     <span
                       data-wb="aiCtxUsage"
                       data-tip={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}（窗口大小在 设置→AI教学 配置）` : '本会话最近一次上下文占用（设置模型上下文窗口后按比例着色）'} aria-label={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}（窗口大小在 设置→AI教学 配置）` : '本会话最近一次上下文占用（设置模型上下文窗口后按比例着色）'}

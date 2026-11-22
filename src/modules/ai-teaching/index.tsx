@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
-  agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
+  agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmReasoningCapable, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault, workspaceOpenInSystem,
   agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged, onWsExternalChange,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
@@ -34,6 +34,7 @@ import type { ArtTab } from './artifacts'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { Collapsible } from '../../components/shared/Collapsible'
 import { AnchoredLayer } from '../../components/shared/AnchoredLayer'
+import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { looseJsonParse } from '../../components/shared/QuizParser'
 import { showToast } from '../../lib/toast'
 import { handleChatCommand } from '../../lib/chatCommands'
@@ -42,6 +43,7 @@ import { ImageCard, imageGroupsOf } from '../../components/shared/AssistantPanel
 import { ComposerImageStrip } from '../../components/shared/AssistantPanel/ComposerImageStrip'
 import { useModelCatalog, resolveCatalogEntry } from '../../lib/modelCatalog'
 import { ChatImageThumbs } from '../../components/shared/AssistantPanel/ChatImageThumbs'
+import { UsageFooter } from '../../components/shared/AssistantPanel/UsageFooter'
 import { useComposerImages, type ComposerImage } from '../../lib/useComposerImages'
 import { looksLikeMindMap } from '../../lib/mindmap'
 import { isRenderableImagePath } from '../../lib/imageFormats'
@@ -64,6 +66,8 @@ import {
   takeEndedFor, unmarkSessionViewed,
 } from '../../lib/assistantRunStore'
 import { UsageRing, fmtTok } from '../../components/shared/UsageRing'
+import { buildContextUsage, formatContextPct, formatContextPctDetailed, formatContextTokens } from '../../lib/contextUsagePure'
+import type { ContextUsageKey } from '../../lib/contextUsagePure'
 import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 
 /**
@@ -71,7 +75,7 @@ import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
  * `agent:listSideLanes` 带回的每条支线都带 `branchFromMessageId`，据此在回答下方显示
  * 「支线追问 · 已开」（点击进右栏支线中心重开）；不再落 localStorage（修掉清缓存/换机即失联）。
  */
-import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AgentImageRef, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
+import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AgentImageRef, AiTeachInjectionStats, LlmUsageInfo, LlmModelEntry, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -259,8 +263,29 @@ function fmtTime(raw?: string | null): string {
   const sameDay = Number(m[1]) === now.getFullYear() && Number(m[2]) === now.getMonth() + 1 && Number(m[3]) === now.getDate()
   return sameDay ? `${m[4]}:${m[5]}` : `${m[2]}-${m[3]} ${m[4]}:${m[5]}`
 }
-/** 中英混排估算口径（仅用于注入构成摘要的字符→token 折算展示，非计费依据） */
-const CHARS_PER_TOKEN = 2.6
+/**
+ * 上下文用量明细 9 段色板（2026-11-20 按用户示意图重做）。
+ *
+ * 选色口径：一律**中明度**（HSL L 40%~60%）+ 中饱和度，色相拉开 30°~40°。
+ * 深色 #1e1e1e / 亮色 #fff / 昼夜浅绿 三种底上都是「一眼能分辨、又不刺眼」的填充色，
+ * 因此**不做主题反色**（堆叠条是类别编码，夜里改成浅色会跟正文抢注意力）。
+ * 顺序与 `CONTEXT_USAGE_CATEGORIES` 对齐：蓝 → 青 → 绿 → 琥珀 → 紫 → 粉 → 橙 → 靛 → 砖红。
+ */
+const CONTEXT_USAGE_COLORS: Record<ContextUsageKey, string> = {
+  messages: 'hsl(212 62% 52%)',
+  toolsDef: 'hsl(188 52% 42%)',
+  toolsList: 'hsl(148 42% 40%)',
+  skills: 'hsl(43 82% 40%)',
+  system: 'hsl(268 48% 58%)',
+  sources: 'hsl(330 52% 56%)',
+  workspace: 'hsl(17 70% 50%)',
+  ledger: 'hsl(235 42% 58%)',
+  capability: 'hsl(0 50% 52%)',
+}
+/** 「其他」= 已用但没被任何分类覆盖（工具结果等）：中性灰，明暗都退在彩色后面 */
+const CONTEXT_USAGE_OTHER_COLOR = 'hsl(0 0% 50%)'
+/** 「剩余空间」= 空心点 + 弱化底，和彩色段明确区分「这是空位，不是内容」 */
+const CONTEXT_USAGE_FREE_COLOR = 'color-mix(in srgb, var(--text-muted) 22%, transparent)'
 
 /** UI 优化条目6B：中栏导航状态按会话持久化（`aiTeach.nav.{sessionId}`）。
  *  保活架构下切 Tab 不卸载组件，但模块实例重建会整树重置——
@@ -432,7 +457,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const convoLlm = useRef<Map<string, { modelId?: string; effort?: Effort }>>(new Map())
   const [convoModel, setConvoModel] = useState('')
   const [convoEffort, setConvoEffort] = useState<Effort>('off')
-  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  /**
+   * 模型菜单锚在触发按钮上（`useAnchoredMenu`，fixed 定位）：默认向下，底部装不下就翻到上方，
+   * 并跟随滚动 / 改窗口重算。2026-11-21 用户反馈：挂在输入卡容器上会跑到面板右缘、离按钮很远，
+   * 而且贴着窗口底会被裁 —— 所以回到「按钮附近 + 自动翻面」，但**不再就地 absolute**
+   * （就地会被卡片的 overflow 与层叠上下文裁掉）。
+   */
+  const modelMenuTriggerRef = useRef<HTMLButtonElement>(null)
+  const modelMenuRef = useRef<HTMLDivElement>(null)
+  const modelMenu = useAnchoredMenu(modelMenuTriggerRef, modelMenuRef, 248)
   /** P2 多模态：当前回答模型是否支持图片（null = 检测中；false = 已确认不支持） */
   const [visionChatOk, setVisionChatOk] = useState<boolean | null>(null)
   useEffect(() => {
@@ -443,25 +476,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return () => { alive = false }
   }, [convoModel])
   const imageBlocked = composerImages.hasImages && visionChatOk === false
-  /**
-   * 视觉转写模型（素材转写用，与回答模型分开）：'' = 自动按模型名识别；格式 providerId:model。
-   *
-   * 单一真源是**设置键 aiTeachVisionModel**（2026-10-13 决策 D）。此前它只存在 localStorage 的
-   * `aiTeach.visionModel`，是个隐藏设置 —— 设置页搜不到、也不随设置迁移（换电脑就丢）。
-   * 现在设置入口在「设置 → AI → 教学」，这里与它是同一个键（老 localStorage 值按决策 E 退役）。
-   */
-  const [visionModel, setVisionModel] = useState('')
-  const [visionList, setVisionList] = useState<LlmVisionModelInfo[]>([])
-  const [showAllVision, setShowAllVision] = useState(false)
-  const pickVision = (val: string): void => {
-    setVisionModel(val)
-    void setSettingRaw('aiTeachVisionModel', val)
-  }
-  // 读设置键（与「设置 → AI → 教学」同一真源）
-  useEffect(() => {
-    void getSettingRaw('aiTeachVisionModel').then(v => setVisionModel(String(v ?? ''))).catch(() => null)
-  }, [])
-  const [providerList, setProviderList] = useState<LlmProviderInfo[]>([])
   const [modelCapable, setModelCapable] = useState(false)
   const [organized, setOrganized] = useState<Record<string, string>>({})
   // P4（§3.7/3.9）：左栏 VS Code 多分区（折叠贴靠+状态记忆）+ 侧栏整体收放 + 中栏文档阅读视图（方案 B）
@@ -1990,35 +2004,67 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [askCustomPicks, setAskCustomPicks] = useState<Record<number, boolean>>({})
   const askVisible = !!askPending && askDismissed !== askPending.id
   /**
-   * 空态（本段刚开、还没消息、也没有待答提问卡）：输入卡抬到视野中部并露出推荐动作。
-   * 只在「已进入课程段」时启用 —— 没有段的自由对话保持原版式（下方空态卡本身就够用）。
+   * 中栏空态（本轮会话还没有任何消息，也不在待答提问卡 / 准备面板 / 只读段里）：
+   * 标题 + 说明 + 输入卡要作为**一组**整体垂直居中 —— 故「居中」按空态判定，与是否开段无关。
+   * 标题本身也搬进了 dock（见 dockRef 那一段），否则会是「文字在滚动区中部、输入框钉在底部」
+   * 的割裂版式：滚动区自己居中、dock 自己靠底，两者没有共同的中轴。
    */
-  const heroMode = !!activeSegment && messages.length === 0 && !pending && !askVisible && !courseReadonly && !preflight
+  const emptyState = messages.length === 0 && !pending && !askVisible && !courseReadonly && !preflight
   /**
-   * 空态居中位移量（2026-11-20 对齐原型）：原型把 dock 改成 `position:absolute; inset` 居中，
-   * 再用 FLIP 补位移动画。这里不必真要 FLIP —— 目标位置可由「滚动区高 + dock 高」直接算出，
-   * 只动 transform 就能得到同样的观感，且不用在状态切换前后各量一次布局。
-   * 副作用是窗口变高/变矮时要重算，故挂 ResizeObserver。
+   * 推荐动作条只在「已进入课程段」的空态露出：没开段的自由对话 / 课程助手建课没有段内动作可推荐。
+   * 与 emptyState 分离，是为了让居中位移覆盖所有空态、而推荐动作仍只照顾本段。
+   */
+  const heroMode = emptyState && !!activeSegment
+  /**
+   * 空态居中位移量（2026-11-20 对齐原型）：
+   * 居中的是**整组** —— 空态标题 + 说明 + 输入卡 + 卡下控件行 / 推荐动作条；后几项都在 dock 内部，
+   * 故「dock 高」即「组高」，只抬 dock 一个容器就等于抬整组。
+   * 口径是**整个中栏**：目标 = 中栏 `<section>` 的垂直中线，dock 自然中线到它的差值就是位移。
+   * ★ 锚点必须是 section 的**实测 rect**，不能用滚动区的 `clientHeight` 反推（2026-11-20 第二次实测）：
+   *   滚动区是 `absolute inset-0`，首帧/面板展开动画期间它的高度还没定型（读到 0 或旧值），
+   *   而它之后未必再变尺寸 → ResizeObserver 不补测，位移就永久停在 0，整组仍贴在列底
+   *   （用户截图：标题 y≈829、输入卡 950–1130，正是「没抬」的样子）。
+   * 另一个坑：`getBoundingClientRect()` 含**当前已施加**的 translateY（含 520ms 过渡中间值），
+   * 直接拿它算会自我反馈，故用计算样式的矩阵把位移还原掉，取「自然位置」再算差。
+   * 副作用：窗口变高/变矮、标题换行 / 托盘展开改变 dock 高时要重算 → observe section 与 dock。
    */
   const dockRef = useRef<HTMLDivElement>(null)
   const [dockShift, setDockShift] = useState(0)
   useLayoutEffect(() => {
+    const dk = dockRef.current
+    /** 中栏列 = 最近的 `<section>`（本模块只有这一个，dock 的定位祖先）。 */
+    const col = (dk?.closest('section') as HTMLElement | null) ?? null
+    /** 当前已施加的 translateY（过渡中间值也算）；用于把 rect 还原到自然位置 */
+    const appliedShift = (): number => {
+      if (!dk) return 0
+      const raw = getComputedStyle(dk).transform
+      return raw && raw !== 'none' ? new DOMMatrixReadOnly(raw).m42 : 0
+    }
     const measure = (): void => {
-      if (!heroMode) { setDockShift(0); return }
-      const sc = scrollRef.current
-      const dk = dockRef.current
-      if (!sc || !dk) return
-      const shift = -Math.round((sc.clientHeight + dk.offsetHeight) / 2)
-      setDockShift(shift < 0 ? shift : 0)
+      if (!emptyState) { setDockShift(0); return }
+      if (!dk || !col) return
+      const dockRect = dk.getBoundingClientRect()
+      const colRect = col.getBoundingClientRect()
+      const naturalTop = dockRect.top - appliedShift()
+      const wanted = Math.round((colRect.top + colRect.height / 2) - (naturalTop + dockRect.height / 2))
+      // 只允许往上抬、绝不下挪；dock 比列还高时最多抬到贴列顶，不把标题顶出可视区
+      const maxUp = Math.round(naturalTop - colRect.top)
+      setDockShift(Math.min(0, Math.max(wanted, -maxUp)))
     }
     measure()
-    if (!heroMode) return
+    if (!emptyState) return
+    // 首帧布局未必定型（Tab 首挂 / 面板展开动画 / 字体度量）：连测三帧 + 一次延迟补测
+    let raf = 0
+    let ticks = 0
+    const tick = (): void => { measure(); if (++ticks < 3) raf = requestAnimationFrame(tick) }
+    raf = requestAnimationFrame(tick)
+    const late = window.setTimeout(measure, 150)
     const ro = new ResizeObserver(measure)
-    if (scrollRef.current) ro.observe(scrollRef.current)
-    if (dockRef.current) ro.observe(dockRef.current)
+    if (col) ro.observe(col)
+    if (dk) ro.observe(dk)
     window.addEventListener('resize', measure)
-    return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
-  }, [heroMode])
+    return () => { cancelAnimationFrame(raf); window.clearTimeout(late); ro.disconnect(); window.removeEventListener('resize', measure) }
+  }, [emptyState])
   /** 卡下控件托盘的展开态（原型 subdock）：默认展开，记忆到 localStorage */
   const [trayOpen, setTrayOpen] = useState(() => localStorage.getItem('aiTeach.composerTray') !== '0')
   const toggleTray = useCallback(() => {
@@ -2066,14 +2112,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       if (wsCreating) { setWsCreating(false); return }
       if (instrOpen) { setInstrOpen(false); return }
       if (tokenOpen) { setTokenOpen(false); return }
-      if (modelMenuOpen) { setModelMenuOpen(false); return }
+      // 模型菜单的 Esc 由 useAnchoredMenu 自己收（它同时管点外部关闭），这里不再重复处理
       if (!zenActive) return
       e.preventDefault()
       onZenLevelChange?.(0)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, reqOpen, preflight, wsConfirmDel, wsRenaming, wsCreating, instrOpen, tokenOpen, modelMenuOpen])
+  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, reqOpen, preflight, wsConfirmDel, wsRenaming, wsCreating, instrOpen, tokenOpen])
   /**
    * 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件）。
    * v3.2.0 第 20 项起：围栏正文先过 `parseProfileFence` —— 解得出 JSON 条目数组就是新形态，
@@ -2593,15 +2639,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return spec.includes(':') ? spec.slice(spec.indexOf(':') + 1) : spec
   }
   const effModelBare = modelDisplayName(effModel)
+  /** 能力判定用的 spec：本对话覆盖 → 目录全局默认（与实际请求的默认链同序）；空 = 还没配置模型 */
+  const capSpec = effModel || modelCatalog.snapshot?.defaultEntryId || ''
+  const capResolved = useMemo(
+    () => resolveCatalogEntry(capSpec, modelCatalog.entries),
+    [capSpec, modelCatalog.entries],
+  )
+  /** 条目显式声明优先（yes / no）；auto / 没有条目 → 交给主进程（内置表 → 名称正则） */
+  const explicitReasoning = capResolved?.entry?.capabilities?.reasoning
   /** 推理能力判定需要真实模型名（条目 id 没有意义） */
-  const effModelRealId = (() => {
-    const r = resolveCatalogEntry(effModel, modelCatalog.entries)
-    return r?.modelId || (effModel.includes(':') ? effModel.slice(effModel.indexOf(':') + 1) : effModel)
-  })()
+  const effModelRealId = capResolved?.modelId
+    || (capSpec.includes(':') ? capSpec.slice(capSpec.indexOf(':') + 1) : capSpec)
   useEffect(() => {
+    if (explicitReasoning === 'yes') { setModelCapable(true); return }
+    if (explicitReasoning === 'no') { setModelCapable(false); return }
     if (!effModelRealId) { setModelCapable(false); return }
     void llmReasoningCapable(effModelRealId).then(setModelCapable).catch(() => setModelCapable(false))
-  }, [effModelRealId])
+  }, [explicitReasoning, effModelRealId])
   useEffect(() => {
     // 换到不支持的模型 → 强度自动回「关闭」（整区禁用同屏已呈现）
     if (!modelCapable && convoEffort !== 'off') {
@@ -2617,18 +2671,44 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     convoLlm.current.set(sid, { ...(convoLlm.current.get(sid) ?? {}), modelId: val })
     setConvoModel(val)
   }
+  /**
+   * 菜单列表 = **设置里配置的模型条目**（`modelCatalog.entries`），不再展开供应商库存。
+   * 精选（curated）只参与排序与标记：它回答「排前面」，不回答「分成两块」——
+   * 用户原话「只需要展示自己在设置中配置的模型就行了」（2026-11-20 重做）。
+   */
+  const menuModelEntries = useMemo(() => {
+    const sorted = [...modelCatalog.entries].sort((a, b) => Number(b.curated) - Number(a.curated))
+    // 同名条目合并（同一模型绑了多个账号时会各生成一条）：菜单只显示名字、没有副行可区分，
+    // 并排两条一模一样只会让人怀疑点错。保留排序后的第一条（精选优先），其余仍可从设置里选。
+    const seen = new Set<string>()
+    return sorted.filter((e) => {
+      const label = e.name || e.modelId
+      if (seen.has(label)) return false
+      seen.add(label)
+      return true
+    })
+  }, [modelCatalog.entries])
   const pickEffort = (e: Effort): void => {
     const sid = activeIdRef.current
     if (!sid) { showToast({ type: 'warning', message: '请先新建对话，再设置思考强度' }); return }
     convoLlm.current.set(sid, { ...(convoLlm.current.get(sid) ?? {}), effort: e })
     setConvoEffort(e)
   }
-  const openModelMenu = (): void => {
-    if (!modelMenuOpen) {
-      void llmListProviders().then(res => setProviderList(res.providers ?? [])).catch(() => null)
-      void llmVisionModels().then(r => setVisionList(r.models ?? [])).catch(() => null)
-    }
-    setModelMenuOpen(v => !v)
+  /**
+   * 两个入口（卡内 footer / 卡下抽屉）共用一套菜单：谁被点就把谁记为锚点，
+   * 菜单才会出现在「刚点的那个按钮」附近，而不是固定长在某一侧。
+   */
+  const openModelMenu = (el: HTMLElement): void => {
+    modelMenuTriggerRef.current = el as HTMLButtonElement
+    modelMenu.toggle()
+  }
+  /**
+   * 空态「打开设置 · 模型」：走既有 `settings:open` 事件通道（AI 助手 / 划词翻译同一个入口），
+   * 不新造跳转机制。先收菜单 —— 设置页盖上来后浮层还挂着会像残留。
+   */
+  const openModelSettings = (): void => {
+    modelMenu.close()
+    window.dispatchEvent(new CustomEvent('settings:open', { detail: { section: 'aiTools', aiTab: 'models' } }))
   }
 
   /** P3b「整理成文档」（§3.8-2）：本条回答落盘会话文件夹（懒建夹 2-5 + 幂等跳转 3-14 默认直出） */
@@ -2675,20 +2755,93 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return 0
   }, [messages, liveSteps])
   const injection = activeId ? injectionMap[activeId] ?? null : null
-  const ctxPct = ctxWindow > 0 ? ctxUsed / ctxWindow : null
-  /** 注入构成摘要（字符→token 估算口径 ≈2.6 字/token，仅展示用） */
-  const injParts = useMemo(() => {
-    if (!injection) return []
-    const t = (n: number) => Math.round(n / CHARS_PER_TOKEN)
-    return [
-      { k: '基础人设', v: t(injection.systemChars) },
-      { k: '会话约束', v: t(injection.constraintChars) },
-      { k: '三层画像', v: t(injection.profileChars) },
-      { k: '素材目录', v: t(injection.sourcesChars) },
-      { k: '教学规则', v: t(injection.ruleChars) },
-    ].filter(p => p.v > 0)
-  }, [injection])
-  const injSystemEst = injParts.reduce((a, p) => a + p.v, 0)
+  /**
+   * 上下文窗口的**有效值**：模型条目里配置的优先（设置 → 模型 → 条目「上下文窗口」），
+   * 条目没填才回落到全局设置 `ctxWindow`。2026-11-21：条目级窗口是这一轮新加的，
+   * 用量面板只认全局键会出现「设置里填了 1M，面板还是 0」的裂缝。
+   */
+  const ctxWindowEff = useMemo(() => {
+    const w = Number(resolveCatalogEntry(effModel, modelCatalog.entries)?.entry?.contextWindow ?? 0)
+    return w > 0 ? Math.floor(w) : ctxWindow
+  }, [effModel, modelCatalog.entries, ctxWindow])
+  /**
+   * 上下文用量明细（2026-11-20 按示意图重做）：估算 / 收敛 / 剩余空间全部交给
+   * `src/lib/contextUsagePure.ts`（与主进程 `electron/lib/aiTeachContextUsagePure.ts` 同口径，
+   * 双端一致性由 verify-context-usage.mjs 第 8 节锁住）。这里只做展示映射。
+   */
+  const ctxUsage = useMemo(
+    () => buildContextUsage(injection, { windowTokens: ctxWindowEff, usedTokens: ctxUsed }),
+    [injection, ctxWindowEff, ctxUsed],
+  )
+  /** 堆叠条分段：9 类（>0 才画）+「其他」（已用未被分类覆盖）+ 剩余空间（仅设了窗口）。
+   *  未设窗口时按「已用」归一化 —— 条只表示构成，不冒充占用比例。 */
+  const ctxBar = useMemo(() => {
+    const segs: Array<{ key: string; tokens: number; color: string }> = []
+    for (const row of ctxUsage.rows) {
+      if (row.tokens > 0) segs.push({ key: row.key, tokens: row.tokens, color: CONTEXT_USAGE_COLORS[row.key] })
+    }
+    if (ctxUsage.unclassifiedTokens > 0) segs.push({ key: 'other', tokens: ctxUsage.unclassifiedTokens, color: CONTEXT_USAGE_OTHER_COLOR })
+    if (ctxUsage.windowTokens > 0 && ctxUsage.freeTokens > 0) segs.push({ key: 'free', tokens: ctxUsage.freeTokens, color: CONTEXT_USAGE_FREE_COLOR })
+    return { total: ctxUsage.windowTokens > 0 ? ctxUsage.windowTokens : Math.max(1, ctxUsage.usedTokens), segs }
+  }, [ctxUsage])
+  const ctxUsageModel = effModelBare || defaultModel || '（默认配置）'
+  const ctxUsageHead = (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="shrink-0 text-[11px] text-[var(--text-secondary)]">上下文窗口</span>
+        <span className="min-w-0 truncate text-[10.5px] text-[var(--text-muted)]" data-tip={effModel || ctxUsageModel} aria-label={effModel || ctxUsageModel}>{ctxUsageModel}</span>
+      </div>
+      <div className="mt-0.5 flex items-baseline gap-1">
+        <span className="tabular-nums text-[15px] font-medium text-[var(--text-primary)]">{formatContextTokens(ctxUsage.usedTokens)}</span>
+        {ctxWindowEff > 0 && <span className="tabular-nums text-[11px] text-[var(--text-muted)]">/ {formatContextTokens(ctxWindowEff)}</span>}
+        {ctxWindowEff > 0 && <span className="tabular-nums text-[10.5px] text-[var(--text-muted)]">（{formatContextPctDetailed(ctxUsage.usedTokens, ctxWindowEff)}）</span>}
+      </div>
+    </div>
+  )
+  const ctxUsageBar = injection ? (
+    <div className="mt-1.5 flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-secondary)]" aria-hidden>
+      {ctxBar.segs.map((s) => (
+        <span key={s.key} className="h-full" style={{ width: `${(s.tokens / ctxBar.total) * 100}%`, background: s.color }} />
+      ))}
+    </div>
+  ) : null
+  const ctxFreeRow = ctxWindowEff > 0 ? (
+    <div className="flex items-center gap-1.5 text-[11.5px] leading-[1.55]">
+      <span className="h-[7px] w-[7px] shrink-0 rounded-full border border-[var(--text-muted)] opacity-70" aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-[var(--text-muted)]">剩余空间</span>
+      <span className="shrink-0 tabular-nums text-[var(--text-secondary)]">{formatContextTokens(ctxUsage.freeTokens)}</span>
+      <span className="w-[34px] shrink-0 text-right tabular-nums text-[var(--text-muted)]">{formatContextPct(ctxUsage.freeTokens, ctxWindowEff)}</span>
+    </div>
+  ) : null
+  const ctxUsageRows = (
+    <div className="mt-1">
+      {ctxUsage.rows.map((row) => (
+        <div key={row.key} className="flex items-center gap-1.5 text-[11.5px] leading-[1.55]">
+          <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: CONTEXT_USAGE_COLORS[row.key] }} aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">{row.label}</span>
+          <span className="shrink-0 tabular-nums text-[var(--text-primary)]">{formatContextTokens(row.tokens)}</span>
+          {ctxWindowEff > 0 && <span className="w-[34px] shrink-0 text-right tabular-nums text-[var(--text-muted)]">{formatContextPct(row.tokens, ctxWindowEff)}</span>}
+        </div>
+      ))}
+      {ctxUsage.unclassifiedTokens > 0 && (
+        <div className="flex items-center gap-1.5 text-[11.5px] leading-[1.55] opacity-80">
+          <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: CONTEXT_USAGE_OTHER_COLOR }} aria-hidden />
+          <span className="min-w-0 flex-1 truncate text-[var(--text-muted)]">其他（工具结果等）</span>
+          <span className="shrink-0 tabular-nums text-[var(--text-secondary)]">{formatContextTokens(ctxUsage.unclassifiedTokens)}</span>
+          {ctxWindowEff > 0 && <span className="w-[34px] shrink-0 text-right tabular-nums text-[var(--text-muted)]">{formatContextPct(ctxUsage.unclassifiedTokens, ctxWindowEff)}</span>}
+        </div>
+      )}
+      {ctxFreeRow}
+    </div>
+  )
+  const ctxUsageFoot = (
+    <div className="mt-1 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+      token 数是按字符估算的粗略值。{ctxWindowEff <= 0 && '在 设置 → AI 教学 填模型上下文窗口后可见比例。'}
+    </div>
+  )
+  const ctxUsageEmpty = (
+    <div className="mt-1 text-[10.5px] leading-relaxed text-[var(--text-muted)]">本轮尚无注入采样（发一条消息后可见构成）</div>
+  )
 
 
   const composerFooter = (
@@ -2712,222 +2865,136 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     <ImagePlus size={11} />
                     图片
                   </button>
-                  {/* 模型 + 思考强度合一菜单（P3b R12/R14）：仅本对话生效 */}
-                  <div className="relative">
-                    <button onClick={openModelMenu}
+                  {/* 模型菜单（2026-11-21 定稿）：只列设置里配置的条目，浮层由 useAnchoredMenu
+                      锚在**被点的这枚按钮**旁（fixed，向下放不下自动翻上），不再就地 absolute
+                      —— 就地会被输入卡的 overflow / 层叠上下文裁掉，挂在卡容器上又会跑到面板右缘。 */}
+                  <div>
+                    <button onClick={(e) => openModelMenu(e.currentTarget)}
                       className="flex items-center gap-1 h-7 px-2 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                      data-tip="本对话模型与思考强度（仅本对话生效，默认跟随 设置→AI 默认模型）" aria-label="本对话模型与思考强度（仅本对话生效，默认跟随 设置→AI 默认模型）">
+                      data-tip="选择本对话模型（仅本对话生效，默认跟随 设置→AI 默认模型）" aria-label="选择本对话模型（仅本对话生效，默认跟随 设置→AI 默认模型）">
                       <Bot size={11} />
                       <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
                       {convoEffort !== 'off' && <span className="text-[var(--accent)]">· 🧠{EFFORT_LABEL[convoEffort]}</span>}
                       <ChevronRight size={10} className="-rotate-90 shrink-0" />
                     </button>
-                    {modelMenuOpen && (
-                      <div className="absolute bottom-full right-0 mb-1.5 w-[280px] z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-none">
-                        <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">回答模型 · 仅本对话生效</div>
-                        <div className="max-h-[300px] overflow-y-auto py-1">
-                          {/* P3：模型条目（精选）置顶 —— 条目是「用户真正会用的那几个」，供应商库存退到下面 */}
-                          {modelCatalog.curated.length > 0 && (
-                            <div className="px-3 pt-1 pb-0.5 text-[9.5px] text-[var(--text-muted)]">精选模型</div>
-                          )}
-                          {modelCatalog.curated.slice(0, 6).map((e) => {
+                    {modelMenu.open && modelMenu.pos && (
+                      /* 极简：只有「选模型」。
+                         2026-11-21 用户拍板：删掉说明文字（头行 / 副行）、视觉转写、思考强度
+                         —— 思考强度已挪到输入区抽屉，视觉转写在 设置→模型→场景分配 里改。
+                         留 —— 只留一个纯列表：名字 + 选中勾。
+                         位置交给 useAnchoredMenu：fixed + 实测高度，底部放不下自动翻到按钮上方。 */
+                      <div ref={modelMenuRef} data-wb="aiTeachModelMenu"
+                        style={{ left: modelMenu.pos.left, top: modelMenu.pos.top, transformOrigin: modelMenu.pos.transformOrigin }}
+                        className="kb-pop fixed z-40 flex max-h-[min(70vh,420px)] w-[248px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-xl select-none"
+                        role="dialog" aria-label="选择本对话模型">
+                        <div className="min-h-0 flex-1 overflow-y-auto">
+                          {menuModelEntries.length === 0 ? (
+                            /* 空态：不造跳转机制，走既有 settings:open 事件（与 AI 助手同一入口） */
+                            <div className="px-2 py-4 text-center">
+                              <div className="text-[11.5px] text-[var(--text-muted)]">设置里还没有配置模型</div>
+                              <button type="button" onClick={openModelSettings}
+                                className="mt-2 inline-flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/50 hover:text-[var(--text-primary)]">
+                                <Settings2 size={11} />
+                                打开设置 · 模型
+                              </button>
+                            </div>
+                          ) : menuModelEntries.map((e) => {
                             const sel = effModel === e.id
                             return (
-                              <button key={e.id} onClick={() => pickModel(e.id)}
-                                className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
-                                <span className="truncate flex-1">{e.name}</span>
-                                <span className="text-[9px] text-[var(--text-muted)] shrink-0">{e.modelId}</span>
-                                {sel && <span className="shrink-0">✓</span>}
+                              <button key={e.id} onClick={() => pickModel(e.id)} aria-pressed={sel}
+                                data-tip={e.modelId} aria-label={e.name || e.modelId}
+                                className={`w-full flex items-center gap-1.5 rounded-lg px-2 py-[6px] text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)] ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                                <span className="min-w-0 flex-1 truncate">{e.name || e.modelId}</span>
+                                {sel && <Check size={12} className="shrink-0 text-[var(--accent)]" aria-hidden />}
                               </button>
                             )
                           })}
-                          {modelCatalog.curated.length > 0 && (
-                            <div className="mx-3 my-1 border-t border-[var(--border-color)]" />
-                          )}
-                          {providerList.filter(p => p.enabled && p.models.length > 0).flatMap(p =>
-                            p.models.map(mm => {
-                              const val = `${p.id}:${mm}`
-                              const sel = effModel === val
-                              return (
-                                <button key={val} onClick={() => pickModel(val)}
-                                  className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
-                                  <span className="text-[9.5px] text-[var(--text-muted)] shrink-0">{p.name}</span>
-                                  <span className="truncate flex-1">{mm}</span>
-                                  {sel && <span className="shrink-0">✓</span>}
-                                </button>
-                              )
-                            }))}
-                          {providerList.filter(p => p.enabled && p.models.length > 0).length === 0 && (
-                            <div className="px-3 py-3 text-[11px] text-[var(--text-muted)]">尚无启用的供应商（设置 → AI 模型中添加）</div>
-                          )}
-                        </div>
-                        <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-t border-b border-[var(--border-color)]">视觉转写模型（素材转写用 · 全局）</div>
-                        <div className="max-h-[180px] overflow-y-auto py-1">
-                          <button onClick={() => pickVision('')}
-                            className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${!visionModel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
-                            <span className="truncate flex-1">自动识别（按模型名：qwen-vl / glm-4v / gpt-4o…）</span>
-                            {!visionModel && <span className="shrink-0">✓</span>}
-                          </button>
-                          {(() => {
-                            // 只列视觉特征模型（vision/vl/4o/glm-4v/gemini/kimi-vision…）；正则漏判时「显示全部」兜底
-                            const list = showAllVision
-                              ? providerList.filter(p => p.enabled && p.type === 'openai-compatible' && p.models.length > 0).flatMap(p => p.models.map(mm => ({ spec: `${p.id}:${mm}`, providerName: p.name, model: mm })))
-                              : visionList
-                            return (
-                              <>
-                                {list.map(v => {
-                                  const sel = visionModel === v.spec
-                                  return (
-                                    <button key={v.spec} onClick={() => pickVision(v.spec)}
-                                      className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
-                                      <span className="text-[9.5px] text-[var(--text-muted)] shrink-0">{v.providerName}</span>
-                                      <span className="truncate flex-1">{v.model}</span>
-                                      {sel && <span className="shrink-0">✓</span>}
-                                    </button>
-                                  )
-                                })}
-                                {list.length === 0 && (
-                                  <div className="px-3 py-2 text-[11px] text-[var(--text-muted)]">没有识别到视觉模型（模型名需含 vision/vl/4o/glm-4v 等特征）。</div>
-                                )}
-                                {providerList.some(p => p.enabled && p.type === 'openai-compatible' && p.models.length > 0) && (
-                                  <button onClick={() => setShowAllVision(v => !v)}
-                                    className="w-full px-3 py-1 text-left text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-                                    {showAllVision ? '▲ 收起，只看视觉模型' : '▼ 显示全部模型（若你确认某模型支持图片但未被识别）'}
-                                  </button>
-                                )}
-                              </>
-                            )
-                          })()}
-                        </div>
-                        <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-color)] bg-[var(--bg-secondary)] space-y-0.5">
-                          <div>本月用量 · 回答：{(usage?.monthTokens ?? 0).toLocaleString()} tokens{(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) ? `（↑ ${(usage?.monthPromptTokens ?? 0).toLocaleString()} / ↓ ${(usage?.monthCompletionTokens ?? 0).toLocaleString()}）` : ''}</div>
-                          <div>本月用量 · 视觉转写：{(usage?.visionMonthTokens ?? 0).toLocaleString()} tokens / {(usage?.visionPages ?? 0)} 页</div>
-                        </div>
-                        <div className="px-3 pt-1.5 flex items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                          <span className="text-[10.5px] text-[var(--text-muted)]">思考强度</span>
-                          {!modelCapable && <span className="text-[10px] text-[var(--text-muted)]">当前模型不支持</span>}
-                        </div>
-                        <div className={`flex gap-1 px-3 py-2 bg-[var(--bg-secondary)] ${modelCapable ? '' : 'opacity-40 pointer-events-none'}`}>
-                          {(['off', 'low', 'medium', 'high'] as const).map(e => (
-                            <button key={e} onClick={() => pickEffort(e)}
-                              className={`flex-1 px-1 py-0.5 rounded-md text-[11px] transition-colors ${convoEffort === e ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
-                              {EFFORT_LABEL[e]}
-                            </button>
-                          ))}
                         </div>
                       </div>
                     )}
                   </div>
                   {/* UI 优化条目9②③：用量指示（圆环/数字降级）——hover 看上下文构成摘要，点击上翻详情面板；
                       档位由 设置→AI教学 `ctxUsageDetail`（off/compact/detailed），窗口大小 `ctxWindow`（F-12 提为通用键） */}
-                  {usageDetail !== 'off' && (
+                  {/* 没有任何消耗时（新会话 / 还没跑过一轮）连圆环一起省掉：
+                      空圆环 + 0 只是个噪音，用户要的是「用多少」而不是「有个控件」。 */}
+                  {usageDetail !== 'off' && (ctxUsed > 0 || tokenStats.llmTokens > 0) && (
                     <div className="relative group">
                       <button onClick={() => setTokenOpen(v => !v)}
                         className={`flex items-center gap-1 h-7 px-2 rounded-md transition-colors ${tokenOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
-                        data-tip={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 点击查看明细（窗口大小在 设置→AI教学 配置）` : '本会话累计 LLM tokens · 点击查看明细（设置模型上下文窗口后圆环按占用比例着色）'} aria-label={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 点击查看明细（窗口大小在 设置→AI教学 配置）` : '本会话累计 LLM tokens · 点击查看明细（设置模型上下文窗口后圆环按占用比例着色）'}>
-                        <UsageRing pct={ctxWindow > 0 ? ctxPct : null} used={ctxUsed || tokenStats.llmTokens} />
+                        aria-label={ctxWindowEff > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindowEff)} · 点击查看明细` : '本会话累计 LLM tokens · 点击查看明细'}>
+                        <UsageRing pct={ctxWindowEff > 0 ? ctxUsage.usedTokens / ctxWindowEff : null} used={ctxUsed || tokenStats.llmTokens} />
                         {usageDetail === 'detailed' && (
                           <span className="tabular-nums whitespace-nowrap text-[10.5px]">
-                            {ctxWindow > 0 ? `${fmtTok(ctxUsed)}/${fmtTok(ctxWindow)}` : `会话 ≈${fmtTok(tokenStats.llmTokens)}`}
+                            {ctxWindowEff > 0 ? `${fmtTok(ctxUsed)}/${fmtTok(ctxWindowEff)}` : `会话 ≈${fmtTok(tokenStats.llmTokens)}`}
                           </span>
                         )}
                       </button>
-                      {!tokenOpen && (
-                        <div className="pointer-events-none absolute bottom-full right-0 mb-1.5 hidden group-hover:block w-[248px] z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl px-2.5 py-2 text-[10.5px] leading-relaxed">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[var(--text-muted)] shrink-0">上下文已用</span>
-                            <span className="tabular-nums text-[var(--text-primary)] truncate">
-                              {ctxWindow > 0 ? `${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 剩 ${fmtTok(Math.max(0, ctxWindow - ctxUsed))}` : `${fmtTok(ctxUsed)}（未设窗口）`}
-                            </span>
-                          </div>
-                          {injParts.length > 0 ? (
-                            <div className="mt-1 border-t border-[var(--border-color)] pt-1">
-                              <div className="text-[var(--text-muted)]">本轮 system 注入构成（≈2.6 字/token 估算）</div>
-                              {injParts.map(p => (
-                                <div key={p.k} className="flex items-center justify-between"><span className="text-[var(--text-secondary)]">{p.k}</span><span className="tabular-nums">{fmtTok(p.v)}</span></div>
-                              ))}
-                              <div className="flex items-center justify-between"><span className="text-[var(--text-secondary)]">对话历史与工具</span><span className="tabular-nums">{fmtTok(Math.max(0, ctxWindow - ctxUsed - injSystemEst))}</span></div>
-                            </div>
-                          ) : (
-                            <div className="mt-1 text-[var(--text-muted)]">本轮尚无注入采样（发一条消息后可见构成）</div>
-                          )}
+                      {/* 用量面板只有**一个**（2026-11-21 用户反馈）：悬停即预览、点击钉住可交互。
+                          之前 hover 和点击是两套内容（252px 精简 / 320px 完整），看起来像两个菜单；
+                          现在共用同一份 DOM，只差 `pointer-events` 与是否钉住。
+                          hover 态 pointer-events-none：鼠标不会停在浮层上，也不挡下方操作；
+                          点击后加 select-text，可选中数字复制。 */}
+                      <div
+                        data-wb="aiTeachUsagePanel"
+                        className={`absolute bottom-full right-0 mb-1.5 w-[320px] max-w-[calc(100vw-2rem)] z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden ${tokenOpen ? 'select-text kb-pop' : 'pointer-events-none hidden group-hover:block kb-view-fade'}`}
+                        role="dialog" aria-label="上下文用量明细" aria-hidden={tokenOpen ? undefined : true}>
+                        <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                          <span className="text-[11.5px] font-medium text-[var(--text-primary)]">上下文用量明细</span>
+                          <button onClick={() => setTokenOpen(false)} data-tip="关闭" aria-label="关闭"
+                            className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><X size={12} /></button>
                         </div>
-                      )}
-                      {tokenOpen && (
-                        <div className="absolute bottom-full right-0 mb-1.5 w-[300px] z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-text">
-                          <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                            <span className="text-[11.5px] font-medium text-[var(--text-primary)]">用量明细</span>
-                            <button onClick={() => setTokenOpen(false)} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><X size={12} /></button>
+                        <div className="p-3 space-y-2.5 text-[11.5px] max-h-[60vh] overflow-y-auto">
+                          <div>
+                            {ctxUsageHead}
+                            {injection ? (
+                              <>
+                                {ctxUsageBar}
+                                {ctxUsageRows}
+                                {ctxUsageFoot}
+                              </>
+                            ) : ctxUsageEmpty}
                           </div>
-                          <div className="p-3 space-y-2.5 text-[11.5px] max-h-[60vh] overflow-y-auto">
+                          <div className="border-t border-[var(--border-color)] pt-2">
                             <div className="flex items-center justify-between">
-                              <span className="text-[var(--text-muted)]">模型</span>
-                              <span className="text-[var(--text-primary)] truncate max-w-[190px]" data-tip={effModel} aria-label={effModel}>{effModelBare || defaultModel || '（默认配置）'}</span>
+                              <span className="text-[var(--text-muted)]">本会话 LLM tokens（累计）</span>
+                              <span className="tabular-nums font-medium text-[var(--text-primary)]">{fmtTok(tokenStats.llmTokens)}{tokenStats.llmTokens >= 1000 ? `（${Math.round(tokenStats.llmTokens)}）` : ''}</span>
                             </div>
-                            <div className="border-b border-[var(--border-color)] pb-2">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-[var(--text-muted)]">上下文占用</span>
-                                <span className="tabular-nums font-medium text-[var(--text-primary)]">{ctxWindow > 0 ? `${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}` : `${fmtTok(ctxUsed)}（未设窗口）`}</span>
+                            {tokenStats.hasSplit && (
+                              <div className="mt-0.5 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
+                                <span>↑ {fmtTok(tokenStats.promptTokens)} 输入</span>
+                                <span>↓ {fmtTok(tokenStats.completionTokens)} 输出</span>
                               </div>
-                              {ctxWindow > 0 && (
-                                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-                                  <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.min(100, (ctxPct ?? 0) * 100)}%`, background: (ctxPct ?? 0) > 0.85 ? 'var(--danger)' : (ctxPct ?? 0) >= 0.7 ? 'var(--warning)' : 'var(--accent)' }} />
-                                </div>
-                              )}
-                              <div className="mt-1 text-[10.5px] text-[var(--text-muted)] leading-relaxed">
-                                口径 = 最近一次调用的输入 tokens（含 system 注入与工具定义）。{ctxWindow <= 0 && '在 设置 → AI教学 填模型上下文窗口后可见比例。'}
+                            )}
+                          </div>
+                          <div className="grid grid-cols-3 gap-1.5 text-center">
+                            {[['模型轮次', String(tokenStats.llmRounds)], ['工具调用', String(tokenStats.toolCalls)], ['耗时', `${Math.round(tokenStats.durationMs / 1000)}s`]].map(([k, v]) => (
+                              <div key={k} className="rounded-lg bg-[var(--bg-secondary)] py-1.5">
+                                <div className="text-[10.5px] text-[var(--text-muted)]">{k}</div>
+                                <div className="tabular-nums text-[12px] font-medium">{v}</div>
                               </div>
-                              {injParts.length > 0 && (
-                                <div className="mt-1.5 space-y-0.5">
-                                  {injParts.map(p => (
-                                    <div key={p.k} className="flex items-center justify-between text-[10.5px]"><span className="text-[var(--text-muted)]">{p.k}</span><span className="tabular-nums text-[var(--text-secondary)]">≈{fmtTok(p.v)}</span></div>
-                                  ))}
-                                  <div className="flex items-center justify-between text-[10.5px]"><span className="text-[var(--text-muted)]">对话历史与工具</span><span className="tabular-nums text-[var(--text-secondary)]">≈{fmtTok(Math.max(0, ctxWindow - injSystemEst))}</span></div>
-                                </div>
-                              )}
+                            ))}
+                          </div>
+                          <div className="border-t border-[var(--border-color)] pt-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[var(--text-muted)]">本月 LLM tokens</span>
+                              <span className="tabular-nums">{fmtTok(monthTokens)}{budget > 0 && <span className="text-[var(--text-muted)]"> / {fmtTok(budget)}</span>}</span>
                             </div>
-                            <div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-[var(--text-muted)]">本会话 LLM tokens（累计）</span>
-                                <span className="tabular-nums font-medium text-[var(--text-primary)]">{fmtTok(tokenStats.llmTokens)}{tokenStats.llmTokens >= 1000 ? `（${Math.round(tokenStats.llmTokens)}）` : ''}</span>
+                            {(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) && (
+                              <div className="mb-1 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
+                                <span>↑ {fmtTok(usage?.monthPromptTokens ?? 0)} 输入</span>
+                                <span>↓ {fmtTok(usage?.monthCompletionTokens ?? 0)} 输出</span>
                               </div>
-                              {tokenStats.hasSplit && (
-                                <div className="mt-0.5 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
-                                  <span>↑ {fmtTok(tokenStats.promptTokens)} 输入</span>
-                                  <span>↓ {fmtTok(tokenStats.completionTokens)} 输出</span>
-                                </div>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-3 gap-1.5 text-center">
-                              {[['模型轮次', String(tokenStats.llmRounds)], ['工具调用', String(tokenStats.toolCalls)], ['耗时', `${Math.round(tokenStats.durationMs / 1000)}s`]].map(([k, v]) => (
-                                <div key={k} className="rounded-lg bg-[var(--bg-secondary)] py-1.5">
-                                  <div className="text-[10.5px] text-[var(--text-muted)]">{k}</div>
-                                  <div className="tabular-nums text-[12px] font-medium">{v}</div>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="border-t border-[var(--border-color)] pt-2">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-[var(--text-muted)]">本月 LLM tokens</span>
-                                <span className="tabular-nums">{fmtTok(monthTokens)}{budget > 0 && <span className="text-[var(--text-muted)]"> / {fmtTok(budget)}</span>}</span>
+                            )}
+                            {budget > 0 ? (
+                              <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width: `${Math.min(100, (monthTokens / budget) * 100)}%`, background: monthTokens / budget > 0.85 ? '#a32d2d' : '#185fa5' }} />
                               </div>
-                              {(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) && (
-                                <div className="mb-1 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
-                                  <span>↑ {fmtTok(usage?.monthPromptTokens ?? 0)} 输入</span>
-                                  <span>↓ {fmtTok(usage?.monthCompletionTokens ?? 0)} 输出</span>
-                                </div>
-                              )}
-                              {budget > 0 ? (
-                                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-                                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, (monthTokens / budget) * 100)}%`, background: monthTokens / budget > 0.85 ? '#a32d2d' : '#185fa5' }} />
-                                </div>
-                              ) : (
-                                <div className="text-[10.5px] text-[var(--text-muted)]">未设月度预算（设置 → AI 可配置上限）</div>
-                              )}
-                            </div>
+                            ) : (
+                              <div className="text-[10.5px] text-[var(--text-muted)]">未设月度预算（设置 → AI 可配置上限）</div>
+                            )}
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   )}
                   {/* P3b（R12）：流式输出中发送键 → 停止键（深色底白方块），点击中断、保留已落库内容 */}
@@ -3374,25 +3441,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               {/* 底部留白 48px = 「回到底部」浮标占位（bottom-3 12px + 按钮 36px）——浮标是 absolute 不占流，
                   若不留白就会盖住滚到下方时的最后一行文字。留白常驻（不随浮标显隐变化）→ 不产生二次回流。 */}
               <div ref={scrollRef} onScroll={onConvScroll} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable] pl-4 pr-8 pt-3 pb-12 space-y-3 min-h-0">
-                {messages.length === 0 && !pending && !heroMode && (
-                  <div className="h-full flex flex-col items-center justify-center gap-2 px-6 text-center">
-                    <div className="text-[15px] font-medium text-[var(--text-primary)]">
-                      {courseReviewChapter ? '章末复习' : activeSegment ? '本段开始' : activeId ? (assistantSid && activeId === assistantSid ? (courseState?.outline ? '课程助手' : '和课程助手建课') : '开始对话') : '从左侧开始'}
-                    </div>
-                    <div className="max-w-[420px] text-[11.5px] leading-relaxed text-[var(--text-muted)]">
-                      {courseReviewChapter
-                        ? '本章知识点都学完了。把复习讨论整理成《复习讲义》，或按你的要求逐块回顾。'
-                        : activeSegment
-                          ? '本段只围绕左侧列出的知识点推进。讲完可点「收尾本段」，系统会生成交接给同章下一段。'
-                          : assistantSid && activeId === assistantSid
-                            ? '把资料和目标交给课程助手：它负责登记素材、给出章→知识点大纲、按章分配素材；开讲由你点知识点开段。'
-                            : '从左侧点一个知识点开段，或点「课程助手」建课 / 改大纲。'}
-                    </div>
-                    {!activeId && (
-                      <button onClick={() => void courseOpenAssistant()} className="mt-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11.5px] text-white hover:opacity-90">打开课程助手</button>
-                    )}
-                  </div>
-                )}
+                {/* 空态的标题 + 说明不在这里 —— 已搬进输入卡 dock 内部（与输入卡一起居中位移，
+                    见 dockRef 那一段的 emptyState 注释） */}
                 {messages.map((m, idx) => (
                   <div key={m.id ?? idx} data-msg-idx={idx} className={`${m.role === 'user' ? 'group relative flex justify-end' : 'relative min-w-0'}${longThread ? ' kb-cv-msg' : ''}`}>
                     {m.role === 'user' ? (
@@ -3571,6 +3621,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           </button>
                           {fmtTime(m.createdAt) && <span className="text-[11px] text-[var(--text-muted)] tabular-nums ml-0.5">{fmtTime(m.createdAt)}</span>}
                         </div>
+                        {/* 本轮消耗：中栏是**自己渲染消息**（不走共用 MessageList），这行与助手面同源同口径 ——
+                            常显在助手回复块右下角（工件卡 / 跳转 chip / 操作条之后），不参与 hover、不套 `.kb-l1`。 */}
+                        <UsageFooter trace={m.trace} className="mt-0.5 pr-0.5" />
                       </div>
                     )}
                     {/* 轮次导航跳转反馈：行内只动 opacity 的洗色层（.kb-turn-flash，1.8s）。
@@ -3756,9 +3809,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 ref={dockRef}
                 className="shrink-0 w-full px-3 pb-2.5 pt-2 relative"
                 style={{
-                  // 空态（本段刚开、还没有消息）：把输入卡抬到对话区正中，发出第一条后沉回底部。
-                  // 位移量按实测高度算（scroll 区一半 + dock 一半），不是拍死的 180px ——
-                  // 拍死值在矮窗口会抬过头、在高窗口又不够（原型也是按容器居中，不是按像素）。
+                  // 空态（本轮还没有消息）：标题 + 输入卡（+ 卡下控件行）作为**一组**抬到整个中栏的垂直中线，
+                  // 发出第一条后沉回底部。位移按 section 与 dock 的实测 rect 求差（推导见 dockShift 那一段：
+                  // 居中的是整组、口径是整个中栏），不拍死像素 —— 拍死值在矮窗口会抬过头、在高窗口又不够。
                   transform: dockShift ? `translateY(${dockShift}px)` : 'none',
                   transition: 'transform 520ms cubic-bezier(.32,.72,0,1)',
                 }}
@@ -3766,6 +3819,33 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 {/* 卡上方 56px 渐隐：消息在卡后淡出，而不是被一条硬边切掉（对齐原型 dock::before） */}
                 <div aria-hidden className="pointer-events-none absolute -top-14 inset-x-0 h-14 kb-dock-fade" />
                 <div className="relative mx-auto w-full max-w-[820px]">
+                {/* 空态标题 / 说明 / 入口：放在输入卡**上方**而不是滚动区里 —— 二者同属 dock，
+                    才能被同一个 translateY（dockShift）一起抬到视野中部，保持「标题—输入卡」一条中轴；
+                    发出第一条消息后 emptyState 转 false：本块卸载、dock 沉回底部，位移仍走同一条 520ms 曲线。
+                    只做淡入（.kb-view-fade，纯 opacity），不新增过渡曲线。 */}
+                {emptyState && (
+                  <div className="mb-5 flex flex-col items-center gap-2.5 px-6 text-center kb-view-fade">
+                    {/* 空态主标题：参考参考图的字号与字重（约 30–34px / 600），取 28px 以适配中栏常用宽度；
+                        如需完全对齐参考图，可只改这一个 class（如 text-[32px]）。
+                        文案最长 7 字，正常宽度单行居中；极窄中栏时允许折行（不加 whitespace-nowrap，
+                        否则会横向溢出）。说明文字字号不动，只调标题这一层。 */}
+                    <div className="text-[28px] font-semibold leading-snug text-[var(--text-primary)]">
+                      {courseReviewChapter ? '章末复习' : activeSegment ? '本段开始' : activeId ? (assistantSid && activeId === assistantSid ? (courseState?.outline ? '课程助手' : '和课程助手建课') : '开始对话') : '从左侧开始'}
+                    </div>
+                    <div className="max-w-[420px] text-[11.5px] leading-relaxed text-[var(--text-muted)]">
+                      {courseReviewChapter
+                        ? '本章知识点都学完了。把复习讨论整理成《复习讲义》，或按你的要求逐块回顾。'
+                        : activeSegment
+                          ? '本段只围绕左侧列出的知识点推进。讲完可点「收尾本段」，系统会生成交接给同章下一段。'
+                          : assistantSid && activeId === assistantSid
+                            ? '把资料和目标交给课程助手：它负责登记素材、给出章→知识点大纲、按章分配素材；开讲由你点知识点开段。'
+                            : '从左侧点一个知识点开段，或点「课程助手」建课 / 改大纲。'}
+                    </div>
+                    {!activeId && (
+                      <button onClick={() => void courseOpenAssistant()} className="mt-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11.5px] text-white hover:opacity-90">打开课程助手</button>
+                    )}
+                  </div>
+                )}
                 {/* v3.1.2 条目7：会话准备态 —— 未开讲时输入区位置显示准备面板（素材 / 会话要求 / 首条消息）
                     与正常输入框同一块区域互斥切换；点「开始对话」才发首条消息。 */}
                 {askVisible && askPending ? (
@@ -4107,7 +4187,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         {quotes.length > 0 ? `引用 ${quotes.length}` : '引用'}
                       </button>
                       <span className="flex-1" />
-                      <button type="button" onClick={openModelMenu} data-tip="切换本对话模型"
+                      <button type="button" onClick={(e) => openModelMenu(e.currentTarget)} data-tip="切换本对话模型"
                         className="h-[24px] max-w-[180px] truncate px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                         {effModel ? effModelBare : '默认模型'}
                       </button>

@@ -6,7 +6,7 @@ import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchIm
 import {
   familyOf, userAgentString, withSessionHeaders, buildResponsesBody,
   parseResponsesWhole, mergeResponsesResult, collectResponsesToolCalls,
-  REASONING_MODEL_RE,
+  REASONING_MODEL_RE, isReasoningCapableModel,
   type ProviderType, type ModelFamily, type PureChatResult,
 } from './llmProtocolPure'
 import {
@@ -521,8 +521,8 @@ function buildOpenAiBody(req: ChatRequest, stream: boolean): Record<string, unkn
     body.tools = req.tools
     body.tool_choice = 'auto'
   }
-  // P3b：思考强度仅在模型具备能力时透传，避免不认该参数的供应商报错
-  if (req.effort && req.effort !== 'off' && REASONING_MODEL_RE.test(req.model)) {
+  // P3b：思考强度仅在模型具备能力时透传，避免不认该参数的供应商报错（判定：内置表 → 名称正则）
+  if (req.effort && req.effort !== 'off' && isReasoningCapableModel(req.model)) {
     body.reasoning_effort = req.effort
   }
   return body
@@ -1400,8 +1400,8 @@ export function resolveNonThinkingFallback(): { providerId: string; modelId: str
   if (!provider) return null
   const target = parsed?.modelId || provider.models[0] || ''
   if (!target) return null
-  if (!REASONING_MODEL_RE.test(target)) return { providerId: provider.id, modelId: target, degraded: false }
-  const nonThinking = provider.models.find(m => !REASONING_MODEL_RE.test(m))
+  if (!isReasoningCapableModel(target)) return { providerId: provider.id, modelId: target, degraded: false }
+  const nonThinking = provider.models.find(m => !isReasoningCapableModel(m))
   if (!nonThinking) return { providerId: provider.id, modelId: target, degraded: false }
   return { providerId: provider.id, modelId: nonThinking, degraded: true }
 }
@@ -1916,7 +1916,7 @@ export function registerLlmHandlers(deps: {
   })
 
   // P3b：模型思考强度能力探测（正则单一真相源在主进程，渲染层据此置灰菜单）
-  ipcMain.handle('llm:reasoningCapable', (_e, model: string) => REASONING_MODEL_RE.test(String(model ?? '')))
+  ipcMain.handle('llm:reasoningCapable', (_e, model: string) => isReasoningCapableModel(String(model ?? '')))
 
   ipcMain.handle('llm:visionCapable', (_e, model: string) => VISION_MODEL_RE.test(String(model ?? '')))
 

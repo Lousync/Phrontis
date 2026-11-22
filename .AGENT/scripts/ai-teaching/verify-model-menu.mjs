@@ -231,6 +231,15 @@ check('fallback label appends provider name (only when name is missing)',
 check('named entry keeps label short (provider is small text in the row)',
   menuLabel(mk('m_5', 'Fast', { modelId: 'glm-5.2' }), 'OpenCode') === 'Fast', '')
 
+// ---------------------------------------------------------------- 7. AI teaching composer menu
+// 2026-11-20 重做：AI 教学的模型菜单只消费设置里配置的条目（shared ModelMenu 不动）。
+console.log('\n=== 7. AI teaching composer menu consumes entries only ===')
+const teach = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/index.tsx'), 'utf8')
+check('AI teaching menu consumes modelCatalog.entries', /modelCatalog\.entries/.test(teach), '')
+check('AI teaching menu no longer renders the providerList inventory', !/\bproviderList\b/.test(teach), '')
+check('AI teaching menu no longer calls provider / vision inventory IPC',
+  !/llmListProviders\s*\(/.test(teach) && !/llmVisionModels\s*\(/.test(teach), '')
+
 // ---------------------------------------------------------------- report
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) {

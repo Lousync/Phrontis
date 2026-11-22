@@ -11,6 +11,7 @@ import type { StreamDraft } from '../../../lib/agentStreamCore'
 import type { AgentTraceStep, ResumeInfo } from '../../../types'
 import type { AgentImageRef } from '../../../types'
 import { ChatImageThumbs } from './ChatImageThumbs'
+import { UsageFooter } from './UsageFooter'
 import { toolActionLabel } from '../../../lib/toolLabels'
 
 /**
@@ -38,45 +39,6 @@ export function fmtTime(raw?: string | null): string {
   const d = new Date()
   const sameDay = Number(m[1]) === d.getFullYear() && Number(m[2]) === d.getMonth() + 1 && Number(m[3]) === d.getDate()
   return sameDay ? `${m[4]}:${m[5]}` : `${m[2]}-${m[3]} ${m[4]}:${m[5]}`
-}
-
-/** 数字 → 友好 token 文本（≥1k 显示 k） */
-function fmtTok(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n)
-}
-
-/** 聚合 assistant 回复的 llm trace 用量，渲染"↑输入 ↓输出 · 合计 tokens"小字。
- *  `.kb-l1` = 容器（ChatBody 根）窄于阈值时先隐它 —— 它是辅助统计，
- *  排序在动作钮文字（`.kb-l2`）之前（N-6，阈值实测见 index.css ⑥）。
- *  v3.9.0：llm step 带 `costUsd`（主进程按价目表算好）时追加「· $x 估算」；无价目/旧 trace 只有 tokens。 */
-function fmtCostUsd(n: number): string {
-  if (n === 0) return '$0'
-  if (n < 0.01) return `$${n.toFixed(4)}`
-  if (n < 1) return `$${n.toFixed(3)}`
-  return `$${n.toFixed(2)}`
-}
-
-function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
-  if (!trace || trace.length === 0) return null
-  const llm = trace.filter(s => s.kind === 'llm')
-  if (llm.length === 0) return null
-  let p = 0, c = 0, hasSplit = false, t = 0, hasTotal = false, cost = 0, hasCost = false
-  for (const s of llm) {
-    if (typeof s.promptTokens === 'number') { p += s.promptTokens; hasSplit = true }
-    if (typeof s.completionTokens === 'number') { c += s.completionTokens; hasSplit = true }
-    if (typeof s.tokens === 'number') { t += s.tokens; hasTotal = true }
-    if (typeof s.costUsd === 'number') { cost += s.costUsd; hasCost = true }
-  }
-  const costText = hasCost ? ` · ${fmtCostUsd(cost)} 估算` : ''
-  if (hasSplit && (p > 0 || c > 0)) {
-    return (
-      <span className="kb-l1 text-[var(--text-muted)]" data-tip="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）与估算费用（按内置价目表，非账单）" aria-label="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）与估算费用（按内置价目表，非账单）">
-        ↑{fmtTok(p)} ↓{fmtTok(c)} · {fmtTok(p + c)} tokens{costText}
-      </span>
-    )
-  }
-  if (hasTotal && t > 0) return <span className="kb-l1 text-[var(--text-muted)]">≈{fmtTok(t)} tokens{costText}</span>
-  return null
 }
 
 /** 实时状态行（agent:step 驱动）：无步骤=思考中；最新为工具=正在调用；失败则显示重试中 */
@@ -382,7 +344,6 @@ export function MessageList({
           ) : (
             <div className={`flex items-center gap-1.5 px-1 mt-0.5 text-[10px] text-[var(--text-disabled)] ${m.role === 'user' ? 'justify-end' : 'justify-start -ml-1.5'}`}>
               {m.createdAt && <span>{fmtTime(m.createdAt)}</span>}
-              {m.role === 'assistant' && <TokensOf trace={m.trace} />}
               <button
                 onClick={async () => {
                   const okFlag = await copyText(m.content)
@@ -428,6 +389,11 @@ export function MessageList({
               )}
             </div>
           )}
+
+          {/* 本轮消耗：常显在这条消息的**最底部右下角**（正文 / 工件卡 / 动作行之后）。
+              刻意不进上面那行动作条 —— 那行 hover 才浮出，用量是要随时能看见的审计信息；
+              也没有套 `.kb-l1`，窄宿主由组件内部 truncate 兜住。用户消息无 llm 用量 → 组件返回 null。 */}
+          {m.role === 'assistant' && <UsageFooter trace={m.trace} className="mt-0.5 pr-0.5" />}
         </div>
       ))}
 

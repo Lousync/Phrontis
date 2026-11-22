@@ -1248,7 +1248,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
 
   // ===== 渲染 =====
   const toolbar = (
-    <div className={`kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)] ${immersive ? 'hidden' : ''}`}>
+    <div className={`kb-fit kb-fit-pdfread kb-chrome-flat flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)] ${immersive ? 'hidden' : ''}`}>
       {onBack && (
         <>
           <button onClick={onBack} data-tip={backLabel ?? '返回书架'} aria-label={backLabel ?? '返回书架'}
@@ -1342,7 +1342,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
   )
 
   const sidePanel = (
-    <div className={`kb-view-fade flex w-64 shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-secondary)] ${immersive || sideTab === null ? 'hidden' : ''}`}>
+    <div className={`kb-view-fade flex w-64 shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-secondary)] kb-glass-chrome ${immersive || sideTab === null ? 'hidden' : ''}`}>
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)]">
         <><Search size={13} />搜索</>
         <button onClick={() => setSideTab(null)} className="ml-auto rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={12} /></button>
@@ -1413,10 +1413,10 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
   }
 
   return (
-    <div ref={rootRef} data-kb-pdf-root="" data-reader-surface data-sel-float-ignore className={`kb-pdf-scope relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
+    <div ref={rootRef} data-kb-pdf-root="" data-reader-surface data-sel-float-ignore className={`kb-pdf-scope kb-reader-desk relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
       {toolbar}
       {effectiveScan !== 'full' && (
-        <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] text-[var(--text-tertiary)]" data-wb="scanHint">
+        <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] kb-chrome-flat px-3 py-1 text-[11px] text-[var(--text-tertiary)]" data-wb="scanHint">
           {effectiveScan === 'no'
             ? '本册为扫描版（页面是图片），划选 / 摘录不可用'
             : `本册部分页为扫描件（无文字层），这些页划选 / 摘录不可用${scanPages ? `（共 ${scanPages.filter(Boolean).length} 页）` : ''}`}

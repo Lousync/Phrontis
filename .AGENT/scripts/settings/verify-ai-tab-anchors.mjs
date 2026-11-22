@@ -118,9 +118,12 @@ check('视觉转写模型归属「模型 · 场景分配表」（它是第五个
   meta.aiTeachVisionModel?.aiTab === 'models' && renderedAnchors.has('aiTeach.visionModel'))
 check('视觉转写模型提为正式设置键（不再只藏在 localStorage）',
   typeof meta.aiTeachVisionModel?.default === 'string')
-check('AI 教学模块改读设置键而不是 localStorage',
-  read('src/modules/ai-teaching/index.tsx').includes("getSettingRaw('aiTeachVisionModel')")
-  && !read('src/modules/ai-teaching/index.tsx').includes("localStorage.setItem('aiTeach.visionModel'"))
+check('AI 教学模块不再自建视觉转写选择器（设置键由模型槽位消费）',
+  // 2026-11-21：模型菜单收敛成「只选回答模型」后，模块内不再自建视觉转写选择器
+  // （该设置只在 设置→模型→场景分配 里改，主进程按模型槽位读取）。
+  !read('src/modules/ai-teaching/index.tsx').includes("localStorage.setItem('aiTeach.visionModel'")
+  && !read('src/modules/ai-teaching/index.tsx').includes('visionMenuOpen')
+  && read('electron/lib/modelCatalogStore.ts').includes("'aiTeachVisionModel'"))
 
 // ===== 5. 视图侧接线 =====
 

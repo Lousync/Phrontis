@@ -16,14 +16,17 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  familyOf, FAMILY_BY_TYPE, withSessionHeaders, userAgentString, SESSION_HEADER,
-  buildResponsesBody, buildResponsesTools, buildResponsesInput, parseResponsesWhole,
-  mergeResponsesResult, collectResponsesToolCalls, REASONING_MODEL_RE,
-} from '../../../electron/lib/llmProtocolPure.ts'
+import { loadTsModule } from '../shared/ts-module.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
+
+const { mod: proto } = await loadTsModule(join(ROOT, 'electron/lib/llmProtocolPure.ts'))
+const {
+  familyOf, FAMILY_BY_TYPE, withSessionHeaders, userAgentString, SESSION_HEADER,
+  buildResponsesBody, buildResponsesTools, buildResponsesInput, parseResponsesWhole,
+  mergeResponsesResult, collectResponsesToolCalls, REASONING_MODEL_RE, isReasoningCapableModel,
+} = proto
 
 let pass = 0, fail = 0
 const check = (name, ok, detail = '') => {
@@ -135,7 +138,8 @@ check('不发 OpenAI 兼容用的 reasoning_effort 字段',
 check('off 不透传', !('reasoning' in buildResponsesBody({ ...baseReq, model: 'qwen3.8-max', effort: 'off' }, false)))
 check('非推理型模型不透传（避免上游不认该参数报错）',
   !('reasoning' in buildResponsesBody({ ...baseReq, model: 'glm-5.3', effort: 'high' }, false)))
-check('推理型识别沿用 REASONING_MODEL_RE', REASONING_MODEL_RE.test('qwen3.8-max') && !REASONING_MODEL_RE.test('glm-5.3'))
+check('推理型识别走「内置表 -> REASONING_MODEL_RE」链',
+  isReasoningCapableModel('deepseek-v4.1-flash') && isReasoningCapableModel('qwen3.8-max') && !isReasoningCapableModel('glm-5.3'))
 
 // ===== 4. Responses 响应解析 =====
 
@@ -226,7 +230,11 @@ check('视觉转写接受 sessionId', /interface VisionChatRequest[\s\S]{0,500}s
 
 console.log('\n[接线] 调用点会话 ID')
 const agent = read('electron/lib/agentService.ts')
-check('agentService 主循环带 sessionId', (agent.match(/sessionId \}/g) ?? []).length >= 2)
+// 口径：两处 LLM 调用（主循环 + 预算耗尽总结轮）都必须把 sessionId 传给 invokeLlmStreamInternal。
+// 旧断言写的是字面量 `sessionId }`，但参数早已改成 shorthand `sessionId, accounting: 'caller'` —— 恒为 0 命中。
+check('agentService 主循环带 sessionId',
+  (agent.match(/invokeLlmStreamInternal\(/g) ?? []).length >= 2 &&
+  (agent.match(/sessionId, accounting: 'caller'/g) ?? []).length >= 2)
 check('agentCompress 带 sessionId', read('electron/lib/agentCompress.ts').includes('sessionId,'))
 check('inlineSuggest 用固定用途名（不能是随机值）', read('electron/lib/aiAssistant/inlineSuggest.ts').includes("sessionId: 'inline-suggest'"))
 check('translateService 用固定用途名', read('electron/lib/translateService.ts').includes("sessionId: 'translate'"))

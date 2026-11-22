@@ -142,7 +142,7 @@ function WriteBatchView({ op, compact }: { op: AiPlanOp; compact: boolean }) {
           <p className="mt-1 max-w-full break-words text-[12px] text-[var(--danger)]" data-tip={op.error} aria-label={op.error}>失败：{op.error}</p>
         )}
       </div>
-      <div className={`shrink-0 overflow-x-auto border-y border-[var(--border-color)] bg-[var(--bg-secondary)] ${compact ? 'px-2 py-1' : 'px-3 py-1.5'}`}>
+      <div className={`shrink-0 overflow-x-auto border-y border-[var(--border-color)] bg-[var(--bg-secondary)] kb-glass-chrome ${compact ? 'px-2 py-1' : 'px-3 py-1.5'}`}>
         <div className="flex w-max items-center gap-1">
           {writes.map((w, i) => (
             <button
@@ -207,7 +207,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
   }
 
   return (
-    <div className="kb-view-in flex h-full min-w-0 flex-col bg-[var(--bg-primary)]">
+    <div className="kb-view-in flex h-full min-w-0 flex-col kb-theme-surface">
       <div className={`flex shrink-0 items-center justify-between gap-1 border-b border-[var(--border-color)] ${compact ? 'min-h-9 flex-wrap px-2 py-1' : 'h-9 px-3'}`}>
         <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] font-medium text-[var(--text-primary)]">
           {onClose && (

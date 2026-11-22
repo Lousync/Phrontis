@@ -1,0 +1,303 @@
+#!/usr/bin/env node
+/**
+ * 契约验证：AI 教学「上下文用量明细」纯函数（`electron/lib/aiTeachContextUsagePure.ts`）
+ *
+ * 锁什么：
+ *  1. 旧 5 字段（systemChars / constraintChars / profileChars / sourcesChars / ruleChars）口径不变；
+ *  2. 新 7 字段是 systemFull 的**互斥分区**：分类和 === systemFull.length（不重不漏）；
+ *  3. messages / toolsDef 不在 systemFull 内，按各自真实序列化长度计；
+ *  4. 字符 → token → 百分比 / 剩余空间：任何输入都不出负数，分类和不超过真实已用；
+ *  5. 无注入 / 未设窗口 / 已用超窗 三种降级不崩；
+ *  6. **双端一致性**：`electron/lib/aiTeachContextUsagePure.ts`（主进程）与
+ *     `src/lib/contextUsagePure.ts`（渲染层）的标签 / 顺序 / 口径 / 输出逐行相等
+ *     —— 两份实现是刻意复制，任一单边改动必须被这里拦住。
+ *
+ * 运行（仓库根目录）：node .AGENT/scripts/ai-teaching/verify-context-usage.mjs [仓库路径]
+ * 输出纯 ASCII（禁 emoji，AGENTS.md）；期望全部 PASS 且 exit=0。
+ */
+import fs from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
+import { pathToFileURL } from 'node:url'
+import { stripTypeScriptTypes } from 'node:module'
+
+const ROOT = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : path.resolve(new URL('../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
+
+const checks = []
+const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
+
+async function loadStripped(relPath, tmpName) {
+  const src = fs.readFileSync(path.join(ROOT, relPath), 'utf8')
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-teach-usage-'))
+  const tmpFile = path.join(tmpDir, tmpName)
+  fs.writeFileSync(tmpFile, stripTypeScriptTypes(src, { mode: 'strip' }))
+  const mod = await import(pathToFileURL(tmpFile).href)
+  return { mod, tmpDir }
+}
+
+const { mod: usage, tmpDir: usageTmp } = await loadStripped(
+  'electron/lib/aiTeachContextUsagePure.ts',
+  'aiTeachContextUsagePure.mjs',
+)
+// 渲染层镜像（src/lib/contextUsagePure.ts；只 import type，strip 后零依赖）
+const { mod: usageUi, tmpDir: usageUiTmp } = await loadStripped(
+  'src/lib/contextUsagePure.ts',
+  'contextUsagePure.mjs',
+)
+
+const {
+  CHARS_PER_TOKEN,
+  CONTEXT_USAGE_CATEGORIES,
+  SYSTEM_SIDE_FIELDS,
+  buildInjectionStats,
+  buildContextUsage,
+  estimateTokensFromChars,
+  scaleTokensToBudget,
+  sumClassifiedSystemChars,
+} = usage
+
+const REP = (n, s) => s.repeat(n)
+
+// 合成一份「有内容」的真实形状注入：各段长度互不相同，便于发现串段 / 漏段。
+const PARTS = {
+  systemPrompt: REP(120, 'S'),
+  constraintsRaw: REP(60, 'C'),
+  scopeInjected: REP(80, 'Q'),
+  repoRules: REP(40, 'R'),
+  favorites: REP(20, 'F'),
+  sources: REP(50, 'M'),
+  profile: REP(30, 'P'),
+  course: REP(70, 'U'),
+  skillList: REP(35, 'K'),
+  explicitSkill: REP(15, 'E'),
+  toolsHint: REP(45, 'T'),
+  protocols: REP(200, 'G'),
+  scopeRule: REP(25, 'A'),
+  writeScope: REP(55, 'B'),
+  permissions: REP(65, 'D'),
+  runtime: REP(75, 'V'),
+  messagesJson: REP(500, 'J'),
+  toolsJson: REP(1500, 'X'),
+}
+// systemFull = 7 个分区字段覆盖到的 15 段（顺序不影响长度断言）
+PARTS.systemFull = [
+  PARTS.systemPrompt,
+  PARTS.scopeInjected,
+  PARTS.repoRules,
+  PARTS.favorites,
+  PARTS.sources,
+  PARTS.profile,
+  PARTS.course,
+  PARTS.skillList,
+  PARTS.explicitSkill,
+  PARTS.toolsHint,
+  PARTS.protocols,
+  PARTS.scopeRule,
+  PARTS.writeScope,
+  PARTS.permissions,
+  PARTS.runtime,
+].join('')
+
+const stats = buildInjectionStats(PARTS)
+
+console.log('\n=== 1. buildInjectionStats：旧 5 字段口径不变 ===')
+check('systemChars = buildSystemPrompt 长度', stats.systemChars === PARTS.systemPrompt.length, String(stats.systemChars))
+check('constraintChars = 四层原始正文合计', stats.constraintChars === PARTS.constraintsRaw.length, String(stats.constraintChars))
+check('profileChars = 三层画像长度', stats.profileChars === PARTS.profile.length, String(stats.profileChars))
+check('sourcesChars = 素材 / 来源长度', stats.sourcesChars === PARTS.sources.length, String(stats.sourcesChars))
+check(
+  'ruleChars = 12 段教学规则（protocols + 范围 + 落点）',
+  stats.ruleChars === PARTS.protocols.length + PARTS.scopeRule.length + PARTS.writeScope.length,
+  String(stats.ruleChars),
+)
+
+console.log('\n=== 2. 新字段：互斥分区，和 === systemFull.length ===')
+check('messagesChars 在 systemFull 之外', stats.messagesChars === PARTS.messagesJson.length, String(stats.messagesChars))
+check('toolsDefChars 在 systemFull 之外', stats.toolsDefChars === PARTS.toolsJson.length, String(stats.toolsDefChars))
+check('toolsListChars = 扩展工具提示', stats.toolsListChars === PARTS.toolsHint.length, String(stats.toolsListChars))
+check('skillChars = 清单 + 显式指定', stats.skillChars === PARTS.skillList.length + PARTS.explicitSkill.length, String(stats.skillChars))
+check(
+  'workspaceChars = 要求注入 + 仓库规则 + 收藏 + 取材 + 落点',
+  stats.workspaceChars === PARTS.scopeInjected.length + PARTS.repoRules.length + PARTS.favorites.length + PARTS.scopeRule.length + PARTS.writeScope.length,
+  String(stats.workspaceChars),
+)
+check('ledgerChars = 画像 + 课程台账', stats.ledgerChars === PARTS.profile.length + PARTS.course.length, String(stats.ledgerChars))
+check(
+  'capabilityChars = 协议 + 权限 + 运行期',
+  stats.capabilityChars === PARTS.protocols.length + PARTS.permissions.length + PARTS.runtime.length,
+  String(stats.capabilityChars),
+)
+check('SYSTEM_SIDE_FIELDS 恰好 7 段', SYSTEM_SIDE_FIELDS.length === 7, String(SYSTEM_SIDE_FIELDS.length))
+check('★ 7 段分区和 === systemFull.length（不重不漏）', sumClassifiedSystemChars(stats) === PARTS.systemFull.length, `${sumClassifiedSystemChars(stats)} vs ${PARTS.systemFull.length}`)
+check('7 段分区和 <= systemFull + messages + tools（总上限）', sumClassifiedSystemChars(stats) + stats.messagesChars + stats.toolsDefChars <= PARTS.systemFull.length + PARTS.messagesJson.length + PARTS.toolsJson.length, '')
+
+console.log('\n=== 3. 空注入 / 缺字段降级 ===')
+const empty = buildInjectionStats({})
+check('空输入不抛错且旧字段为 0', empty.systemChars === 0 && empty.constraintChars === 0 && empty.ruleChars === 0, JSON.stringify(empty))
+check('空输入新字段全 0', empty.messagesChars === 0 && empty.toolsDefChars === 0 && empty.ledgerChars === 0 && empty.capabilityChars === 0, JSON.stringify(empty))
+check('空输入分区和为 0', sumClassifiedSystemChars(empty) === 0, '')
+check('null stats 分区和为 0', sumClassifiedSystemChars(null) === 0, '')
+
+console.log('\n=== 4. 字符 -> token：口径与边界 ===')
+check('CHARS_PER_TOKEN = 2.6', CHARS_PER_TOKEN === 2.6, String(CHARS_PER_TOKEN))
+check('2600 字 -> 1000 tok', estimateTokensFromChars(2600) === 1000, String(estimateTokensFromChars(2600)))
+check('0 / 负数 / NaN -> 0', estimateTokensFromChars(0) === 0 && estimateTokensFromChars(-9) === 0 && estimateTokensFromChars(NaN) === 0, '')
+
+console.log('\n=== 5. 分类行 + 百分比 + 剩余空间 ===')
+check('分类表 9 行且 key 唯一', CONTEXT_USAGE_CATEGORIES.length === 9 && new Set(CONTEXT_USAGE_CATEGORIES.map((c) => c.key)).size === 9, String(CONTEXT_USAGE_CATEGORIES.length))
+check(
+  '分类顺序与示意图一致',
+  CONTEXT_USAGE_CATEGORIES.map((c) => c.key).join(',') === 'messages,toolsDef,toolsList,skills,system,sources,workspace,ledger,capability',
+  CONTEXT_USAGE_CATEGORIES.map((c) => c.key).join(','),
+)
+
+const normal = buildContextUsage(stats, { windowTokens: 200000, usedTokens: 50000 })
+const rowSum = normal.rows.reduce((a, r) => a + r.tokens, 0)
+check('rows 输出 9 行', normal.rows.length === 9, String(normal.rows.length))
+check('★ 分类 token 和 <= 真实已用', rowSum <= normal.usedTokens, `${rowSum} vs ${normal.usedTokens}`)
+check('usedTokens 保持真实值', normal.usedTokens === 50000, String(normal.usedTokens))
+check('剩余空间 = 窗口 - 已用（非负）', normal.freeTokens === 150000, String(normal.freeTokens))
+check('剩余百分比 75', normal.freePct === 75, String(normal.freePct))
+check('所有行百分比在 0..100', normal.rows.every((r) => r.pct >= 0 && r.pct <= 100), JSON.stringify(normal.rows.map((r) => r.pct)))
+check('unclassifiedTokens = 已用 - 分类和（非负）', normal.unclassifiedTokens === normal.usedTokens - rowSum && normal.unclassifiedTokens >= 0, String(normal.unclassifiedTokens))
+
+// 估算和明显超过真实 used：等比收敛，绝不让分类和 > used
+const heavy = buildInjectionStats({
+  systemPrompt: REP(20000, 'a'),
+  protocols: REP(20000, 'b'),
+  messagesJson: REP(40000, 'c'),
+  toolsJson: REP(80000, 'd'),
+})
+const tight = buildContextUsage(heavy, { windowTokens: 100000, usedTokens: 12000 })
+const tightSum = tight.rows.reduce((a, r) => a + r.tokens, 0)
+check('★ 估算超真实 used 时收敛（分类和 <= used）', tightSum <= tight.usedTokens, `${tightSum} vs ${tight.usedTokens}`)
+check('收敛后 classifiedTokens === 分类和', tight.classifiedTokens === tightSum, `${tight.classifiedTokens} vs ${tightSum}`)
+check('收敛不产生负数', tight.rows.every((r) => r.tokens >= 0 && r.pct >= 0) && tight.unclassifiedTokens >= 0, '')
+check('未超时收敛函数原样返回', JSON.stringify(scaleTokensToBudget([1, 2, 3], 10)) === JSON.stringify([1, 2, 3]), '')
+
+// 未设窗口 / 已用超窗
+const noWindow = buildContextUsage(stats, { usedTokens: 50000 })
+check('未设窗口：百分比全 0、剩余 0', noWindow.rows.every((r) => r.pct === 0) && noWindow.freeTokens === 0 && noWindow.freePct === 0, '')
+const overshoot = buildContextUsage(stats, { windowTokens: 10000, usedTokens: 50000 })
+check('已用超窗：剩余恒 0（不出负）', overshoot.freeTokens === 0, String(overshoot.freeTokens))
+check('已用超窗：usedPct 夹取到 100', overshoot.usedPct === 100, String(overshoot.usedPct))
+const noUsed = buildContextUsage(stats, { windowTokens: 100000, usedTokens: 0 })
+const noUsedSum = noUsed.rows.reduce((a, r) => a + r.tokens, 0)
+check('没有 promptTokens 时退回分类估算和', noUsed.usedTokens === noUsedSum, `${noUsed.usedTokens} vs ${noUsedSum}`)
+check('没有 promptTokens + 有窗口：剩余 = 窗口 - 分类和', noUsed.freeTokens === Math.max(0, 100000 - noUsedSum), String(noUsed.freeTokens))
+
+console.log('\n=== 6. 无注入 / 空 stats 的明细降级 ===')
+const emptyView = buildContextUsage(null, { windowTokens: 128000, usedTokens: 0 })
+check('null stats 不抛错', emptyView.rows.length === 9, String(emptyView.rows.length))
+check('null stats 全 0 / 剩余 = 窗口', emptyView.rows.every((r) => r.tokens === 0) && emptyView.usedTokens === 0 && emptyView.freeTokens === 128000, JSON.stringify({ used: emptyView.usedTokens, free: emptyView.freeTokens }))
+const zeroView = buildContextUsage(empty, { windowTokens: 0, usedTokens: 0 })
+check('全空 + 未设窗口不崩', zeroView.rows.length === 9 && zeroView.freeTokens === 0 && zeroView.usedPct === 0, '')
+
+console.log('\n=== 7. agentService 接线：每个 system 片段恰好归入一个分区 ===')
+const agentSrc = fs.readFileSync(path.join(ROOT, 'electron/lib/agentService.ts'), 'utf8')
+const blockStart = agentSrc.indexOf('const injection: AiTeachInjectionStats')
+const block = blockStart >= 0 ? agentSrc.slice(blockStart, blockStart + 2500) : ''
+const countOf = (name) => (block.match(new RegExp(`\\b${name}\\b`, 'g')) || []).length
+// systemFull 的全部片段（顺序与 buildSystemPrompt 拼接一致）
+const HINT_NAMES = [
+  'baseSystem', 'schedulePersona', 'intelPersona', 'scopeInstHint', 'repoRulesHint',
+  'assistantConstraintHint', 'glossaryHint', 'profileHint', 'longTaskHint', 'courseHint',
+  'teachStyleHint', 'favoritesHint', 'titleRuleHint', 'quizRuleHint', 'planRuleHint',
+  'askRuleHint', 'outlineRuleHint', 'visualHint', 'mindmapHint', 'imageHint',
+  'sourcesHint', 'scopeRuleHint', 'writeScopeHint', 'constraintsToolHint', 'sideLaneHint',
+  'toolsHint', 'executionHint', 'deniedHint', 'vaultFileHint', 'vaultScopeHint',
+  'skillHint', 'explicitSkillHint', 'PARALLEL_HINT', 'aiAssistantHint', 'hookStartHint',
+]
+check('找到 injection 统计块', blockStart >= 0 && block.includes('buildInjectionStats('), String(blockStart))
+const missing = HINT_NAMES.filter((n) => countOf(n) === 0)
+const duplicated = HINT_NAMES.filter((n) => countOf(n) > 1)
+check('systemFull 的 35 个片段全部入分区（无遗漏）', missing.length === 0, missing.join(','))
+check('没有片段被重复计入两个分区', duplicated.length === 0, duplicated.join(','))
+check('messages / tools 走真实序列化', block.includes('JSON.stringify(convo') && block.includes('JSON.stringify(toolPayload)'), '')
+check('旧字段 constraintsRaw 仍是四层原始正文', block.includes('constraintsRaw: scopeLayers.global + scopeLayers.workspace + scopeLayers.unit + scopeLayers.lesson'), '')
+
+console.log('\n=== 8. 双端一致性：src/lib/contextUsagePure.ts（渲染层镜像） ===')
+const UI_TRIO = (list) => JSON.stringify(list.map((c) => [c.key, c.label, c.field]))
+check('渲染层导出了 5 个同名算法', ['CHARS_PER_TOKEN', 'CONTEXT_USAGE_CATEGORIES', 'estimateTokensFromChars', 'scaleTokensToBudget', 'buildContextUsage'].every((k) => usageUi[k] != null), Object.keys(usageUi).join(','))
+check('★ 9 个分类的 key / 标签 / 字段与顺序两处完全相同', UI_TRIO(CONTEXT_USAGE_CATEGORIES) === UI_TRIO(usageUi.CONTEXT_USAGE_CATEGORIES), UI_TRIO(usageUi.CONTEXT_USAGE_CATEGORIES))
+check('★ CHARS_PER_TOKEN 两处相同', usageUi.CHARS_PER_TOKEN === CHARS_PER_TOKEN, `${usageUi.CHARS_PER_TOKEN} vs ${CHARS_PER_TOKEN}`)
+check(
+  'estimateTokensFromChars 同口径',
+  [0, 1, 999, 2599, 2600, 123456].every((n) => usageUi.estimateTokensFromChars(n) === estimateTokensFromChars(n)),
+  '',
+)
+check(
+  'scaleTokensToBudget 同输出（含不需要收敛的分支）',
+  [[[900, 400, 300, 50], 500], [[3, 2, 1], 100], [[1, 2, 3], 0]].every(
+    ([vals, cap]) => JSON.stringify(usageUi.scaleTokensToBudget(vals, cap)) === JSON.stringify(scaleTokensToBudget(vals, cap)),
+  ),
+  '',
+)
+
+const PARITY_CASES = [
+  [stats, { windowTokens: 200000, usedTokens: 50000 }],
+  [stats, { windowTokens: 1000000, usedTokens: 12900 }],
+  [stats, {}],
+  [heavy, { windowTokens: 10000, usedTokens: 50000 }],
+  [empty, { windowTokens: 128000, usedTokens: 0 }],
+  [null, { windowTokens: 0 }],
+  [null, { windowTokens: -1, usedTokens: NaN }],
+]
+let parityDiff = ''
+for (const [s, o] of PARITY_CASES) {
+  const main = JSON.stringify(buildContextUsage(s, o))
+  const ui = JSON.stringify(usageUi.buildContextUsage(s, o))
+  if (main !== ui && !parityDiff) parityDiff = `opts=${JSON.stringify(o)} main=${main} ui=${ui}`
+}
+check('★ 同一组输入下 buildContextUsage 输出逐行相等（7 组用例）', parityDiff === '', parityDiff)
+
+const badNums = []
+for (const [s, o] of PARITY_CASES) {
+  for (const view of [buildContextUsage(s, o), usageUi.buildContextUsage(s, o)]) {
+    const nums = [view.windowTokens, view.usedTokens, view.usedPct, view.classifiedTokens, view.unclassifiedTokens, view.freeTokens, view.freePct, ...view.rows.flatMap((r) => [r.chars, r.tokens, r.pct])]
+    if (nums.some((n) => !Number.isFinite(n) || n < 0)) badNums.push(`opts=${JSON.stringify(o)}`)
+  }
+}
+check('★ 渲染层纯函数不出负数 / NaN（null / 负数窗口 / NaN 已用 都覆盖）', badNums.length === 0, badNums.join(' | '))
+check(
+  '渲染层展示格式：429 / 12.9k / 987.1k / 1M',
+  [429, 12900, 987100, 1000000].map(usageUi.formatContextTokens).join(',') === '429,12.9k,987.1k,1M',
+  [429, 12900, 987100, 1000000].map(usageUi.formatContextTokens).join(','),
+)
+check(
+  '渲染层百分比：<1% / 0% / 取整 / 未设窗口空串',
+  usageUi.formatContextPct(429, 1000000) === '<1%' &&
+    usageUi.formatContextPct(0, 1000000) === '0%' &&
+    usageUi.formatContextPct(987100, 1000000) === '99%' &&
+    usageUi.formatContextPct(5000, 0) === '',
+  `${usageUi.formatContextPct(429, 1000000)} / ${usageUi.formatContextPct(0, 1000000)} / ${usageUi.formatContextPct(987100, 1000000)} / "${usageUi.formatContextPct(5000, 0)}"`,
+)
+check(
+  '头部比例保留一位小数：1.3% / <0.1% / 0% / 未设窗口空串',
+  usageUi.formatContextPctDetailed(13000, 1000000) === '1.3%' &&
+    usageUi.formatContextPctDetailed(429, 1000000) === '<0.1%' &&
+    usageUi.formatContextPctDetailed(0, 1000000) === '0%' &&
+    usageUi.formatContextPctDetailed(5000, 0) === '',
+  `${usageUi.formatContextPctDetailed(13000, 1000000)} / ${usageUi.formatContextPctDetailed(429, 1000000)} / ${usageUi.formatContextPctDetailed(0, 1000000)} / "${usageUi.formatContextPctDetailed(5000, 0)}"`,
+)
+
+console.log('\n=== 9. 面板接线（src/modules/ai-teaching/index.tsx） ===')
+const panelSrc = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/index.tsx'), 'utf8')
+check('面板走渲染层纯函数，不再自算 CHARS_PER_TOKEN', panelSrc.includes("from '../../lib/contextUsagePure'") && !panelSrc.includes('const CHARS_PER_TOKEN'), '')
+check('明细面板 aria-label / 关闭按钮可访问名', panelSrc.includes('aria-label="上下文用量明细"') && panelSrc.includes('aria-label="关闭"'), '')
+check('未分类兜底行 + 估算脚注 + 未设窗口提示在位', panelSrc.includes('其他（工具结果等）') && panelSrc.includes('token 数是按字符估算的粗略值') && panelSrc.includes('填模型上下文窗口后可见比例'), '')
+check('用量面板只有一份 DOM：hover 预览与点击钉住共用（不再出现「两个菜单」）',
+  panelSrc.includes('data-wb="aiTeachUsagePanel"') && panelSrc.includes('group-hover:block') &&
+    panelSrc.includes("tokenOpen ? 'select-text kb-pop' : 'pointer-events-none hidden group-hover:block kb-view-fade'") &&
+    !panelSrc.includes('w-[252px]'), '')
+
+// ---------------------------------------------------------------- 报告
+const failed = checks.filter((c) => !c.pass)
+for (const c of checks) console.log(`  ${c.pass ? '[OK]' : '[FAIL]'} ${c.name}${c.detail && !c.pass ? '  -> ' + c.detail : ''}`)
+console.log(`\n${failed.length === 0 ? 'PASS' : 'FAIL'} —— ${checks.length - failed.length}/${checks.length} 断言通过`)
+
+try { fs.rmSync(usageTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
+try { fs.rmSync(usageUiTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
+process.exit(failed.length === 0 ? 0 : 1)

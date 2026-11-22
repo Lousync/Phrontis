@@ -81,6 +81,7 @@ import { LONG_TASK_HINT, resolveResumeProfile } from './agentLongTaskPure'
 import { readRepoRulesFrom, ruleDirsForScopePaths } from './repoRules'
 import { readAssistantHooks } from './assistantHooks'
 import { MAX_AFTER_TOOL_PER_ROUND, matchToolPattern, renderAfterToolHooks, renderRunStartHooks } from './assistantHooksPure'
+import { buildInjectionStats } from './aiTeachContextUsagePure'
 
 /**
  * 单轮估算费用（USD）：把 provider 的 prompt/completion/cached 拆成 `modelPricing` 的四桶
@@ -459,13 +460,38 @@ export interface AgentChatResult {
   journal?: { runId: string; ops: number }
 }
 
-/** AI教学 system 注入分段字符数（基础人设 / CONSTRAINTS / 三层画像 / SOURCE 目录 / 教学规则） */
+/**
+ * AI教学 system 注入分段字符数（基础人设 / CONSTRAINTS / 三层画像 / SOURCE 目录 / 教学规则）。
+ *
+ * 2026-11-20 扩展（上下文用量明细）：旧 5 字段口径不变；新 7 个 `*Chars` 是 **systemFull 的互斥分区**
+ * （见 `aiTeachContextUsagePure.ts` 头注）。`messagesChars` / `toolsDefChars` 不在 systemFull 内。
+ * 渲染层类型镜像在 `src/types/index.ts`，两处必须同步。
+ */
 export interface AiTeachInjectionStats {
+  /** 基础人设（`buildSystemPrompt`）字符数 —— 旧字段 / 「系统提示词」行 */
   systemChars: number
+  /** 四层 CONSTRAINTS 原始正文合计 —— 旧字段（新分类里归入「工作区」） */
   constraintChars: number
+  /** 三层学习者画像 —— 旧字段（新分类里归入「学习画像与课程」） */
   profileChars: number
+  /** 素材 / 来源清单 —— 旧字段 / 「来源」行 */
   sourcesChars: number
+  /** 教学规则合计 —— 旧字段（新分类里归入「教学协议」） */
   ruleChars: number
+  /** 「对话消息」：首轮非 system 消息 JSON 长度（历史 + 纪要 + 首条 user 注入，不含后续 tool 结果） */
+  messagesChars?: number
+  /** 「内置工具定义」：本轮 tools 载荷 `JSON.stringify` 长度 */
+  toolsDefChars?: number
+  /** 「工具装载提示」：扩展工具提示（ondemand 工具申请说明）长度 */
+  toolsListChars?: number
+  /** 「技能」：已配置 Skill 清单 + 显式指定 Skill 提示词长度 */
+  skillChars?: number
+  /** 「工作区」：四层要求注入 + 仓库规则 + 收藏 + 取材 / 落点纪律长度 */
+  workspaceChars?: number
+  /** 「学习画像与课程」：三层画像 + 课程 / 复习上下文长度 */
+  ledgerChars?: number
+  /** 「教学协议」：教学协议 + 权限执行纪律 + 运行期提示长度 */
+  capabilityChars?: number
 }
 
 /** 进行中的对话 → 中断控制器（用户点击停止时触发） */
@@ -1662,17 +1688,6 @@ async function runAgentLoopInner(
     : ''
   const aiAssistantHint = scopeHint + writeModeHint + scheduleReadOnlyHint + intelReadOnlyHint
   const baseSystem = buildSystemPrompt(context)
-  // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
-  const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
-    ? {
-        systemChars: baseSystem.length,
-        // 分层要求合计（四层原始正文长度；实际注入串还含分层标注与截断标记，见 scopePrompt.ts）
-        constraintChars: scopeLayers.global.length + scopeLayers.workspace.length + scopeLayers.unit.length + scopeLayers.lesson.length,
-        profileChars: profileHint.length,
-        sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + teachStyleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + constraintsToolHint.length + sideLaneHint.length,
-      }
-    : undefined
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
@@ -1755,6 +1770,35 @@ async function runAgentLoopInner(
   // 续跑注入：同样只存在于本次请求（不落库、不进历史）。放在 convo 末尾 = 前缀（system+tools）逐字不变，
   // prompt cache 不受影响；且 carry 只付这一次（续跑成功即清现场）
   if (resumeInjection) convo.push({ role: 'user', content: resumeInjection })
+  // UI 优化条目9② / 上下文用量明细（2026-11-20）：教学会话的注入分段字符数。
+  // ★ 口径锁在 `aiTeachContextUsagePure.ts` 头注：旧 5 字段语义不变；新 7 字段是 systemFull 的
+  //   互斥分区（和恒等于 systemFull.length）；messages/tools 两项不在 systemFull 内。
+  //   放在 convo 定型之后算，才能量到压缩后的真实首轮消息（不含循环中追加的 tool 结果）。
+  const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
+    ? buildInjectionStats({
+        systemFull,
+        systemPrompt: baseSystem,
+        // 旧 constraintChars 口径：四层原始正文长度之和（实际注入串的抬头 / 截断标记另算）
+        constraintsRaw: scopeLayers.global + scopeLayers.workspace + scopeLayers.unit + scopeLayers.lesson,
+        scopeInjected: scopeInstHint,
+        repoRules: repoRulesHint,
+        favorites: favoritesHint,
+        sources: sourcesHint,
+        profile: profileHint,
+        course: courseHint,
+        skillList: skillHint,
+        explicitSkill: explicitSkillHint,
+        toolsHint,
+        // 教学协议：与旧 ruleChars 的 12 段同源（范围 / 落点纪律另列，计入「工作区」）
+        protocols: titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + teachStyleHint + visualHint + mindmapHint + constraintsToolHint + sideLaneHint,
+        scopeRule: scopeRuleHint,
+        writeScope: writeScopeHint,
+        permissions: executionHint + deniedHint + vaultFileHint + vaultScopeHint,
+        runtime: schedulePersona + intelPersona + assistantConstraintHint + glossaryHint + longTaskHint + imageHint + PARALLEL_HINT + aiAssistantHint + hookStartHint,
+        messagesJson: JSON.stringify(convo.filter((m) => m.role !== 'system')),
+        toolsJson: JSON.stringify(toolPayload),
+      })
+    : undefined
   let sessionWrites = 0
   /** 本条消息累计批量移动条目数（v3.16.1 方案 A：整批算 1 次写，但条目总量另有 300 硬上限） */
   let batchMoveItems = 0

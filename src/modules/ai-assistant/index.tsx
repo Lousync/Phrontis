@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star, ListTree, Loader2, Sparkles } from 'lucide-react'
 import type { AgentSessionInfo, AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
+import { resolveCatalogEntry, useModelCatalog } from '../../lib/modelCatalog'
 import { showToast } from '../../lib/toast'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
@@ -156,12 +157,22 @@ export function AiAssistantModule({
     })
   }, [isActive])
 
-  // 思考强度门槛（与 AI 教学同口径）：所选模型不支持推理 → 强制回落关闭
-  const effModelBare = api.modelId.includes(':') ? api.modelId.slice(api.modelId.indexOf(':') + 1) : api.modelId
+  // 思考强度门槛（与 AI 教学同口径）：条目显式 yes/no 优先 → 未定再问主进程（内置表 → 名称正则）
+  const modelCatalog = useModelCatalog()
+  const capSpec = api.modelId || modelCatalog.snapshot?.defaultEntryId || ''
+  const capResolved = useMemo(
+    () => resolveCatalogEntry(capSpec, modelCatalog.entries),
+    [capSpec, modelCatalog.entries],
+  )
+  const explicitReasoning = capResolved?.entry?.capabilities?.reasoning
+  const effModelBare = capResolved?.modelId
+    || (capSpec.includes(':') ? capSpec.slice(capSpec.indexOf(':') + 1) : capSpec)
   useEffect(() => {
+    if (explicitReasoning === 'yes') { setModelCapable(true); return }
+    if (explicitReasoning === 'no') { setModelCapable(false); return }
     if (!effModelBare) { setModelCapable(false); return }
     void llmReasoningCapable(effModelBare).then(setModelCapable).catch(() => setModelCapable(false))
-  }, [effModelBare])
+  }, [explicitReasoning, effModelBare])
   useEffect(() => {
     if (!modelCapable && api.effort !== 'off') api.setEffort('off')
   }, [modelCapable, api.effort, api])
@@ -552,9 +563,9 @@ export function AiAssistantModule({
         modActionsEl,
       )}
 
-      <div ref={layoutRef} className="flex h-full min-w-0 bg-[var(--bg-primary)]">
+      <div ref={layoutRef} className="flex h-full min-w-0 kb-theme-surface">
         <div className="flex h-full min-w-0 flex-1 flex-col">
-        <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3">
+        <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-secondary)] kb-chrome-flat px-3">
           <span className="flex min-w-0 items-center gap-2">
             <AiAssistantIcon size={13} style={{ color: BOOKMARK_COLORS.aiAssistant.fg }} />
             <span className="truncate text-[12.5px] font-medium text-[var(--text-primary)]">{api.active?.title || 'AI助手'}</span>

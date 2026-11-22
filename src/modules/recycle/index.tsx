@@ -307,11 +307,9 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
         )}
       </div>
 
-      {/* 范围说明：这个模块不是全量文件回收站，避免「删了文件却在这里找不到」的误解 */}
-      <div className="px-3 py-1.5 border-b border-[var(--border-color)] shrink-0 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
-        这里只收博客 / 密码本 / 动态等模块删除的数据；笔记和文件删除在系统回收站。
-      </div>
-
+      {/* 「这里只收博客 / 密码本 / 动态…」整行说明已删（2026-11-21 用户点名）：
+          同一信息在空态里还有一处短提示（笔记 / 文件删除在系统回收站），
+          顶部再压一行常驻说明属于重复注解，按铁律 26 让结构本身解释。 */}
       {/* Sort + Filter bar */}
       <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--border-color)] shrink-0">
         {/* Sort toggle */}

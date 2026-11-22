@@ -18,7 +18,7 @@ export function EntryList({ entries, loading, onEntryClick, onToggleStar, onNewE
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-[var(--bg-primary)]">
+      <div className="flex-1 flex items-center justify-center kb-theme-surface">
         <div className="flex flex-col items-center gap-3 text-[var(--text-muted)]">
           <div className="w-8 h-8 border-2 border-[var(--border-color)] border-t-[var(--accent)] rounded-full animate-spin" />
           <span className="text-sm">加载中...</span>
@@ -30,7 +30,7 @@ export function EntryList({ entries, loading, onEntryClick, onToggleStar, onNewE
   const sorted = [...entries].sort((a, b) => b.date.localeCompare(a.date))
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)]">
+    <div className="flex-1 overflow-y-auto kb-theme-surface">
       <div className="flex h-full flex-col max-w-3xl mx-auto px-6 py-6">
         {!hasToday && (
           <div className="flex justify-end mb-4">

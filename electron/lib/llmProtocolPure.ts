@@ -1,5 +1,5 @@
 /**
- * 模型网关 · 协议层纯函数（零依赖 —— 专供 `.AGENT/scripts/**` 契约脚本 import）。
+ * 模型网关 · 协议层纯函数（零 electron 依赖 —— 专供 `.AGENT/scripts/**` 契约脚本 import）。
  *
  * 为什么单独一个文件：`llmService.ts` 顶部 `import { app, ipcMain, net } from 'electron'`，
  * 契约脚本用裸 node 跑不起来。所以凡是「值得断言、又不需要 electron」的判定与装配逻辑
@@ -11,7 +11,9 @@
  *   · OpenAI Responses 协议的请求装配与响应解析
  */
 
-// ===== 类型（结构上与 llmService 的同名类型兼容，但本文件不 import 任何东西）=====
+import { lookupCapability } from './modelCapabilityTable'
+
+// ===== 类型（结构上与 llmService 的同名类型兼容；运行时只依赖同为零依赖的 modelCapabilityTable）=====
 
 export type ProviderType = 'openai-compatible' | 'ollama' | 'anthropic' | 'openai-responses'
 
@@ -114,8 +116,21 @@ export function withSessionHeaders(
 
 // ===== 推理能力启发式（原在 llmService，随 Responses 装配逻辑一起下移）=====
 
-/** P3b 推理/思考能力启发式：仅这些模型接受 reasoning 参数（跟随模型能力）。 */
+/** P3b 思考能力名称兜底：内置表（`modelCapabilityTable`）没有依据时才用。 */
 export const REASONING_MODEL_RE = /(reasoner|r1|qwq|qwen3|o[134]-|o[134]$|thinking|research|smart|deepthink)/i
+
+/**
+ * 思考能力判定（主进程唯一口径）：内置表 → 名称正则 → 未定（false）。
+ * 表是「确定模型族」的登记处；表里没有时才回落到旧正则，保证新模型名（如 deepseek-v4.1-flash）
+ * 只要登记过就能被识别，而不是被一个猜名字的正则拦住。
+ */
+export function isReasoningCapableModel(modelId: string): boolean {
+  const id = String(modelId ?? '')
+  const known = lookupCapability(id, 'reasoning')
+  if (known === 'yes') return true
+  if (known === 'no') return false
+  return REASONING_MODEL_RE.test(id)
+}
 
 // ===== OpenAI Responses 协议装配 =====
 
@@ -191,7 +206,7 @@ export function buildResponsesBody(req: PureChatRequest, stream: boolean): Recor
   const tools = buildResponsesTools(req.tools)
   if (tools.length > 0) { body.tools = tools; body.tool_choice = 'auto' }
   // P3b：Responses 的字段名是 reasoning.effort（不是 reasoning_effort），且只在模型具备能力时透传
-  if (req.effort && req.effort !== 'off' && REASONING_MODEL_RE.test(req.model)) {
+  if (req.effort && req.effort !== 'off' && isReasoningCapableModel(req.model)) {
     body.reasoning = { effort: req.effort }
   }
   return body

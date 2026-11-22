@@ -253,15 +253,15 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
   }, [showPreview])
 
   if (!loaded) {
-    return <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] bg-[var(--bg-primary)]">加载中...</div>
+    return <div className="flex-1 flex items-center justify-center text-[var(--text-muted)] kb-theme-surface">加载中...</div>
   }
 
   const activeStates = entryStates.split(',').filter(Boolean)
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 bg-[var(--bg-primary)]">
+    <div className="flex flex-col flex-1 min-h-0 kb-theme-surface">
       {/* toolbar */}
-      <div className="flex items-center justify-between gap-0.5 px-2 py-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shrink-0">
+      <div className="flex items-center justify-between gap-0.5 px-2 py-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] kb-chrome-flat shrink-0">
         <div className="flex items-center gap-1">
           <button onClick={handleCancelWithCheck} className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
             <ArrowLeft size={13} /> 返回
@@ -336,7 +336,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
       </div>
 
       {/* Tag bar */}
-      <div className="flex items-center gap-1.5 px-4 py-1.5 border-b border-[var(--border-color)] bg-[var(--bg-primary)] shrink-0 overflow-x-auto">
+      <div className="flex items-center gap-1.5 px-4 py-1.5 border-b border-[var(--border-color)] kb-theme-surface shrink-0 overflow-x-auto">
         {entryTags.map(t => (
           <span key={t.id}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] shrink-0"
@@ -375,7 +375,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
       </div>
 
       {/* content */}
-      <div className="flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)]">
+      <div className="flex-1 min-h-0 overflow-hidden kb-theme-surface">
         {showPreview ? (
           <div ref={previewRef} className="h-full overflow-y-auto">
             <div className="max-w-3xl mx-auto px-10 py-6">
