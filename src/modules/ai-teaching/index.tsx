@@ -1771,7 +1771,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setPreflight({ chapterId: ch.id, unitId, prevHandoff: prev })
   }, [activeSegmentSid, openArtFile, openSegmentBySid, reloadSources, sourcePayload])
 
-  /** 预检确认：开段 */
+  /** 预检确认：开段（`unitIds` 已由 Preflight 按章内先修拓扑序排好 → 段内讲解顺序就是它，`unitIds[0]` = 当前聚焦） */
   const startSegment = useCallback(async (unitIds: string[], sources: AiTeachSegmentSource[]) => {
     const ws = activeWsRef.current
     if (!ws || ws === '__none__') return

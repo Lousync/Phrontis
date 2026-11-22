@@ -7,9 +7,12 @@
  *   · stableTopo：无 requires / 正常链 / 菱形 / 有环 / 缺先修 / 自引用 / 已合法顺序不动 /
  *     不修改入参；跨章（不在本组内）先修视为已满足；
  *   · 选点：起点在中间、起点之后有已学、起点不存在、只有 1 个未学、起点已学、max 边界；
+ *   · ★ 段内顺序（`orderSelectedUnits`，开段确认后的讲解顺序）：正常链 / 菱形 / 无 requires 原样 /
+ *     有环原样 / 缺先修原样 / 先修未选中视为已满足 / 只重排不增删；
  *   · ★ 老课程（无 requires）与改造前实现**输出完全一致**（脚本内保留旧算法做对照，
- *     含随机生成的 120 组章节 × 起点 × max）；
- *   · 静态接线：index.tsx 的预检入参不丢 requires；stableTopo 只有一份实现（re-export 验证）。
+ *     含随机生成的 120 组章节 × 起点 × max，段内顺序另有 80 组行序对照）；
+ *   · 静态接线：index.tsx 的预检入参不丢 requires；Preflight 确认时用 orderSelectedUnits；
+ *     stableTopo / orderSelectedUnits 只有一份实现（re-export 验证）。
  *
  * 运行（项目根目录）：node .AGENT/scripts/ai-teaching/verify-outline-topo.mjs [仓库路径]
  * 输出纯 ASCII（禁 emoji）；期望全部 PASS 且 exit=0。
@@ -27,7 +30,8 @@ const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
 const stager = makeStager(ROOT)
-const { stableTopo } = await stager.load('src/lib/courseOutlineTopo.ts')
+const topoMod = await stager.load('src/lib/courseOutlineTopo.ts')
+const { stableTopo, orderSelectedUnits } = topoMod
 const sourcesPure = await stager.load('src/lib/aiTeachingSourcesPure.ts')
 // stableTopo 经 electron 侧 re-export 必须仍是同一个函数（单一真相源）
 const outlinePure = await stager.load('electron/lib/courseOutlinePure.ts')
@@ -199,12 +203,86 @@ check('buildPreflight 无 requires 时与旧行为一致（B,C,D）',
 check('显式 selectedUnitIds 仍然优先（不被拓扑序改写）',
   sourcesPure.buildPreflight({ units: chainU, assignments: [], sources: [], clickedUnitId: 'u2', selectedUnitIds: ['u3'] }).selectedUnitIds.join(',') === 'u3')
 
+// ---------------------------------------------------------------- 4b. 段内顺序（开段确认后的讲解顺序）
+console.log('\n=== 4b. 段内顺序 orderSelectedUnits ===')
+
+/** 改造前的段内顺序实现（逐字保留：大纲行序过滤选中集合）——段内顺序的对照基准 */
+function legacySegmentOrder(units, selectedIds) {
+  const want = new Set(selectedIds)
+  return units.filter((x) => want.has(x.id)).map((x) => x.id)
+}
+
+const seg = (list, sel) => orderSelectedUnits(list, sel).map((x) => x.id).join(',')
+
+check('无 requires：选中项按大纲行序（顺序不变）',
+  seg([u('A'), u('B'), u('C'), u('D')], ['A', 'B']) === 'A,B', seg([u('A'), u('B'), u('C'), u('D')], ['A', 'B']))
+check('无 requires：勾选顺序不影响输出（基准是大纲行序，不是点击序）',
+  seg([u('A'), u('B'), u('C')], ['C', 'A']) === 'A,C', seg([u('A'), u('B'), u('C')], ['C', 'A']))
+check('空选中 -> 空段', orderSelectedUnits([u('A')], []).length === 0)
+check('跨章 / 不存在的 id 被忽略（不增条目）',
+  seg([u('A'), u('B')], ['A', 'ZZ', 'B']) === 'A,B', seg([u('A'), u('B')], ['A', 'ZZ', 'B']))
+
+const segChain = [u('u3', { requires: ['u2'] }), u('u2', { requires: ['u1'] }), u('u1')]
+check('正常链：全选 -> 讲序 u1,u2,u3（大纲行序是 u3,u2,u1）',
+  seg(segChain, ['u3', 'u2', 'u1']) === 'u1,u2,u3', seg(segChain, ['u3', 'u2', 'u1']))
+check('正常链：与改造前行序不同（旧实现讲成 u3,u2,u1，先修倒着讲）',
+  legacySegmentOrder(segChain, ['u3', 'u2', 'u1']).join(',') === 'u3,u2,u1',
+  legacySegmentOrder(segChain, ['u3', 'u2', 'u1']).join(','))
+check('正常链：部分选中（u3,u2）仍按拓扑 -> u2,u3',
+  seg(segChain, ['u3', 'u2']) === 'u2,u3', seg(segChain, ['u3', 'u2']))
+check('正常链：只选 u3 -> 先修未选中视为已满足 -> u3',
+  seg(segChain, ['u3']) === 'u3', seg(segChain, ['u3']))
+
+const segDiamond = [u('d', { requires: ['b', 'c'] }), u('b', { requires: ['a'] }), u('c', { requires: ['a'] }), u('a')]
+check('菱形：全选 -> a,b,c,d', seg(segDiamond, ['d', 'b', 'c', 'a']) === 'a,b,c,d', seg(segDiamond, ['d', 'b', 'c', 'a']))
+check('菱形：已合法行序不被扰动（[a,c(<-a),b(<-a),d] -> a,c,b,d）',
+  seg([u('a'), u('c', { requires: ['a'] }), u('b', { requires: ['a'] }), u('d', { requires: ['b', 'c'] })], ['a', 'c', 'b', 'd']) === 'a,c,b,d',
+  seg([u('a'), u('c', { requires: ['a'] }), u('b', { requires: ['a'] }), u('d', { requires: ['b', 'c'] })], ['a', 'c', 'b', 'd']))
+
+const segCyclic = [u('x', { requires: ['y'] }), u('y', { requires: ['z'] }), u('z', { requires: ['x'] })]
+check('有环：原样（大纲行序）', seg(segCyclic, ['x', 'y', 'z']) === 'x,y,z', seg(segCyclic, ['x', 'y', 'z']))
+check('有环：与旧实现逐字一致', seg(segCyclic, ['x', 'y', 'z']) === legacySegmentOrder(segCyclic, ['x', 'y', 'z']).join(','), '')
+check('缺先修（指向不存在的 id）：原样', seg([u('b', { requires: ['ghost'] }), u('a')], ['b', 'a']) === 'b,a', seg([u('b', { requires: ['ghost'] }), u('a')], ['b', 'a']))
+check('自引用：原样（当作环）', seg([u('a', { requires: ['a'] }), u('b')], ['a', 'b']) === 'a,b', seg([u('a', { requires: ['a'] }), u('b')], ['a', 'b']))
+check('已合法顺序幂等', seg(segChain, orderSelectedUnits(segChain, ['u3', 'u2', 'u1']).map((x) => x.id)) === 'u1,u2,u3', '')
+
+check('只重排不增删：输出集合 = 选中集合（有 requires 时也一样）', (() => {
+  const a = orderSelectedUnits(segChain, ['u3', 'u2']).map((x) => x.id).sort().join(',')
+  return a === 'u2,u3' && orderSelectedUnits(segChain, ['u3', 'u2']).length === 2
+})(), '')
+check('返回新数组 / 不修改入参顺序', (() => {
+  const input = [u('u3', { requires: ['u2'] }), u('u2', { requires: ['u1'] }), u('u1')]
+  const before = JSON.stringify(input)
+  const out = orderSelectedUnits(input, ['u3', 'u2', 'u1'])
+  return out !== input && JSON.stringify(input) === before && out[0].id === 'u1'
+})(), '')
+
+/** 无 requires 的段内顺序必须与改造前实现逐字一致（确定性伪随机 80 组 × 随机勾选集合） */
+let segSeed = 20261123
+const segRnd = (n) => {
+  segSeed = (segSeed * 1103515245 + 12345) % 2147483648
+  return segSeed % n
+}
+let segMismatch = 0
+let segCases = 0
+for (let t = 0; t < 80; t++) {
+  const size = 1 + segRnd(8)
+  const units = Array.from({ length: size }, (_, i) => u(`s${i + 1}`))
+  const picked = units.filter(() => segRnd(3) !== 0).map((x) => x.id)
+  const shuffled = picked.slice().sort(() => (segRnd(2) ? 1 : -1)) // 勾选序与行序无关
+  segCases++
+  if (seg(units, shuffled) !== legacySegmentOrder(units, shuffled).join(',')) segMismatch++
+}
+check(`无 requires 随机 ${segCases} 组：段内顺序与旧实现逐字一致`, segMismatch === 0, `mismatch=${segMismatch}`)
+
 // ---------------------------------------------------------------- 5. 静态接线 / 单一真相源
 console.log('\n=== 5. 静态接线 ===')
 const topoSrc = read('src/lib/courseOutlineTopo.ts')
 const outlineSrc = read('electron/lib/courseOutlinePure.ts')
 const sourcesSrc = read('src/lib/aiTeachingSourcesPure.ts')
 const idxSrc = read('src/modules/ai-teaching/index.tsx')
+const preflightSrc = read('src/modules/ai-teaching/Preflight.tsx')
+const courseSrc = read('electron/lib/aiTeachingCourse.ts')
 
 check('courseOutlineTopo.ts 零运行时 import（真正零依赖）', !/^\s*import\s/m.test(topoSrc))
 check('courseOutlinePure.ts 不再自己实现 stableTopo', !/function\s+stableTopo/.test(outlineSrc), '')
@@ -215,6 +293,16 @@ check('aiTeachingSourcesPure 用共享拓扑序', sourcesSrc.includes("from './c
 check('PreflightUnit 带 requires 字段', /interface PreflightUnit[\s\S]*?requires\?: string\[\]/.test(sourcesSrc))
 check('index.tsx 预检入参把 requires 带上（丢了会静默退化为行序）',
   /requires:\s*u\.requires/.test(idxSrc), '')
+check('Preflight 从共享模块取 orderSelectedUnits（不自己实现排序）',
+  /import\s*\{[^}]*orderSelectedUnits[^}]*\}\s*from\s*'\.\.\/\.\.\/lib\/courseOutlineTopo'/.test(preflightSrc), '')
+check('Preflight 确认时把选中集合交给 orderSelectedUnits（段内顺序 = 拓扑序）',
+  /orderSelectedUnits\(chapter\.units,\s*selectedUnits\)/.test(preflightSrc), '')
+check('Preflight 不再用「大纲行序直接过滤」当段内顺序（负向）',
+  !/chapter\.units\.map\(\(u\)\s*=>\s*u\.id\)\.filter\(/.test(preflightSrc), '')
+check('当前聚焦 = 拓扑序第一个（index.tsx 用返回的 unitIds[0]）',
+  /setActiveUnitId\(unitIds\[0\] \?\? null\)/.test(idxSrc), '')
+check('主进程 openSegment 不自作主张重排（顺序只认传入的 unitIds）',
+  !/stableTopo|topoOrderUnits/.test(courseSrc), '')
 
 // ---------------------------------------------------------------- 汇总
 const failed = checks.filter((c) => !c.pass)

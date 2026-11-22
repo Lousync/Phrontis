@@ -190,9 +190,10 @@ export function ensureScopeText(ref: AiTeachScopeRef, getSetting: (key: string) 
  * 「要求」条目计数（`- ` 开头的行；**允许前置缩进**，标题与说明段一律不计）。
  * 只读不改，供画布卡片显示「要求 N」。
  *
- * ★ 与渲染层 `src/modules/ai-teaching/constraintsParse.ts` 的 `ITEM_RE` **必须同口径**：
- *   那边允许缩进条目（且编辑时会归一为顶格），这里若只数顶格行，用户手写的缩进条目
- *   会在卡片上显示「要求 0」、而右栏「要求」页签里明明看得见 —— 同一份文档两处读数打架。
+ * ★ **主进程是唯一口径**（渲染侧的同名条目化模块已于 2026-11-22 退役，`constraintsParse.ts` 已删）：
+ *   这里必须允许缩进条目（`^\s*-\s+\S`），否则用户手写的缩进条目会数不到 ——
+ *   卡片上显示「要求 0」，而文件里明明有内容。改这条正则即改全仓口径，契约脚本
+ *   `.AGENT/scripts/ai-teaching/verify-scope-files.mjs` 锁着该行为。
  */
 export function countConstraintItems(text: string): number {
   let n = 0

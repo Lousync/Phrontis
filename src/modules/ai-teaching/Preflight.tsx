@@ -9,6 +9,7 @@ import {
   type SourceEntry,
 } from '../../lib/aiTeachingSourcesPure'
 import { AnchoredLayer } from '../../components/shared/AnchoredLayer'
+import { orderSelectedUnits } from '../../lib/courseOutlineTopo'
 import { useModelCatalog } from '../../lib/modelCatalog'
 import { llmCatalogSetWorkspace } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
@@ -18,6 +19,10 @@ import { modelLineView, pickerSections } from './preflightModelPure'
 /**
  * AI教学 3.14 开段预检（中栏整页，不是弹窗）。
  * 选本段知识点 → 看本章素材的「精确 / 缩窄 / 整章」匹配 → 确认后把段快照交给 openSegment。
+ *
+ * 段内顺序（2026-11-22）：确认时把选中集合按**章内先修拓扑序**重排（`orderSelectedUnits`），
+ * 因为 `lesson.unitIds` 的顺序就是讲解顺序（注入清单 / 「当前聚焦第 X/N」/ `activeUnitId` 都跟着它）。
+ * 无 `requires` / 有环 / 缺先修时输出 = 大纲行序，与改造前逐字一致；选中集合不变。
  */
 
 interface Props {
@@ -85,7 +90,8 @@ export function Preflight(props: Props) {
   }
 
   const confirm = (): void => {
-    const orderedUnits = chapter.units.map((u) => u.id).filter((id) => selectedUnitSet.has(id))
+    // 段内讲解顺序 = 章内先修拓扑序（无 requires / 有环 → 与大纲行序逐字一致）
+    const orderedUnits = orderSelectedUnits(chapter.units, selectedUnits).map((u) => u.id)
     if (!orderedUnits.length) return
     const segs: AiTeachSegmentSource[] = preflight.candidates
       .filter((c) => picked.has(c.sourceId))

@@ -11,6 +11,10 @@
  *   · 有环（找不到可取条目）→ **原样返回**入参副本，不抛错；
  *   · 无 `requires` → 输出与入参逐元素同序（调用方行为与改造前完全一致）。
  *
+ * 两个导出各管一段流程：
+ *   · `stableTopo` —— 全量排序（大纲落盘 `topoOrderUnits`、默认选点 `defaultUnitSelection`）；
+ *   · `orderSelectedUnits` —— **只排「选中集合」**（开段确认后的段内讲解顺序，2026-11-22）。
+ *
  * 契约脚本：`.AGENT/scripts/ai-teaching/verify-outline-topo.mjs`。
  */
 
@@ -36,4 +40,23 @@ export function stableTopo<T extends TopoUnit>(units: ReadonlyArray<T>): T[] {
     out.push(u)
   }
   return out
+}
+
+/**
+ * 选中集合的段内讲解顺序：先按**大纲行序**取选中项（与改造前同一基准，不按点击顺序），
+ * 再套章内先修拓扑序。
+ *
+ * 为什么要这一步：开段预检的 `orderedUnits` 原先是大纲行序，而段内讲解顺序就是
+ * `lesson.unitIds` 的顺序（注入的「本段知识点清单」、`当前聚焦第 X/N`、`activeUnitId` 全跟着它）——
+ * 选了 u2/u3 而 u3 依赖 u2 时，行序可能在拓扑上倒着讲。
+ *
+ * 口径（与 `stableTopo` 完全一致，不新增规则）：
+ *   · 无 `requires` / 有环 / 缺先修 → 输出 = 大纲行序的选中项（与改造前逐字一致）；
+ *   · 先修不在**本次选中集合**内 → 视为已满足（它要么已在别段学过，要么这段不覆盖它）；
+ *   · 只重排、不增删：输出集合恒等于选中集合（跨章 / 不存在的 id 直接忽略）。
+ */
+export function orderSelectedUnits<T extends TopoUnit>(units: ReadonlyArray<T>, selectedIds: ReadonlyArray<string>): T[] {
+  const pick = new Set((selectedIds ?? []).map((x) => String(x ?? '').trim()).filter(Boolean))
+  if (!pick.size) return []
+  return stableTopo(units.filter((u) => pick.has(u.id)))
 }

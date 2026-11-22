@@ -337,8 +337,8 @@ const c1 = scopeCounts('ws1', getSetting)
 check('u1 → { req:2, src:1 }', c1.ok && c1.units.u1.req === 2 && c1.units.u1.src === 1, JSON.stringify(c1.units.u1))
 check('u2 → { req:0, src:1 }（缺失层填 0，覆盖全部知识点）', c1.units.u2.req === 0 && c1.units.u2.src === 1, JSON.stringify(c1.units.u2))
 check('counts 再次调用仍不改文件树（负向）', listEntries(vaultPath).join(',') === before2.join(','), '')
-// 口径必须与渲染层 `src/modules/ai-teaching/constraintsParse.ts` 的 ITEM_RE 一致：
-// 缩进条目**算**条目（渲染层编辑时会归一成顶格），空条目 / 标题 / 说明段不算。
+// 条目计数口径（主进程唯一口径，渲染侧同名模块已退役）：
+// 缩进条目**算**条目，空条目 / 标题 / 说明段不算。
 check('条目计数口径 = `- ` 行（允许缩进；空条目与标题不算）', countConstraintItems('- a\n  - 缩进也算\n- \n# 标题\n- b') === 3, String(countConstraintItems('- a\n  - 缩进也算\n- \n# 标题\n- b')))
 check('骨架不计条目（新层 counts 为 0）', countConstraintItems(UNIT_CONSTRAINTS_SKELETON) === 0, String(countConstraintItems(UNIT_CONSTRAINTS_SKELETON)))
 
