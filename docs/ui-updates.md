@@ -3041,3 +3041,16 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **动效口径**：新增 `.kb-tray-handle` / `.kb-tray-grip` / `.kb-tray-hint`（`src/styles/index.css` C 段，reduced-motion 统一关断），只动 `transform` / `opacity`；无 `transition-all`、无高度过渡（`.kb-collapse` 的 grid-rows 是既有例外）。`docs/ui-animation-plan.md` 对应行已同步改写。
 
 **验收**：`tsc --noEmit -p tsconfig.web.json` 0 错；`verify-teach-toolbar-ui.mjs` 76 PASS / 0 FAIL（原「pill 在折叠区外」那条按新结构改写为「抽屉整体在 `.kb-collapse` 内 / 抓手在折叠容器外 / `aria-expanded` + `aria-controls` 接线 / 无 `transition-all`」）。
+
+## 2026-11-23 · AI 教学 · 段收尾卡改 ```wrapup 围栏驱动（不再每轮常驻）
+
+**现状 / 用户反馈**：段会话里每发一条消息，对话流末尾都挂着一张「本段学完了？/ 收尾后本段冻结为只读…［收尾本段］」卡 —— 讲课时反复出现，像系统在催收尾。
+
+**根因**：「本段学完了？」是 2026-11-22 从顶栏迁过来的**常驻**块（条件只有「当前段会话 + 段进行中 + 有消息」），与用户是否想收尾无关。同期结课卡已经改成围栏驱动（AI 判断该结课时才在回复里吐 ```endcourse），收尾卡没跟上同一范式。
+
+**改动点**：
+- **协议**（`electron/lib/agentService.ts`）：段会话（未收尾、未结课）提示词新增【段收尾协议（AI教学）】——只有用户明确表达收尾意图（「收尾吧 / 学完了 / 结束这一段」）或你建议收尾且用户确认后，才在回答末尾输出一个 ```wrapup 围栏（块内可放 `{"note":"…"}` 或留空）；**不要每轮输出**、不主动催促；「收尾本段」≠「结课」（结课用 endcourse）。
+- **渲染**（`src/modules/ai-teaching/index.tsx`）：新增 `wrapupFence` memo（倒序扫全部 assistant 消息，取最后一条带 `wrapup` 围栏的回复），卡片只在 `wrapupFence?.idx === idx` 的那条回复里渲染 —— 与 endcourse 卡同模式，全对话至多一张。流末尾那块**只留**「本段已收尾 · 交接.md」行与「本课已结课」卡。左栏段行 `✓` 入口不动（本来就随时可点、带二次确认）。
+- **正文剥离**：协议围栏正则追加 `wrapup`（`(profile|plan|ask|outline|endcourse|teach|wrapup)`），围栏不出现在正文。
+
+**契约**：`verify-teach-toolbar-ui.mjs` 新增 [收尾卡] / [收尾协议] 两段 20 条断言（含负向：流末尾不再渲染该卡、不再按 `messages.length` 出卡）；`verify-teach-ledger.mjs` / `verify-context-usage.mjs` 按新注入串与共享 `sessionLessonBrief` 改写既有断言（未删成恒真）。`verify-teach-toolbar-ui.mjs` 110 PASS / 0 FAIL，`verify-all-p0.mjs` 26/26。

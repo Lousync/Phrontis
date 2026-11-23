@@ -287,10 +287,11 @@ check('协议字段与解析口径一致（unitId / step / label / newTerms / ne
 check('协议要求：每条都输出、step 只增、newTerms 只放本轮新术语',
   agentSrc.includes('每条回答都输出、最多一个') && agentSrc.includes('只增不减') && agentSrc.includes('newTerms 只放本轮**新引入**的术语'), '')
 check('★ 只对段会话注入（课程助手 / 复习课 / 零散会话不注入）',
-  /const teachLedgerRuleHint = source === 'aiTeaching' && !isSideLane[\s\S]{0,200}getSessionLessonBrief\(sessionId\)/.test(agentSrc), '')
-check('已收尾段不注入台账协议（负向）', /getSessionLessonBrief\(sessionId\)[\s\S]{0,120}!brief\.ended/.test(agentSrc), '')
-check('teachLedgerRuleHint 拼进 systemFull', /\+ endcourseRuleHint \+ teachLedgerRuleHint \+ visualHint/.test(agentSrc), '')
-check('台账协议计入 protocols 分区（与其它协议同区）', /outlineRuleHint \+ endcourseRuleHint \+ teachLedgerRuleHint \+ teachStyleHint/.test(agentSrc), '')
+  /const sessionLessonBrief = source === 'aiTeaching' && !isSideLane[\s\S]{0,120}getSessionLessonBrief\(sessionId\)/.test(agentSrc)
+  && /const teachLedgerRuleHint = sessionLessonBrief && !sessionLessonBrief\.ended/.test(agentSrc), '')
+check('已收尾段不注入台账协议（负向）', /sessionLessonBrief && !sessionLessonBrief\.ended/.test(agentSrc), '')
+check('teachLedgerRuleHint 拼进 systemFull', /\+ teachLedgerRuleHint \+ wrapupRuleHint \+ visualHint/.test(agentSrc), '')
+check('台账协议计入 protocols 分区（与其它协议同区）', /outlineRuleHint \+ endcourseRuleHint \+ teachLedgerRuleHint \+ wrapupRuleHint \+ teachStyleHint/.test(agentSrc), '')
 check('★ 段会话全量合并本会话所有围栏（foldTeachFences + 全量消息 + unitOrder）',
   /const ledger = foldTeachFences\(getAgentMessagesAll\(sessionId\), \{ unitOrder: ids \}\)/.test(courseSrc), '')
 check('★ 不用只给最早 500 条的 getAgentMessages（长段会漏最近围栏，负向）',
@@ -303,7 +304,7 @@ check('★ 台账经 requestOut 出参交给请求级层（不 push 进 system �
   courseSrc.includes('requestOut.block = requestBlock') && !courseSrc.includes('lines.push(ledgerBlock)') && !courseSrc.includes('lines.push(requestBlock)'), '')
 check('★ 不再只读最后一条围栏（负向）', !courseSrc.includes('lastTeachPatchOf('), '')
 check('已收尾段不注入台账块（负向）', /if \(curLesson\.status !== 'ended'\) \{[\s\S]{0,120}foldTeachFences/.test(courseSrc), '')
-check('渲染层剥离 teach 围栏（不进正文）', panelSrc.includes('(profile|plan|ask|outline|endcourse|teach)'), '')
+check('渲染层剥离 teach 围栏（不进正文）', /\(profile\|plan\|ask\|outline\|endcourse\|teach\|wrapup\)/.test(panelSrc), '')
 
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)

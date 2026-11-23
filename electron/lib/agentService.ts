@@ -1527,11 +1527,15 @@ async function runAgentLoopInner(
   // 段内教学台账（2026-11-22）：只有**段会话**（有段上下文、且未收尾）才要模型每轮回写
   // ```teach 围栏 —— 程序据此在下一轮注入「讲到哪 / 已覆盖 / 未覆盖 / 下一步」，不再靠模型猜。
   // 课程助手 / 复习课 / 零散对话 / 已收尾段都不注入（它们不推进度）。
-  const teachLedgerRuleHint = source === 'aiTeaching' && !isSideLane && (() => {
-    const brief = getSessionLessonBrief(sessionId)
-    return !!brief && !brief.ended
-  })()
+  // 段上下文只查一次（progress.json 读盘）：台账协议与下方收尾建议共用
+  const sessionLessonBrief = source === 'aiTeaching' && !isSideLane ? getSessionLessonBrief(sessionId) : null
+  const teachLedgerRuleHint = sessionLessonBrief && !sessionLessonBrief.ended
     ? '\n\n【段内台账协议（AI教学）】每轮回答末尾输出一个 ```teach 围栏代码块，块内是一个 JSON 对象（不要注释）：{"unitId":"当前知识点id","step":2,"label":"当前台阶","newTerms":["本轮新术语"],"next":"下一步讲什么"}。规则：① 每条回答都输出、最多一个；② unitId 只填本段知识点清单里的 id，每条都写全，不要回退到已讲过的知识点；③ step 在同一知识点内只增不减（1、2、3…），换 unitId 时从 1 重计；④ newTerms 只放本轮**新引入**的术语，讲过的不要重复；⑤ 台账是程序认定进度的唯一来源，比「当前聚焦」更准，按你实际的讲课进度写；⑥ 围栏语言必须是 teach（\u0060\u0060\u0060teach），写成 json 不会被识别；正文里不要解释这个围栏。'
+    : ''
+  // 2026-11-23：段收尾建议改围栏驱动 —— 用户没说要收尾时**不输出**，客户端也就没有「收尾本段」卡；
+  // 只在用户明确表达收尾意图 / 你建议且用户确认后输出一次。「收尾本段」≠ 结课（结课用 endcourse）。
+  const wrapupRuleHint = sessionLessonBrief && !sessionLessonBrief.ended && !courseEndedForHint
+    ? '\n\n【段收尾协议（AI教学）】只有用户**明确**表达收尾本段的意思（如「收尾吧 / 学完了 / 结束这一段」），或你建议收尾且用户已经确认，才在回答末尾输出一个 ```wrapup 围栏代码块，块内是（可留空）{"note":"一句话收尾说明"}。规则：① **不要每轮输出**，也不要主动催促收尾；② 用户只是提问 / 继续讲课时绝不输出；③ 「收尾本段」不是结课，结课用 endcourse；④ 一次回答最多一个；⑤ 客户端会把它渲染成「收尾本段」确认卡，真正冻结仍由用户点击完成。'
     : ''
   // 3.14：素材注入按角色（助手摘要 / 段快照 / 复习章级）；旧零散会话不注入
   const sourcesHint = source === 'aiTeaching' ? (() => {
@@ -1722,7 +1726,7 @@ async function runAgentLoopInner(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + endcourseRuleHint + teachLedgerRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint + hookStartHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + endcourseRuleHint + teachLedgerRuleHint + wrapupRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint + hookStartHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1822,7 +1826,7 @@ async function runAgentLoopInner(
         explicitSkill: explicitSkillHint,
         toolsHint,
         // 教学协议：与旧 ruleChars 的 12 段同源（范围 / 落点纪律另列，计入「工作区」）
-        protocols: titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + endcourseRuleHint + teachLedgerRuleHint + teachStyleHint + visualHint + mindmapHint + constraintsToolHint + sideLaneHint,
+        protocols: titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + endcourseRuleHint + teachLedgerRuleHint + wrapupRuleHint + teachStyleHint + visualHint + mindmapHint + constraintsToolHint + sideLaneHint,
         scopeRule: scopeRuleHint,
         writeScope: writeScopeHint,
         permissions: executionHint + deniedHint + vaultFileHint + vaultScopeHint,

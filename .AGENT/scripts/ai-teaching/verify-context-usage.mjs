@@ -210,7 +210,7 @@ const HINT_NAMES = [
   'baseSystem', 'schedulePersona', 'intelPersona', 'scopeInstHint', 'repoRulesHint',
   'assistantConstraintHint', 'glossaryHint', 'profileHint', 'longTaskHint', 'courseHint',
   'teachStyleHint', 'favoritesHint', 'titleRuleHint', 'quizRuleHint', 'planRuleHint',
-  'askRuleHint', 'outlineRuleHint', 'endcourseRuleHint', 'teachLedgerRuleHint', 'visualHint',
+  'askRuleHint', 'outlineRuleHint', 'endcourseRuleHint', 'teachLedgerRuleHint', 'wrapupRuleHint', 'visualHint',
   'mindmapHint', 'imageHint',
   'sourcesHint', 'scopeRuleHint', 'writeScopeHint', 'constraintsToolHint', 'sideLaneHint',
   'toolsHint', 'executionHint', 'deniedHint', 'vaultFileHint', 'vaultScopeHint',
@@ -219,7 +219,7 @@ const HINT_NAMES = [
 check('找到 injection 统计块', blockStart >= 0 && block.includes('buildInjectionStats('), String(blockStart))
 const missing = HINT_NAMES.filter((n) => countOf(n) === 0)
 const duplicated = HINT_NAMES.filter((n) => countOf(n) > 1)
-check('systemFull 的 37 个片段全部入分区（无遗漏）', missing.length === 0, missing.join(','))
+check(`systemFull 的 ${HINT_NAMES.length} 个片段全部入分区（无遗漏）`, missing.length === 0, missing.join(','))
 check('没有片段被重复计入两个分区', duplicated.length === 0, duplicated.join(','))
 check('messages / tools 走真实序列化', block.includes('JSON.stringify(convo') && block.includes('JSON.stringify(toolPayload)'), '')
 check('旧字段 constraintsRaw 仍是四层原始正文', block.includes('constraintsRaw: scopeLayers.global + scopeLayers.workspace + scopeLayers.unit + scopeLayers.lesson'), '')

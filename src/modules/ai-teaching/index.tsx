@@ -113,7 +113,8 @@ import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTrac
  * 2026-11-22 中栏 UI 改版（方案 `tmp/ai-teach-toolbar/PLAN.md`，本文件顶部这一批注释之后不再重述）：
  * 顶栏右侧只剩一枚「打开右侧栏」图标；画像 / 要求两枚 pill 落在输入区工具条最左（只做本会话一层，
  * 折叠时仍常驻）；段上下文条 / 560px 约束模态 / 要求抽屉 / 进度浮层全部退役；
- * 收尾本段改为左栏 ✓ + 对话流末尾卡两处行内两段式确认；结课由 AI 回复里的 ```endcourse 围栏给按钮。
+ * 收尾本段改为左栏 ✓ + 段会话里 AI 回复的 ```wrapup 围栏卡两处行内两段式确认（2026-11-23：围栏卡
+ * 不再常驻流末尾，只在 AI 判断该收尾时才出现）；结课由 AI 回复里的 ```endcourse 围栏给按钮。
  */
 
 /** P5：工作区卡片「最近活跃」相对时间（updated_at 'YYYY-MM-DD HH:MM:SS' 本地串） */
@@ -457,7 +458,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const raw = splitJumps(m.content)
     const rec = {
       src: m.content,
-      body: raw.body.replace(/```(profile|plan|ask|outline|endcourse|teach)[^\n]*\n[\s\S]*?```/g, ''),
+      body: raw.body.replace(/```(profile|plan|ask|outline|endcourse|teach|wrapup)[^\n]*\n[\s\S]*?```/g, ''),
       jumps: raw.jumps,
     }
     msgParseCache.current.set(key, rec)
@@ -732,7 +733,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 当前段状态：ended → 只读 */
   const [segmentStatus, setSegmentStatus] = useState<'open' | 'ended'>('open')
   /**
-   * 收尾本段的两段式确认落点（2026-11-22 A 线）：'rail' = 左栏当前段行下方，'card' = 对话流末尾卡。
+   * 收尾本段的两段式确认落点（2026-11-22 A 线）：'rail' = 左栏当前段行下方，'card' = 带 ```wrapup 围栏的那条回复里。
    * 两处**原位互换**成「确认收尾 / 取消」，不再一键冻结（铁律 25：行内化，不用模态）；Esc 取消。
    */
   const [endConfirm, setEndConfirm] = useState<'rail' | 'card' | null>(null)
@@ -2147,7 +2148,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         setAskDismissed(askPending.id)
         return
       }
-      // 收尾两段式确认（左栏 ✓ / 流末尾卡）：Esc = 取消，并原位退回未确认态
+      // 收尾两段式确认（左栏 ✓ / wrapup 围栏卡）：Esc = 取消，并原位退回未确认态
       if (endConfirm) { setEndConfirm(null); return }
       if (preflight) { setPreflight(null); return }
       if (wsConfirmDel) { setWsConfirmDel(false); return }
@@ -2211,6 +2212,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       const m = messages[i]
       if (m.role !== 'assistant') continue
       const mt = /```endcourse[^\n]*\n([\s\S]*?)```/.exec(m.content)
+      if (mt) return { idx: i, raw: mt[1].trim() }
+    }
+    return null
+  }, [messages])
+  /**
+   * AI 段收尾建议（2026-11-23）：扫描**全部** assistant 消息里**最后一个** ```wrapup 围栏。
+   * 与 endcourse 同一范式 —— 卡片不再常驻流末尾：模型只在用户明确要收尾（或建议后用户确认）时
+   * 才输出围栏，输出前对话流里根本没有「收尾本段」按钮。倒序取最后一条 → 全对话至多一张卡；
+   * 左栏段行 ✓ 仍随时可点（带二次确认），那条路不受影响。
+   */
+  const wrapupFence = useMemo<{ idx: number; raw: string } | null>(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.role !== 'assistant') continue
+      const mt = /```wrapup[^\n]*\n([\s\S]*?)```/.exec(m.content)
       if (mt) return { idx: i, raw: mt[1].trim() }
     }
     return null
@@ -3149,7 +3165,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           {/* 顶栏右侧只留**一枚**「打开右侧栏」（2026-11-22 A 线，PLAN §2）。
               结课组 / 画像 / 工件 / 会话要求 / 进度 / 收尾全部退出顶栏，去向：
                 · 画像 / 要求 → 输入区工具条最左两枚 pill（只做本段 / 本会话一层）
-                · 收尾本段 → 左栏当前段行 ✓ + 对话流末尾卡（两处都行内两段式确认）
+                · 收尾本段 → 左栏当前段行 ✓ + 段会话里的 ```wrapup 围栏卡（两处都行内两段式确认）
                 · 进度 → 左栏课程树本身就是进度
                 · 结课组 → 对话流末尾「本课已结课」卡 + 选择页已结课预览
               图标是**内联 SVG**（18×14 / 外框 16×12 / rx 4 / 分隔线 x=10.9 / 描边 1.8）：
@@ -3377,7 +3393,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           ) : (
             <>
               {/* 段上下文条（章名 · 第N段 · N 个知识点 · 收尾 · 要求 · 进度）已于 2026-11-22 整块退役：
-                  收尾 → 左栏当前段行 ✓ + 对话流末尾卡；要求 → 输入区「要求」pill；进度 → 左栏课程树本身。
+                  收尾 → 左栏当前段行 ✓ + AI 回复里的 ```wrapup 围栏卡；要求 → 输入区「要求」pill；进度 → 左栏课程树本身。
                   段标题信息仍在中栏空态标题与左栏段行（「第N段 · N 个」）里，没有丢独有信息。 */}
               {courseReviewChapter && activeId && courseState?.reviews[courseReviewChapter]?.sessionId === activeId && (
                 <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
@@ -3553,6 +3569,39 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             </div>
                           </div>
                         )}
+                        {/* 段收尾建议（2026-11-23）：```wrapup 围栏 → **产生它的那条回复里**一张行内卡（同 endcourse）。
+                            2026-11-23 之前这张卡常驻流末尾、每轮都挂 —— 改为围栏驱动后只有模型判断该收尾才出现。
+                            `wrapupFence` 取最后一条带围栏的 assistant 消息 → 全对话至多一张；
+                            已收尾 / 已结课 / 非当前段会话都不渲染（流末尾换成「本段已收尾 · 交接.md」行）。 */}
+                        {wrapupFence?.idx === idx && activeSegment && activeId === activeSegmentSid && segmentStatus === 'open' && !courseEnded && (
+                          endConfirm === 'card' ? (
+                            <div className="mt-2 w-full max-w-[820px] mx-auto px-3">
+                              <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--accent)]/45 bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[11.5px] text-[var(--text-primary)]">确认收尾本段？</div>
+                                  <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">本段将冻结为只读，知识点标记为已学，并生成《交接.md》给同章下一段。</div>
+                                </div>
+                                <div className="shrink-0 flex items-center gap-1.5">
+                                  <button type="button" onClick={() => setEndConfirm(null)}
+                                    className="h-6 shrink-0 rounded-[5px] border border-[var(--border-color)] px-2.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--text-muted)] hover:text-[var(--text-primary)]">取消</button>
+                                  <button type="button" onClick={() => { setEndConfirm(null); void courseEndSegment() }}
+                                    className="h-6 shrink-0 rounded-[5px] border border-[var(--accent)] bg-[var(--accent)] px-2.5 text-[10.5px] text-white transition-opacity hover:opacity-90">确认收尾</button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mt-2 w-full max-w-[820px] mx-auto px-3">
+                              <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[11.5px] text-[var(--text-primary)]">本段学完了？</div>
+                                  <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">收尾后本段冻结为只读，并生成《交接.md》交给同章下一段。</div>
+                                </div>
+                                <button type="button" onClick={() => setEndConfirm('card')}
+                                  className="h-6 shrink-0 rounded-[5px] border border-[var(--accent)] bg-[var(--accent)] px-2.5 text-[10.5px] text-white transition-opacity hover:opacity-90">收尾本段</button>
+                              </div>
+                            </div>
+                          )
+                        )}
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
                           {/* A 方案：只有挂着 resumeInfo 的那条中断卡才有「继续」——与通用助手的按钮同源 */}
@@ -3658,47 +3707,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   </div>
                 )}
 
-                {/* 流末尾收尾 / 结课卡（2026-11-22 A 线，PLAN §3 / §6.4）。三个状态互斥：
-                    · 段进行中（本段会话）→ 「本段学完了？」→ 原位两段式确认（取消 / 确认收尾）
+                {/* 流末尾收尾行 / 结课卡（2026-11-22 A 线，PLAN §3 / §6.4）。
+                    2026-11-23 改：**「本段学完了？」卡不再常驻这里** —— 它由 ```wrapup 围栏驱动，
+                    渲染在产生围栏的那条回复里（见上方 wrapupFence 块）。这里只留三个互斥状态：
                     · 本段已收尾 → 一行「本段已收尾 · 交接.md」（点开交接文档）
                     · 本课程已结课 → 「本课已结课」卡（结课报告 / 重新开课）—— 顶栏结课组退役后的落点
                     复习课 / 自由对话 / 课程助手没有这张卡。不用模态（铁律 25）；进场走 .kb-item-in。 */}
-                {activeSegment && activeId === activeSegmentSid && !courseEnded && (messages.length > 0 || segmentStatus === 'ended') && (
-                  segmentStatus === 'ended' ? (
-                    <div className="kb-item-in flex items-center gap-1.5 pt-0.5 text-[10.5px] text-[var(--text-muted)] select-none">
-                      <Check size={11} className="shrink-0 text-[var(--success)]" />
-                      <span className="shrink-0">本段已收尾 ·</span>
-                      {activeSegment.handoffRel ? (
-                        <button type="button" onClick={() => { const rel = activeSegment.handoffRel; if (rel) void openArtFile(rel) }}
-                          data-tip={activeSegment.handoffRel} aria-label={`打开 ${activeSegment.handoffRel}`}
-                          className="min-w-0 truncate text-[var(--accent)] transition-colors hover:underline">交接.md</button>
-                      ) : (
-                        <span className="shrink-0 text-[var(--text-disabled)]">交接生成中…</span>
-                      )}
-                    </div>
-                  ) : endConfirm === 'card' ? (
-                    <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--accent)]/45 bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11.5px] text-[var(--text-primary)]">确认收尾本段？</div>
-                        <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">本段将冻结为只读，知识点标记为已学，并生成《交接.md》给同章下一段。</div>
-                      </div>
-                      <div className="shrink-0 flex items-center gap-1.5">
-                        <button type="button" onClick={() => setEndConfirm(null)}
-                          className="h-6 shrink-0 rounded-[5px] border border-[var(--border-color)] px-2.5 text-[10.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--text-muted)] hover:text-[var(--text-primary)]">取消</button>
-                        <button type="button" onClick={() => { setEndConfirm(null); void courseEndSegment() }}
-                          className="h-6 shrink-0 rounded-[5px] border border-[var(--accent)] bg-[var(--accent)] px-2.5 text-[10.5px] text-white transition-opacity hover:opacity-90">确认收尾</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11.5px] text-[var(--text-primary)]">本段学完了？</div>
-                        <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">收尾后本段冻结为只读，并生成《交接.md》交给同章下一段。</div>
-                      </div>
-                      <button type="button" onClick={() => setEndConfirm('card')}
-                        className="h-6 shrink-0 rounded-[5px] border border-[var(--accent)] bg-[var(--accent)] px-2.5 text-[10.5px] text-white transition-opacity hover:opacity-90">收尾本段</button>
-                    </div>
-                  )
+                {activeSegment && activeId === activeSegmentSid && segmentStatus === 'ended' && !courseEnded && (
+                  <div className="kb-item-in flex items-center gap-1.5 pt-0.5 text-[10.5px] text-[var(--text-muted)] select-none">
+                    <Check size={11} className="shrink-0 text-[var(--success)]" />
+                    <span className="shrink-0">本段已收尾 ·</span>
+                    {activeSegment.handoffRel ? (
+                      <button type="button" onClick={() => { const rel = activeSegment.handoffRel; if (rel) void openArtFile(rel) }}
+                        data-tip={activeSegment.handoffRel} aria-label={`打开 ${activeSegment.handoffRel}`}
+                        className="min-w-0 truncate text-[var(--accent)] transition-colors hover:underline">交接.md</button>
+                    ) : (
+                      <span className="shrink-0 text-[var(--text-disabled)]">交接生成中…</span>
+                    )}
+                  </div>
                 )}
                 {courseEnded && activeWs && activeWs !== '__none__' && (
                   <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
