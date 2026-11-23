@@ -486,6 +486,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const modelMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const modelMenu = useAnchoredMenu(modelMenuTriggerRef, modelMenuRef, 248)
+  /**
+   * 抽屉窄态「思考」气泡（2026-11-23 工具条图标化）：抽屉可用宽 < 380px 时，
+   * 四档按钮由 CSS 容器查询收起，只剩「脑图标 + 当前档」一枚；点它在这里选档。
+   * 与模型菜单同一套锚定逻辑（fixed + 自动翻面），避免被输入卡的 overflow 裁掉。
+   */
+  const effortMenuTriggerRef = useRef<HTMLButtonElement>(null)
+  const effortMenuRef = useRef<HTMLDivElement>(null)
+  const effortMenu = useAnchoredMenu(effortMenuTriggerRef, effortMenuRef, 132)
   /** P2 多模态：当前回答模型是否支持图片（null = 检测中；false = 已确认不支持） */
   const [visionChatOk, setVisionChatOk] = useState<boolean | null>(null)
   useEffect(() => {
@@ -3010,15 +3018,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       <button type="button" onClick={() => void openSessionDoc('profile')} aria-pressed={docPressed('profile')}
         data-tip={`PROFILE.md · ${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}画像（右栏可就地编辑）`}
         aria-label={`打开${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}画像 PROFILE.md`}
-        className={docPillClass(docPressed('profile'))}>
-        画像
+        className={`${docPillClass(docPressed('profile'))} kb-tray-opt`}>
+        <User size={12} className="kb-tray-opt-icon" aria-hidden />
+        <span className="kb-tray-opt-label">画像</span>
         {profPending && <span className="ml-0.5 h-1 w-1 shrink-0 rounded-full bg-[var(--warning)]" aria-hidden />}
       </button>
       <button type="button" onClick={() => void openSessionDoc('constraints')} aria-pressed={docPressed('constraints')}
         data-tip={`CONSTRAINTS.md · ${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}要求（右栏可就地编辑）`}
         aria-label={`打开${activeSegment && activeId === activeSegmentSid ? '本段' : '本会话'}要求 CONSTRAINTS.md`}
-        className={docPillClass(docPressed('constraints'))}>
-        要求
+        className={`${docPillClass(docPressed('constraints'))} kb-tray-opt`}>
+        <ScrollText size={12} className="kb-tray-opt-icon" aria-hidden />
+        <span className="kb-tray-opt-label">要求</span>
       </button>
     </>
   )
@@ -4325,7 +4335,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     >
                       <div>
                         <div
-                          className={`w-full h-[34px] flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] px-1.5 transition-opacity duration-[200ms] motion-reduce:transition-none ${trayOpen ? 'opacity-100' : 'opacity-0'}`}
+                          className={`kb-tray-row w-full h-[34px] flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] px-1.5 transition-opacity duration-[200ms] motion-reduce:transition-none ${trayOpen ? 'opacity-100' : 'opacity-0'}`}
                           style={{ background: 'color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary))' }}
                         >
                           {docPills}
@@ -4333,30 +4343,62 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           {/* 段已收尾 / 课程已结课：只压暗并禁点右侧控制（pill 不压暗、仍可点，打开右栏笔记页签）；
                               抽屉本身**不自动收起**、抓手不禁用 —— 收尾态最可能想回看画像 / 要求。 */}
                           <div className={`flex min-w-0 flex-1 items-center gap-1.5 ${courseReadonly || courseEnded ? 'opacity-45 pointer-events-none select-none' : ''}`}>
-                            <span className="shrink-0 pl-0.5 text-[10.5px] text-[var(--text-muted)]">思考</span>
-                            {(['off', 'low', 'medium', 'high'] as Effort[]).map((e) => (
-                              <button key={e} type="button" disabled={!modelCapable} onClick={() => pickEffort(e)}
-                                aria-pressed={convoEffort === e}
-                                className={`h-[24px] px-2 rounded-full text-[11px] transition-colors disabled:opacity-35 ${convoEffort === e ? 'bg-[var(--bg-primary)] text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-                                {EFFORT_LABEL[e]}
-                              </button>
-                            ))}
-                            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+                            {/* 宽态：标签 + 四档（窄态整组由容器查询隐藏，换下面那枚「脑图标 + 当前档」）
+                                2026-11-23 工具条图标化：抽屉可用宽 < 380px 时不藏入口，只把文字收成图标。 */}
+                            <span className="kb-tray-effort-seg flex min-w-0 items-center gap-1.5">
+                              <span className="shrink-0 pl-0.5 text-[10.5px] text-[var(--text-muted)]">思考</span>
+                              {(['off', 'low', 'medium', 'high'] as Effort[]).map((e) => (
+                                <button key={e} type="button" disabled={!modelCapable} onClick={() => pickEffort(e)}
+                                  aria-pressed={convoEffort === e}
+                                  className={`h-[24px] px-2 rounded-full text-[11px] transition-colors disabled:opacity-35 ${convoEffort === e ? 'bg-[var(--bg-primary)] text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                                  {EFFORT_LABEL[e]}
+                                </button>
+                              ))}
+                            </span>
+                            {/* 窄态：一枚「脑 + 当前档」，点开气泡选四档（fixed 锚定，不被输入卡 overflow 裁） */}
+                            <button ref={effortMenuTriggerRef} type="button" disabled={!modelCapable}
+                              onClick={effortMenu.toggle}
+                              aria-expanded={effortMenu.open}
+                              aria-label={`思考强度：${EFFORT_LABEL[convoEffort]}`}
+                              data-tip={`思考强度：${EFFORT_LABEL[convoEffort]}（点击切换）`}
+                              className="kb-tray-effort-compact h-[24px] items-center gap-1 rounded-full px-2 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-35">
+                              <Brain size={12} aria-hidden />
+                              <span className="text-[var(--accent)]">{EFFORT_LABEL[convoEffort]}</span>
+                              <ChevronRight size={10} className="-rotate-90 shrink-0" aria-hidden />
+                            </button>
+                            <span aria-hidden className="kb-tray-divider mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
                             <button type="button" disabled={quotes.length === 0} onClick={() => setQuotesOpen(v => !v)}
                               aria-pressed={quotesOpen && quotes.length > 0}
+                              aria-label={quotes.length ? `查看本轮引用（${quotes.length} 条）` : '本轮还没有引用'}
                               data-tip={quotes.length ? '查看/管理本轮引用' : '本轮还没有引用'}
-                              className="h-[24px] px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35 transition-colors">
-                              {quotes.length > 0 ? `引用 ${quotes.length}` : '引用'}
+                              className="kb-tray-opt inline-flex h-[24px] items-center px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35 transition-colors">
+                              <span className="kb-tray-quote-text">{quotes.length > 0 ? `引用 ${quotes.length}` : '引用'}</span>
+                              <span className="kb-tray-quote-icon items-center gap-1">
+                                <Quote size={12} aria-hidden />
+                                {quotes.length > 0 && <span className="text-[10px] tabular-nums text-[var(--accent)]">{quotes.length}</span>}
+                              </span>
                             </button>
                             <span className="flex-1" />
-                            <button type="button" onClick={(e) => openModelMenu(e.currentTarget)} data-tip="切换本对话模型"
-                              className="h-[24px] max-w-[180px] truncate px-2 rounded-full text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                              {effModel ? effModelBare : '默认模型'}
-                            </button>
                           </div>
                         </div>
                       </div>
                     </div>
+                    {/* 窄态思考气泡（fixed；随锚点自动翻面，点外部 / Esc 关闭） */}
+                    {effortMenu.open && effortMenu.pos && (
+                      <div ref={effortMenuRef} data-wb="aiTeachEffortMenu"
+                        style={{ left: effortMenu.pos.left, top: effortMenu.pos.top, transformOrigin: effortMenu.pos.transformOrigin }}
+                        className="kb-pop fixed z-40 w-[132px] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-xl select-none"
+                        role="dialog" aria-label="思考强度">
+                        {(['off', 'low', 'medium', 'high'] as Effort[]).map((e) => (
+                          <button key={e} type="button" onClick={() => { pickEffort(e); effortMenu.close() }}
+                            aria-pressed={convoEffort === e}
+                            className={`w-full flex items-center justify-between rounded-lg px-2 py-[6px] text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)] ${convoEffort === e ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                            <span>{EFFORT_LABEL[e]}</span>
+                            {convoEffort === e && <Check size={12} className="shrink-0 text-[var(--accent)]" aria-hidden />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {heroMode && (

@@ -102,9 +102,44 @@ check('抓手脉冲 .kb-tray-hint 落在 index.css（只动 transform）',
 check('reduced-motion 关闭抓手过渡与脉冲',
   /prefers-reduced-motion: reduce[\s\S]{0,900}\.kb-tray-grip \{ transition: none; \}/.test(css)
   && /prefers-reduced-motion: reduce[\s\S]{0,900}\.kb-tray-grip\.kb-tray-hint \{ animation: none; \}/.test(css))
-check('思考四档带 aria-pressed', count(tray, /aria-pressed=\{convoEffort === e\}/g) === 1)
+check('思考四档带 aria-pressed（宽态四档 + 窄态气泡各一份）', count(tray, /aria-pressed=\{convoEffort === e\}/g) === 2)
 check('引用按钮带 aria-pressed', count(tray, /aria-pressed=\{quotesOpen && quotes\.length > 0\}/g) === 1)
-check('模型仍在最右（flex-1 占位后）', /<span className="flex-1" \/>[\s\S]{0,400}openModelMenu/.test(tray))
+check('抽屉不再放模型入口（与底部 openModelMenu 重复，2026-11-23 去重）', !tray.includes('openModelMenu'))
+check('模型入口仍在输入卡底部', mod.slice(mod.indexOf('const composerFooter')).includes('openModelMenu'))
+
+/* ─────────── 2c. 窄态自动图标化（2026-11-23 用户拍板） ─────────── */
+console.log('\n[图标化] 抽屉可用宽 < 360px 时整体收成图标（不藏入口、不换行）；宽了自动还原')
+check('抽屉行是容器查询容器（container-type: inline-size）',
+  tray.includes('kb-tray-row') && /\.kb-tray-row \{ container-type: inline-size/.test(css))
+check('断点 @container composer-tray (max-width: 360px)',
+  /@container composer-tray \(max-width: 360px\)/.test(css))
+check('容器查询里：文字隐藏、图标显示',
+  /@container composer-tray \(max-width: 360px\)[\s\S]{0,700}\.kb-tray-opt-label \{ display: none; \}/.test(css)
+  && /\.kb-tray-opt-icon \{ display: block; \}/.test(css))
+check('窄态按钮压成 24px 方图标（不换行）',
+  /\.kb-tray-opt \{\s*width: 24px;/.test(css))
+check('画像 / 要求：文字 + 图标两套都渲染（docPills 里）',
+  pills.includes('kb-tray-opt-label') && count(pills, /kb-tray-opt-icon/g) === 2)
+check('引用：文字版 + 图标版 + 数量',
+  tray.includes('kb-tray-quote-text') && tray.includes('kb-tray-quote-icon')
+  && tray.includes('{quotes.length > 0 && <span'))
+check('思考宽态四档在 kb-tray-effort-seg 容器里',
+  /kb-tray-effort-seg[\s\S]{0,1200}EFFORT_LABEL\[e\]/.test(tray))
+check('思考窄态是一枚「脑图标 + 当前档」，点击开气泡',
+  tray.includes('kb-tray-effort-compact')
+  && tray.includes('ref={effortMenuTriggerRef}')
+  && tray.includes('onClick={effortMenu.toggle}')
+  && /EFFORT_LABEL\[convoEffort\]/.test(tray)
+  && tray.includes('aria-label={`思考强度：${EFFORT_LABEL[convoEffort]}`}'))
+check('思考气泡：fixed 锚定 + 四档 + 选中勾 + 点外部/Esc 关闭（useAnchoredMenu）',
+  tray.includes('data-wb="aiTeachEffortMenu"')
+  && /role="dialog" aria-label="思考强度"/.test(tray)
+  && count(tray, /pickEffort\(e\); effortMenu\.close\(\)/g) === 1
+  && mod.includes('useAnchoredMenu(effortMenuTriggerRef, effortMenuRef'))
+check('引用窄态带完整 aria-label（图标没有可见文字）',
+  tray.includes("aria-label={quotes.length ? `查看本轮引用（${quotes.length} 条）` : '本轮还没有引用'}"))
+check('图标化不引入 transition-all / 新动效令牌',
+  !tray.includes('transition-all') && !/kb-tray-(?:opt|effort|quote)[a-z-]* \{[^}]*(?:animation|transition)/.test(css))
 
 /* ─────────── 2b. 抽屉贴底跟随：每帧复检 + 用户输入打断（2026-11-23 竞态修复） ─────────── */
 console.log('\n[贴底跟随] 钉底循环每帧复检；wheel / pointerdown 打断；时间窗同源')

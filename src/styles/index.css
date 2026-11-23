@@ -1271,6 +1271,33 @@ input:focus, textarea:focus, select:focus {
 }
 .kb-tray-grip.kb-tray-hint { animation: kb-tray-hint 760ms var(--ease-kb); }
 
+/* --- 输入区抽屉：窄了自动收成图标（2026-11-23）
+   判据是「抽屉这一行自己的可用宽」，不是窗口宽 —— 查看器让位、左栏拖宽、工件分栏都会体现在它上面。
+   用容器查询而不是 JS 测量：切换不经过渲染层状态，抽屉开合 / Tab 保活 / 拖宽都不会闪，也没有测量抖动。
+   断点 360px：完整形态实测约 333px（画像/要求 + 思考四档 + 引用；模型入口已收到底部），
+   360 留约 27px 余量（够跨「引用」两位数与画像待确认圆点），既不会误裁也不会过早图标化。再窄就整体图标化 —— **不藏入口、不换行**，只是把文字收成图标。
+   图标都带 aria-label / data-tip；窄态的思考是一枚「脑 + 当前档」，点开气泡选四档。 */
+.kb-tray-row { container-type: inline-size; container-name: composer-tray; }
+.kb-tray-opt-icon { display: none; }
+.kb-tray-effort-compact { display: none; }
+.kb-tray-quote-icon { display: none; }
+@container composer-tray (max-width: 360px) {
+  .kb-tray-opt {
+    width: 24px;
+    padding-left: 0;
+    padding-right: 0;
+    justify-content: center;
+    gap: 0;
+  }
+  .kb-tray-opt-label { display: none; }
+  .kb-tray-opt-icon { display: block; }
+  .kb-tray-effort-seg { display: none; }
+  .kb-tray-effort-compact { display: inline-flex; }
+  .kb-tray-quote-text { display: none; }
+  .kb-tray-quote-icon { display: inline-flex; }
+  .kb-tray-divider { margin-left: 0; margin-right: 0; }
+}
+
 /* --- C2 左栏分区贴底：四分区单 grid 驱动（AI 教学左栏「资源管理器」对标 VS Code，2026-10-16） ---
    形态：会话头 / 会话体 / 资源管理器头 / 资源管理器体 = 一个 grid 的四条轨。
    贴底原理：资源管理器收起时第 4 轨归 0，剩余高度由 align-content:stretch 全部分给
