@@ -493,6 +493,7 @@
 - 2026-11-14 台账批归档后，`docs/ai-assistant-scope-rail-plan.md`、`docs/linux-port-plan.md`、`docs/ai-teaching-module-rework.md`、`docs/ui-updates.md`、`src/components/workbench/useStripScroll.tsx`、`.AGENT/help-rewrite/README.md` 中对 `v3.4.0-feedback` / `v3.9.0-feedback` / `v3.13.0-feedback` / `v3.15.2-feedback` / `batch1|batch3-real-machine-verification` 的按名引用失效（规则 6）
 - 2026-11-14 原型补批后，`docs/ui-animation-plan.md`、`docs/ai-learn-center-design.md`、`docs/ai-teaching-course-mode-plan.md` 对 `docs/prototypes/` 四件原型的按名引用失效（规则 6，检索以本清单为准）
 - 2026-11-14 结构批次后，剩余文档（ui-animation-plan / tooltip-design / simplify / rail-segments / long-material / constraints-write / ui-updates）与代码注释（settings.ts / HelpHint.tsx / ReadingSidePanel.tsx / AiLearn / App.tsx / AboutView.tsx / terminal 等）对本批 20 份的按名引用失效（规则 6，检索以本清单为准）
+- 2026-11-23 tmp 归档后，`src/modules/dashboard/index.tsx` 注释对 `tmp/home-view-proto/index.html#e` 的引用、`docs/ui-updates.md` / `docs/pending-fixes.md` 对 `tmp/probe-shots/` / `tmp/dashboard-impl-shots/` 截图的按名引用失效（规则 6，检索以本清单为准）
 
 ## 反向说明：留在主仓库的"旧位置"文档
 
@@ -504,3 +505,62 @@
 ## 待归档：AI教学学习流 v2 原型（2026-10-17 登记 → **2026-11-14 确认已散失**）
 
 本节原登记的四项 `tmp/` 产物（`aiteach-flow-proto-v2/` 的原型与冒烟脚本、`aiteach-flow-v380/index.html` 对照版、`flow-v2-verify/` 运行时验证载体）在 2026-11-14 清点时**均已不存在**——`tmp/` 不进 git，登记时预警的「文件随时可能被清」已成真。学习流 v2 本身已落码（simplify 线 P0–P3），设计过程材料无存档，重启时从实现反写。
+
+## 2026-11-23 归档（tmp 已落码原型 / 证据 / 工具）
+
+> 背景：`tmp/` 累积到 350 个条目 / 286 MB，本轮逐项核对落码证据后清仓。**未落码**的原型仍留主仓 `tmp/`：`ai-teach-mindmap-compact` / `ai-teach-mindmap-camera` / `ai-teach-tutor-mode`（对话模式，进行中）、`quiz-library-proto`（题库重做）、`ai-text-simplify-proto`、`layout-simplify-proto`、`console-proto`。
+>
+> 去向：DP `Phrontis/原型/2026-11-23-归档批次/`（34 个整目录，保留 `index.html` + `PLAN.md` + 截图 / harness）；`Phrontis/过程记录/UI迭代截图/2026-11-23-归档批次/`；`Phrontis/过程记录/探针与工具/`；`Phrontis/已实现设计文档/ai-teaching-outline-topology-plan.md`；`Phrontis/内容与素材/AI教学建课套件/`。
+
+### 原型（整目录归档）
+
+| tmp 目录 | 落码证据 |
+|---|---|
+| ai-assistant-outline-proto | AI 助手「会话大纲」（v3.6x） |
+| ai-teach-anchor-rail | 右缘轮次导航（2026-11-22 提交 dc8a44ba 一带） |
+| ai-teach-composer-compact | v3.57.0 工具条窄态图标化 |
+| ai-teach-composer-tray | 输入区控件抽屉整体收起（2026-11-22） |
+| ai-teach-right-viewer | 右活动栏多页签（2026-11-22；主仓 `docs/ai-teaching-right-viewer-plan.md`） |
+| ai-teach-segment-bar | 段上下文条收敛（2026-11-22） |
+| ai-teach-toolbar | 单图标顶栏 + 输入区工具条（2026-11-22） |
+| ai-teach-topbar | 会话元信息托盘 pill + 右栏笔记页签就地编辑 |
+| ai-teach-webpane | 网页页签单页 + 空态点阵（`b46061ab`） |
+| ai-teaching-cleanup-proto | 产物收纳与结课 |
+| ai-teaching-course-end-proto | 结课与资料沉淀 |
+| ai-teaching-picker-proto | 选择工作区排版 |
+| ai-teaching-rail-proto | 左栏段节点分组（主仓 `docs/ai-teaching-rail-segments-plan.md`） |
+| ai-teaching-simplify-proto | 学习段（主仓 `docs/ai-teaching-simplify-plan.md`） |
+| assistant-commands-hooks-proto | v3.39.0 提示型 hooks + 自定义 `/` 指令 |
+| assistant-multimodal-proto | v3.41.0 / v3.42.0 多模态输入 |
+| code-block-readability-proto | 代码块独立编辑器表面（v3.5x） |
+| context-usage-panel | 上下文用量面板（v3.5x） |
+| daycycle-background-proto | 昼夜主题全窗天空（v3.23.0） |
+| daycycle-sidebar-proto | 昼夜主题笔记左栏分组条 |
+| daycycle-wallpaper-proto | 昼夜动态壁纸 |
+| home-view-proto | 看板首页「今日纸」（`src/modules/dashboard/index.tsx` 注释仍按 tmp 路径引用，规则 6 接受） |
+| icon-redesign-proto | 无影版图标（`build/`） |
+| knowledge-outline-edit-proto | 笔记区编辑态左栏大纲（v3.5x） |
+| note-zone-proto | 笔记区左栏改版（v3.27.0） |
+| pomodoro-upgrade-proto | 番茄钟升级 + 改工具标签页 |
+| quiz-short-answer-proto | 题单简答题与折叠参考答案 |
+| rail-board-workbench-icons | 图标条「看板 / 工作台 / AI 教学」三枚 |
+| right-panel-proto | 工作台右栏小工具改造 |
+| titlebar-daycycle-proto | 昼夜主题顶栏 v2 |
+| titlebar-status-proto | v3.19.0 顶栏状态 |
+| tooltip-proto | Tooltip 统一换肤（主仓 `docs/tooltip-design.md`） |
+| vault-switch-proto | 仓库切换入口（纸头 `▤ 仓库名 ⌄`） |
+| vocab-native-proto | 背单词 v3.17.0（入口由 `VOCAB_ENTRY_ENABLED` 关闭） |
+| ai-teaching-course-kit | 建课内容包（非原型，随批进 `内容与素材/`） |
+
+### 方案 / 证据 / 工具
+
+| 材料 | 来源 | 去向 | 判定依据 |
+|---|---|---|---|
+| `ai-teaching-outline-topology-plan.md` | `tmp/ai-teach-topology/PLAN.md` | `已实现设计文档/` | 批 1–3 已随 2026-11-22 提交落码（`55b161a5` / `3bf4f041`） |
+| `2026-11-23-归档批次/`（截图） | `tmp/probe-shots/`、`tmp/dashboard-impl-shots/` | `过程记录/UI迭代截图/` | 看板 / 信息流 / 双写作面实测证据，`ui-updates.md` 与 `pending-fixes.md` 按名引用过 |
+| `探针与工具/` | `tmp/heat-probe/`、`tmp/tooltip-harness/` | `过程记录/探针与工具/` | 看板热力图窄视口实测与 Tooltip 换肤对照宿主，对应功能均已落码 |
+| `2026-11-22-ui-batch-contract.md` | `tmp/ui-batch/CONTRACT.md` | `过程记录/` | AI 教学 UI 三线并行契约，三条线均已落码 |
+
+### 同批清理（不进归档）
+
+`kb-ts-*`（292 个，`.AGENT/scripts/shared/ts-module.mjs` 转译中间目录泄漏）、`kb-ai-teach-*`、`devbridge/`（79 张临时截图）、`probe-ai-models-layout/`、`verify-resizable-panel/`（空）、`edge-drag-repro/`（已修 bug 复现件）、tmp 根重复的 `verify-topic-ai-tools.mjs` 与一次性 `probe-pomodoro-upgrade.mjs`。
