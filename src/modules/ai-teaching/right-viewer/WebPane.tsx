@@ -354,19 +354,18 @@ export function WebPane(props: WebPaneProps) {
   /**
    * 壳的页签模型带着地址（重启恢复 / 新建网页页签时直接带 URL）：空态才导航一次。
    *
-   * 必须等会话 id 非空再抢跑：会话恢复期首帧 `sessionId=''`、`initialUrl` 已经是恢复出来的地址，
-   * 此时建了视图，id 晚到就会走「换会话」把页面清掉且不再自动恢复（缺陷 1）。
+   * 不再等会话 id：网页视图是全局 w1，与「这段对话是否已就绪」无关；重启后落在
+   * 「还没有任何会话的工作区」时也必须把地址加载出来（2026-11-23 复验发现）。
+   * 晚到的会话 id 只会走首挂分支并直接 return，不会清掉已经加载的页面（缺陷 1 已修）。
    */
   const initialUrl = String(props.initialUrl ?? '').trim()
-  const sessionId = String(props.sessionId ?? '').trim()
   useEffect(() => {
     if (!initialUrl) return
-    if (!sessionId) return
     const raf = requestAnimationFrame(() => {
       if (latestRef.current.tabs.length === 0) void navigate(initialUrl)
     })
     return () => cancelAnimationFrame(raf)
-  }, [initialUrl, sessionId, navigate])
+  }, [initialUrl, navigate])
 
   // 地址上报：壳把 url 写回页签对象（持久化 / 重启后还是这一页）
   const reportUrl = props.onUrlChange

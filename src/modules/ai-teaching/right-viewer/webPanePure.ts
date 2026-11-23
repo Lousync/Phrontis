@@ -176,7 +176,7 @@ export function shouldShowView(input: {
 export function shouldRebuildWebView(input: {
   /** 之前是否真的挂载过（首挂不算「重建」） */
   mounted: boolean
-  /** 本轮会话 id；空串 = 会话还没恢复，不动 */
+  /** 本轮会话 id（保留入参以兼容调用方；网页视图是全局 w1，不依赖会话是否就绪） */
   sessionId: string
   /** 壳传下来的目标地址；空串 = 壳没要求导航，不动 */
   initialUrl: string
@@ -184,7 +184,6 @@ export function shouldRebuildWebView(input: {
   currentUrl: string
 }): boolean {
   if (!input.mounted) return false
-  if (!String(input.sessionId ?? '').trim()) return false
   const target = normalizeUrl(String(input.initialUrl ?? '').trim())
   if (!target) return false
   const current = normalizeUrl(String(input.currentUrl ?? '').trim())

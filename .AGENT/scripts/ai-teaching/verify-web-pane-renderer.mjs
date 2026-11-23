@@ -13,7 +13,7 @@
  * 2026-11-22 随内层页签条删除更新：第 8 节补了五条静态断言 —— 内层「新建 / 关闭」入口消失、
  * 地址栏仍在、pane 不再自己写 localStorage、空态是点阵而不是起始块、五种状态名必须都出现。
  *
- * 2026-11-23 补会话恢复 / 跨会话保活契约：首挂必须等 sessionId 非空、sessionId 变化不卸载视图、
+ * 2026-11-23 补会话恢复 / 跨会话保活契约：首挂必须等 sessionId 非空（初始导航不依赖它）、sessionId 变化不卸载视图、
  * URL 相同不重建（`shouldRebuildWebView` 纯函数 + WebPane 接线静态断言）。
  *
  * 运行（项目根目录）：node .AGENT/scripts/ai-teaching/verify-web-pane-renderer.mjs [仓库路径]
@@ -189,8 +189,8 @@ check(
   shouldRebuildWebView({ mounted: true, sessionId: 's2', initialUrl: 'https://b.com/', currentUrl: 'https://a.com/' }) === true,
 )
 check(
-  'empty session id never rebuilds (session not restored yet)',
-  shouldRebuildWebView({ mounted: true, sessionId: '', initialUrl: 'https://b.com/', currentUrl: 'https://a.com/' }) === false,
+  'no session id does not block a url change (workspace without sessions)',
+  shouldRebuildWebView({ mounted: true, sessionId: '', initialUrl: 'https://b.com/', currentUrl: 'https://a.com/' }) === true,
 )
 check(
   'empty initialUrl keeps the current page',
@@ -235,8 +235,8 @@ const sessionEffect = (() => {
 
 check('first mount waits for a non-empty sessionId',
   /if \(firstMountRef\.current\)[\s\S]{0,320}?if \(!sid\) return/.test(paneSrc))
-check('initial navigation also waits for a non-empty sessionId',
-  /if \(!initialUrl\) return\s*if \(!sessionId\) return/.test(paneSrc))
+check('initial navigation does not depend on sessionId (workspace may have no session)',
+  /if \(!initialUrl\) return\s*const raf/.test(paneSrc) && !/if \(!sessionId\) return/.test(paneSrc))
 check('session id change never unloads the live view (cross-session keep-alive)',
   sessionEffect.length > 0
     && !sessionEffect.includes('webPaneClose')
