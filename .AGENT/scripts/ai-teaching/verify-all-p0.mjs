@@ -45,6 +45,19 @@ const SCRIPTS = [
   'verify-context-compiler.mjs',
   'verify-viewer-tabs.mjs',
   'verify-side-scope.mjs',
+  'verify-outline-topo.mjs',
+  'verify-outline-fence.mjs',
+  'verify-course-mode.mjs',
+  'verify-course-segments.mjs',
+  'verify-course-end.mjs',
+  'verify-segment-wrapup.mjs',
+  'verify-teach-style.mjs',
+  'verify-teach-toolbar-ui.mjs',
+  'verify-right-viewer-tabs.mjs',
+  'verify-turn-rail.mjs',
+  'verify-session-isolation.mjs',
+  'verify-ai-teaching-tools.mjs',
+  'verify-doc-ipc.mjs',
 ]
 
 const dir = path.join(ROOT, '.AGENT/scripts/ai-teaching')

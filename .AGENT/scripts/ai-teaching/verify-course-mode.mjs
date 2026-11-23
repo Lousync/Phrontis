@@ -71,7 +71,7 @@ check('段会话兜底只作用于 activeSegmentSid === activeId', idx.includes(
 check('course.outline.write 描述禁止落盘后开讲', tools.includes('落盘/更新成功即终止建课流程') && tools.includes('不要问「开讲第 N 章」'))
 check('ask 协议禁止大纲后开讲选项', agent.includes('禁止「开讲第 N 章」') && agent.includes('只允许「去左栏开第 1 段」'))
 check('ask 协议禁止段会话写交接选项', agent.includes('段会话（本段上课）中，ask 禁止出现') && agent.includes('交接只由用户点「收尾本段」生成'))
-check('教师提示词禁止 AI 自行创建交接', course.includes('交接纪律：交接文档只由用户点右上角「收尾本段」时由系统生成') && course.includes('也不要自行创建 `交接.md` 或任何交接文件'))
+check('教师提示词禁止 AI 自行创建交接', course.includes('交接纪律：交接文档只由用户点「收尾本段」确认卡（或左栏段行 ✓）时由系统生成') && course.includes('也不要自行创建 `交接.md` 或任何交接文件'))
 check('归档工具硬闸拒绝交接标题', course.includes('isHandoffTitle(title)') && course.includes('交接由「收尾本段」统一生成，不能用整理归档创建'))
 check('收尾幂等复用现有交接（含标准路径兜底）', course.includes('pickReusableHandoff(') && course.includes('标准路径兜底') && course.includes('reused: true'))
 check('帮助文档说明交接只由收尾本段生成', help.includes('交接只由「收尾本段」生成一份 `交接.md`'))
