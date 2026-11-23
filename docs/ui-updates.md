@@ -3054,3 +3054,37 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - **正文剥离**：协议围栏正则追加 `wrapup`（`(profile|plan|ask|outline|endcourse|teach|wrapup)`），围栏不出现在正文。
 
 **契约**：`verify-teach-toolbar-ui.mjs` 新增 [收尾卡] / [收尾协议] 两段 20 条断言（含负向：流末尾不再渲染该卡、不再按 `messages.length` 出卡）；`verify-teach-ledger.mjs` / `verify-context-usage.mjs` 按新注入串与共享 `sessionLessonBrief` 改写既有断言（未删成恒真）。`verify-teach-toolbar-ui.mjs` 110 PASS / 0 FAIL，`verify-all-p0.mjs` 26/26。
+
+## 2026-11-23 · AI 教学 · 查看器宽度给中栏留最小可读宽（窄窗不再压扁）
+
+**现状 / 用户反馈**：900×700 窗口 + 查看器拉到最窄 360 时，中栏只剩 ≈227px —— 正文一行 4 个字，输入区底部工具条「关闭 / 低 / 中 / 高」竖排且被裁。
+
+**根因**：查看器宽度上限只按 `innerWidth − 300` 算，没扣活动栏 63 与左栏（默认 248），也没有「中栏最小可读宽度」的概念；窗口变窄时压力全给中栏。
+
+**改动点**（`rightViewerPure.ts` / `viewerResize.ts` / `RightViewer.tsx` / `index.tsx`）：
+- 新增 `VIEWER_MIN_MIDDLE_WIDTH = 420`（中栏最小可读宽）、`VIEWER_TIGHT_MIN_WIDTH = 300`（窗口实在放不下时的紧凑下限）。
+- 上限改成 `max(300, min(960, innerWidth − reserve))`，`reserve = 中栏左缘 + 420`；中栏左缘由 `<section>` 实测（天然含活动栏 + 左栏展开 / 折叠 / 拖宽），取不到回退 `63 + 248 + 420`。
+- 触发源两路：左栏 `ResizablePanel.onWidthChange` + 中栏 `ResizeObserver({box:'border-box'})`；Tab 保活 `display:none`（0×0）时跳过测量，避免切回时白闪一次宽度。
+- 拖拽下界改成 `min(360, upper)`：正常窗口仍是 360，只有窄到连 360 都放不下才跟着上限降，绝不「夹紧反着用」。
+- **不**自动关查看器 / 自动折左栏腾地方（状态自己变会让人懵）。
+- 同一批次删掉了 `viewerResize.ts` 里的第二份夹紧实现，规则只剩 `rightViewerPure.clampViewerWidth` 一处。
+
+**实测**（900×700，devbridge）：查看器 300、中栏 282、工具条行高 34px 单行；1280 下默认 480 不被改动（中栏 482）；900 + 左栏折叠 → 查看器 403、中栏 413。
+
+**契约**：`verify-right-viewer-shell.mjs` 54 → 70 条（纯函数四档 + 「夹紧规则只有一份」静态断言）。
+
+## 2026-11-23 · AI 教学 · 抽屉贴底可被用户滚动打断；关页签 190ms 内重开不再被吞
+
+**问题 1：贴底循环抢滚动**。抽屉开合时 300ms 内每帧把 `scrollTop` 钉到 `scrollHeight`；旧实现只在进入时判一次 `stickRef`，且 `onConvScroll` 会把程序化滚动重算成「贴底」——用户在这段窗口上翻会被逐帧拽回底，结束后自动贴底还被强行恢复。
+- `step()` 每帧复查 `stickRef`，翻 false 立即停；
+- 滚动容器新增 `onWheel` / `onPointerDown` → `cancelTrayPin()`（只在循环真在跑时生效，静止点击不会凭空弹「回到底部」浮标；不 `preventDefault`，不影响选中 / 复制 / 图片点击）；
+- `onConvScroll` 在 `trayPinRaf` 运行期间跳过贴底判定（位置记忆与轮次测量照常）；
+- 两个时间窗合并为 `TRAY_ANIM_SETTLE_MS = COMPOSER_TRAY_ANIM_MS + 80`。
+
+**问题 2：关页签后 190ms 内重开被吞**。关闭动效期间页签仍在 `tabs` 里，`findNotesTab` / `findWebTab` 能命中它，但 `liveIds` 会过滤 `closingIds` → 内容区空白、到点被删。新增 `reviveClosing(id)`（清定时器 + 从 `closingIds` 摘出），在 `selectTab` 里先复活再激活；`openBook` 复用「当前书架页签」这条不走 `selectTab` 的路径单独补；`closeTab` 刻意绕开（负向断言锁住）。
+
+**契约**：`verify-teach-toolbar-ui.mjs` 125 → 138、`verify-right-viewer-tabs.mjs` 160 → 169。
+
+**真机复验**（Linux，devbridge）：滚轮在 41ms 内打断后 `scrollTop` 停在 3534（gap 400）不再被拽回，浮标出现且点击可回底；贴底开合仍 gap 0；静止点击不误弹浮标。笔记页签在 40ms 重开后 `kb-item-out` 在 53ms 被撤销、页签从未移除、500ms 后仍是活动页签且正文非空；正常关闭仍在 200ms 移除。
+
+**已知残留（未修）**：网页地址栏在**页面加载失败**时不会回写壳层（`onUrlChange` 依赖导航成功），关闭该页签会丢掉刚输入的地址；加载成功的页面地址可持久化（上一轮已验）。

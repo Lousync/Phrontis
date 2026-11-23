@@ -264,6 +264,145 @@ check('vault.write 门不合格时抛错（不是拒绝保存，是把重写提�
 check('两处入口复用同一个 gate 实现（不各写一套）',
   (tools.match(/applyQuizQualityGate\(/g) ?? []).length === 0 && (course.match(/export function gateQuizContentForWrite\(/g) ?? []).length === 1, '')
 
+/* ---------------------------------------------------------------- 11. 所有 .md 写入口共同过门 */
+
+console.log('\n=== 11. 所有 .md 写入口共同过门（write / write-batch / edit） ===')
+
+/** 截取某个 tool 的 handler 片段（到下一个 registerTool 为止） */
+const toolBody = (name) => {
+  const s = tools.indexOf(`name: '${name}'`)
+  if (s < 0) return ''
+  const nxt = tools.indexOf('\n  registerTool({', s)
+  return tools.slice(s, nxt > s ? nxt : tools.length)
+}
+
+const writeBody = toolBody('builtin.vault.write')
+const batchBody = toolBody('builtin.vault.write-batch')
+const editBody = toolBody('builtin.vault.edit')
+check('找到三个写入口的 handler', writeBody.length > 0 && batchBody.length > 0 && editBody.length > 0,
+  `write=${writeBody.length} batch=${batchBody.length} edit=${editBody.length}`)
+
+for (const [label, body] of [['vault.write', writeBody], ['vault.write-batch', batchBody], ['vault.edit', editBody]]) {
+  check(`★ ${label}：aiTeaching + .md + hasQuizFence 都调用同一道门`,
+    /ctx\?\.source === 'aiTeaching' && rel\.toLowerCase\(\)\.endsWith\('\.md'\) && hasQuizFence\(/.test(body)
+    && body.includes('gateQuizContentForWrite(String(ctx.sessionId ?? \'\')'), '')
+}
+
+// write-batch：位置与整批中止
+const batchGateAt = batchBody.indexOf('gateQuizContentForWrite(')
+const batchPushAt = batchBody.indexOf('writes.push(')
+const batchEnsureIdAt = batchBody.indexOf('ensureKnowledgeDocFrontmatter(')
+const batchCommitAt = batchBody.indexOf('commitOrStage(')
+check('★ write-batch：门在 ensureId 之后（校验的是补好 frontmatter 的正文）',
+  batchEnsureIdAt >= 0 && batchGateAt > batchEnsureIdAt, `ensureIdAt=${batchEnsureIdAt} gateAt=${batchGateAt}`)
+check('★ write-batch：门在 writes.push 之前（任一条不合格不会先入队）',
+  batchGateAt > 0 && batchPushAt > batchGateAt, `gateAt=${batchGateAt} pushAt=${batchPushAt}`)
+check('★ write-batch：失败信息带「第 N 条：」前缀',
+  /if \(!gated\.ok\) throw new Error\(`第 \$\{i \+ 1\} 条：\$\{gated\.error\}`\)/.test(batchBody), '')
+check('★ write-batch：该 throw 在 commitOrStage 之前（整批中止，不落盘也不进暂存）',
+  batchCommitAt > 0 && batchGateAt < batchCommitAt
+  && batchBody.slice(0, batchCommitAt).includes('第 ${i + 1} 条：${gated.error}'), `gateAt=${batchGateAt} commitAt=${batchCommitAt}`)
+
+// vault.edit：全文过门 + 位置
+const editGateAt = editBody.indexOf('gateQuizContentForWrite(')
+const editNextAt = editBody.lastIndexOf('next = text.slice(')
+const editAppendAt = editBody.indexOf("next = text.replace(/\\s*$/, '')")
+const editCommitAt = editBody.indexOf('commitOrStage(')
+check('★ vault.edit：门在 next 算好之后（替换分支与追加分支都覆盖）',
+  editNextAt >= 0 && editAppendAt >= 0 && editGateAt > editNextAt && editGateAt > editAppendAt,
+  `appendAt=${editAppendAt} sliceAt=${editNextAt} gateAt=${editGateAt}`)
+check('★ vault.edit：门在 commitOrStage 之前（不合格不落盘）',
+  editGateAt > 0 && editCommitAt > editGateAt, `gateAt=${editGateAt} commitAt=${editCommitAt}`)
+check('vault.edit：门看的是 next 全文而不是 newText 片段',
+  /hasQuizFence\(next\)/.test(editBody) && /gateQuizContentForWrite\(String\(ctx\.sessionId \?\? ''\)[^\n]*next,/.test(editBody), '')
+check('vault.edit：门不合格抛错（把重写提示给模型）', /if \(!gated\.ok\) throw new Error\(gated\.error\)/.test(editBody), '')
+
+// off 档逐字直通（含 CRLF）
+const crlfDoc = doc([choice(1, 'A'), choice(2, 'B')]).replace(/\n/g, '\r\n')
+const crlfOff = applyQuizQualityGate({ content: crlfDoc, mode: 'off' })
+check('★ off 档不归一化：CRLF 正文逐字返回（长度 / 字符完全一致）',
+  crlfOff.ok === true && crlfOff.content === crlfDoc && crlfOff.content.length === crlfDoc.length
+  && crlfOff.changed === false && crlfOff.summary.fences === 0, `len=${crlfOff.content.length}/${crlfDoc.length}`)
+check('gateQuizContentForWrite 的 off 分支同样返回 rawText（三个入口共用，无需各自归一化）',
+  /if \(mode === 'off'\) return \{ ok: true, content: rawText \}/.test(helperFn), '')
+
+/** 执行级说明：三个 handler 依赖 Electron ipcMain / 当前 vault / 权限上下文，脚本内无法低成本拉起，
+ *  故批量写「strict 坏题单 → 抛错且目标文件未创建」用上面的位置断言（throw 先于 commitOrStage 与 writes.push）
+ *  + 纯函数严格档用例共同覆盖；真正的落盘路径由 verify-all-p0 的端到端脚本负责。 */
+
+/* ---------------------------------------------------------------- 12. 其余吃任意 Markdown 的写入口 */
+
+console.log('\n=== 12. knowledge.create-page / artifact.edit 过门 + gen-paper 豁免 ===')
+
+const sources = read('electron/lib/aiTeachingSources.ts')
+
+// 12a. builtin.knowledge.create-page：整篇 Markdown 进暂存 → vaultCreatePage 落盘
+const createBody = toolBody('builtin.knowledge.create-page')
+check('找到 knowledge.create-page handler', createBody.length > 0, `len=${createBody.length}`)
+const cpLetAt = createBody.indexOf('let contentMd = str(args.contentMd)')
+const cpGateAt = createBody.indexOf('gateQuizContentForWrite(')
+const cpStageAt = createBody.indexOf('stageToolOp(')
+check('★ create-page：只在 aiTeaching + 含 quiz 围栏时过门（普通知识库备注不动）',
+  /ctx\?\.source === 'aiTeaching' && hasQuizFence\(contentMd\)/.test(createBody), '')
+check('★ create-page：门在 stageToolOp 之前（预览 / 确认的就是校正后正文，失败也不等应用才炸）',
+  cpLetAt >= 0 && cpGateAt > cpLetAt && cpStageAt > cpGateAt, `letAt=${cpLetAt} gateAt=${cpGateAt} stageAt=${cpStageAt}`)
+check('★ create-page：校正后的正文写回暂存参数（预览与落盘同一份，不留「预览原样、落盘校正」旁路）',
+  /withResolvedTarget\(\{ \.\.\.args, contentMd \}, target\)/.test(createBody)
+  && /let contentMd = str\(args\.contentMd\)/.test(createBody)
+  && /args: stagedArgs/.test(createBody), '')
+check('create-page：落盘用的也是同一个 contentMd 变量（没有回退去读 args.contentMd）',
+  /vaultCreatePage\(\{ title, contentMd,/.test(createBody) && !/vaultCreatePage\(\{ title, contentMd: str\(args\.contentMd\)/.test(createBody), '')
+check('create-page：不合格抛错（把重写提示当错误回给模型，与 vault.write 同口径）',
+  /if \(!gated\.ok\) throw new Error\(gated\.error\)/.test(createBody), '')
+
+// 12b. aiTeach.artifact.edit（editArtifactText）：局部替换 / 追加后整篇过门
+check('artifact.edit 所在的 aiTeachingSources 已 import 同一道门 + 围栏判定（不各写一套）',
+  /gateQuizContentForWrite/.test(sources) && /from '\.\/quizDocPure'/.test(sources), '')
+const eaStart = sources.indexOf('export function editArtifactText')
+const eaEnd = sources.indexOf('/** 解析条目路径', eaStart)
+const eaFn = eaStart >= 0 && eaEnd > eaStart ? sources.slice(eaStart, eaEnd) : ''
+check('找到 editArtifactText 函数体', eaFn.length > 0, `start=${eaStart}`)
+const eaNextAt = eaFn.indexOf('let next = applied.next')
+const eaGateAt = eaFn.indexOf('gateQuizContentForWrite(')
+const eaWriteAt = eaFn.indexOf('writeFileSync(abs, next')
+check('★ artifact.edit：门在全文 next 算好之后（替换分支与追加分支都已应用）',
+  eaNextAt >= 0 && eaGateAt > eaNextAt, `nextAt=${eaNextAt} gateAt=${eaGateAt}`)
+check('★ artifact.edit：门在 writeFileSync 之前（不合格就不落盘）',
+  eaGateAt > 0 && eaWriteAt > eaGateAt, `gateAt=${eaGateAt} writeAt=${eaWriteAt}`)
+check("★ artifact.edit：条件正好是 ext === 'md' && hasQuizFence(next)（html / json 产物不受影响）",
+  /if \(ext === 'md' && hasQuizFence\(next\)\) \{/.test(eaFn), '')
+check('★ artifact.edit：门看的是 next 全文而不是 edits 片段，且复用本函数的 getSetting',
+  /gateQuizContentForWrite\(sessionId, basename\(n\.rel\)\.replace\(\/\\\.md\$\/i, ''\), next, getSetting\)/.test(eaFn), '')
+check('★ artifact.edit：失败返回 { ok:false, error }，不 throw',
+  /if \(!gated\.ok\) return \{ ok: false, error: gated\.error \}/.test(eaFn) && !/throw new Error\(gated\.error\)/.test(eaFn), '')
+check('★ artifact.edit：放行后把校正正文写回 next（落盘用的是过门结果）',
+  /next = gated\.content/.test(eaFn), '')
+
+// 12c. builtin.quiz.gen-paper：**有意豁免**（机械拼装，坏快照不该炸整卷）
+const genBody = toolBody('builtin.quiz.gen-paper')
+check('★ gen-paper：豁免注释存在（锁住「这是有意的，不是漏了」）',
+  /题单质量门\*\*有意豁免\*\*/.test(genBody) && /快照/.test(genBody), '')
+check('gen-paper：确实没有调用质量门（豁免已落实，不是注释与代码不一致）',
+  genBody.length > 0 && !genBody.includes('gateQuizContentForWrite('), '')
+
+// 12d. 清单式断言：所有「模型写 .md 正文」的入口都在这里
+const mdWriteEntries = [
+  ['vault.write', writeBody],
+  ['vault.write-batch', batchBody],
+  ['vault.edit', editBody],
+  ['knowledge.create-page', createBody],
+  ['artifact.edit', eaFn],
+]
+const missingMdEntries = mdWriteEntries.filter(([, body]) => !body.includes('gateQuizContentForWrite(')).map(([label]) => label)
+check('★ 所有 .md 写入口清单齐全（write / write-batch / edit / create-page / artifact.edit）',
+  missingMdEntries.length === 0, `缺：${missingMdEntries.join(', ') || '无'}`)
+
+/** 执行级说明：`editArtifactText` 虽不依赖 ipcMain，但它所在的 `aiTeachingSources.ts` 静态 import
+ *  electron / phrontis-core / src/*（素材库整条业务链），本脚本的 strip 装载器只 stage 相对 TS import、
+ *  不解析裸包，故无法在纯 node 里低成本拉起 —— 「坏题单 .md 产物 → ok:false 且文件未被修改」这一条
+ *  由上面的位置断言（门在 writeFileSync 之前 + 失败走 return）+ verify-quiz-quality.mjs 的 strict 用例
+ *  共同覆盖；端到端落盘路径由 verify-all-p0 的端到端脚本负责。 */
+
 /* ---------------------------------------------------------------- 报告 */
 
 const failed = checks.filter((c) => !c.pass)

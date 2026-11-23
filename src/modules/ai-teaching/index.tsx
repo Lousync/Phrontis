@@ -26,6 +26,7 @@ import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOf
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
 import { RightViewer } from './right-viewer/RightViewer'
+import { viewerReserveWidth } from './right-viewer/rightViewerPure'
 import type { ViewerTabKey } from './right-viewer/paneContracts'
 import { SideLanePanel } from './SideLanePanel'
 import { pickLearningQuote } from './learningQuotes'
@@ -207,6 +208,13 @@ const HERO_CHIPS: Array<{ label: string; prompt: string }> = [
  * 贴底钉底循环与 dock 位移过渡的「动画窗口」都按它算 —— 改 CSS 时长时同步这一个数。
  */
 const COMPOSER_TRAY_ANIM_MS = 220
+/**
+ * 抽屉动画的「观测窗口」= 220ms 动画 + 80ms 余量。
+ * `trayAnimating` 关窗与贴底钉底窗口**必须同源**（2026-11-23 竞态修复）：
+ * 两个窗口不同源时，钉底循环会在 `trayAnimating` 关掉后多跑几十毫秒，
+ * 期间用户上翻会被逐帧拽回底（且结束后 `stickRef` 仍被钉成 true）。
+ */
+const TRAY_ANIM_SETTLE_MS = COMPOSER_TRAY_ANIM_MS + 80
 
 /** 名称归一（去书名号/引号/标点/空白，大小写不敏感）：让跳转 chip 容忍 AI 输出的写法差异（F3） */
 function normName(s: string): string {
@@ -529,6 +537,40 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
   const [viewerTab, setViewerTab] = useState<ViewerTabKey>('web')
   const [viewerW, setViewerW] = useState(0)
+  /**
+   * 中栏 reserve = `中栏左缘 + VIEWER_MIN_MIDDLE_WIDTH`（查看器宽度上限的唯一依据）。
+   *
+   * 左缘由中栏 `<section>` 实测 —— 它天然包含活动栏 + 左栏（展开 / 折叠 / 拖宽都算在内），
+   * 取不到时回退 `63 + 248 + 420`。触发源有两路：左栏 `onWidthChange` + 中栏 ResizeObserver
+   * （窗口缩放 / 左栏折叠动画 / 拖宽都会让中栏边界动）。
+   */
+  const [viewerReserve, setViewerReserve] = useState<number>(() => viewerReserveWidth(null))
+  const middleSectionRef = useRef<HTMLElement | null>(null)
+  const middleRoRef = useRef<ResizeObserver | null>(null)
+  const syncViewerReserve = useCallback(() => {
+    const el = middleSectionRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    // Tab 保活（display:none）时 rect 是 0×0、left=0 —— 当成真实左缘会把 reserve 算小，
+    // 切回本 Tab 时再被 RO 纠正，中间会白闪一次宽度；这里直接跳过。
+    if (!(rect.width > 0)) return
+    const next = viewerReserveWidth(rect.left)
+    // 亚像素抖动不写 state：ResizeObserver 在过渡动画里会连续回调
+    setViewerReserve((prev) => (Math.abs(prev - next) < 0.5 ? prev : next))
+  }, [])
+  /** 回调 ref：section 随分支挂载 / 卸载时自动接上 / 断开 ResizeObserver（不依赖 effect 顺序） */
+  const attachMiddleSection = useCallback((el: HTMLElement | null) => {
+    middleSectionRef.current = el
+    middleRoRef.current?.disconnect()
+    middleRoRef.current = null
+    if (!el) return
+    syncViewerReserve()
+    if (typeof ResizeObserver === 'undefined') return
+    // border-box：查看器拖宽只改中栏 padding，不触发；中栏**左缘**移动才触发
+    const ro = new ResizeObserver(() => syncViewerReserve())
+    ro.observe(el, { box: 'border-box' })
+    middleRoRef.current = ro
+  }, [syncViewerReserve])
   /** 当前仓库 rootId（查看器只传 rootId + relPath，绝不接触绝对路径） */
   const [vaultRootId, setVaultRootId] = useState('')
   useEffect(() => {
@@ -2076,16 +2118,31 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const trayBodyRef = useRef<HTMLDivElement>(null)
   const trayHandleRef = useRef<HTMLButtonElement>(null)
   /**
+   * 打断贴底钉底循环（用户输入 / 滚轮 / 指针按下）。
+   * 只在循环真的在跑时生效：窗口之外的上翻由 `onConvScroll` 的几何判定负责，
+   * 否则普通点击（复制按钮 / 选词 / 图片缩略图）也会把贴底状态冲掉、凭空弹出「回到底部」浮标。
+   * 不 `preventDefault`：滚动、文本选中、图片点击一律照旧。
+   */
+  const cancelTrayPin = useCallback((): void => {
+    if (!trayPinRaf.current) return
+    cancelAnimationFrame(trayPinRaf.current)
+    trayPinRaf.current = 0
+    stickRef.current = false
+    setJumpBottom(true)
+  }, [])
+  /**
    * 贴底跟随（PLAN §6）：抽屉是 220ms 的 grid-template-rows 动画，高度逐帧变；
    * 滚动容器挂着 `[overflow-anchor:none]`（原生锚定已关），所以贴底时必须在动画期间**每帧**把
    * `scrollTop` 钉到 `scrollHeight`，否则收起结束那一刻最后一条消息会被拉起 34px（看着像内容被拔起来）。
    * 未贴底（用户往上翻了）时整个循环不启动：scrollTop 与上方内容都不动，只是视口下沿长出来。
+   * 循环内**每帧复查** `stickRef`：用户在这段窗口里上翻 / 按下的瞬间就停，不再拽回底。
    */
   const pinTrayBottom = useCallback((): void => {
     if (!stickRef.current) return
     if (trayPinRaf.current) cancelAnimationFrame(trayPinRaf.current)
-    const until = performance.now() + COMPOSER_TRAY_ANIM_MS + 80
+    const until = performance.now() + TRAY_ANIM_SETTLE_MS
     const step = (): void => {
+      if (!stickRef.current) { trayPinRaf.current = 0; return }
       const c = scrollRef.current
       if (c) {
         c.scrollTop = c.scrollHeight
@@ -2131,7 +2188,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     trayAnimTimer.current = window.setTimeout(() => {
       trayAnimTimer.current = null
       setTrayAnimating(false)
-    }, COMPOSER_TRAY_ANIM_MS + 40)
+    }, TRAY_ANIM_SETTLE_MS)
     pinTrayBottom()
   }, [trayOpen, modelMenu, pulseTrayHandle, pinTrayBottom])
   /** 条目9：提问卡收起二态（不丢 askPending 与点选状态；换 ask 重置） */
@@ -2588,11 +2645,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // Tab 保活隐藏期间（display:none）滚动容器读回 0——别把位置记忆冲掉，否则回切恢复不到
     if (!isActive) return
     if (activeIdRef.current) convScroll.current.set(activeIdRef.current, c.scrollTop)
-    // 贴底判定（条目 6）：**纯几何**，不需要「程序化滚动」标记 —— 程序滚到底后几何上本就是贴底，
-    // 所以不会把「自己滚的自己」误判成用户上滚；48px 容差同时吸收了流式增量带来的高度滞后。
-    const near = c.scrollHeight - c.scrollTop - c.clientHeight < 48
-    stickRef.current = near
-    setJumpBottom(!near)
+    // 贴底判定（条目 6）：**纯几何**；唯一的例外是钉底循环运行期间（`trayPinRaf`）——
+    // 那几帧的「滚到底」是程序化的，几何上恒为贴底，若照常重算就会把用户在这段窗口里的上翻
+    // 重新钉回 `stickRef = true`（2026-11-23 竞态修复）。所以这个标记**只用于贴底判定**，
+    // 不参与位置记忆与轮次测量。
+    if (!trayPinRaf.current) {
+      const near = c.scrollHeight - c.scrollTop - c.clientHeight < 48
+      stickRef.current = near
+      setJumpBottom(!near)
+    }
     if (scrollRaf.current) return
     // 每帧只做一次：高度没变就纯二分（零 DOM 读），变了才重测一遍
     scrollRaf.current = requestAnimationFrame(() => {
@@ -3209,7 +3270,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         <ResizablePanel side="left" storageKey="aiTeachLeftWidth" defaultWidth={248} minWidth={200} maxWidth={400}
           visible={leftOpen} onSnapClose={() => toggleSide('left')} onSnapOpen={() => toggleSide('left')}
           keepMounted
-          collapsedWidth={14}>
+          collapsedWidth={14}
+          onWidthChange={syncViewerReserve}>
           {/* v3.8.0 §二：工作区 switcher（顶部常驻）——选择页本身不变，这里只是快捷切换 */}
           {activeWs && (
             <div className="relative shrink-0 border-b border-[var(--border-color)]">
@@ -3386,6 +3448,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             P4：查看器是 overlay（absolute 盖在右缘），中栏用 padding-right 让位 —— 宽度与面板同一条
             200ms 曲线；拖拽时查看器自己会关掉过渡，这里跟随 CSS 变量即可。 */}
         <section
+          ref={attachMiddleSection}
           className="flex-1 flex flex-col min-w-0 min-h-0 relative motion-reduce:transition-none"
           style={{
             paddingRight: srcVisible && viewerW > 0 ? viewerW : 0,
@@ -3432,7 +3495,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   原先挂在这里只能在中栏里浮，现在要能跨左栏/中栏/工件栏自由拖动。 */}
               {/* 底部留白 48px = 「回到底部」浮标占位（bottom-3 12px + 按钮 36px）——浮标是 absolute 不占流，
                   若不留白就会盖住滚到下方时的最后一行文字。留白常驻（不随浮标显隐变化）→ 不产生二次回流。 */}
-              <div ref={scrollRef} onScroll={onConvScroll} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable] pl-4 pr-8 pt-3 pb-12 space-y-3 min-h-0">
+              <div ref={scrollRef} onScroll={onConvScroll} onWheel={cancelTrayPin} onPointerDown={cancelTrayPin} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable] pl-4 pr-8 pt-3 pb-12 space-y-3 min-h-0">
                 {/* 空态的标题 + 说明不在这里 —— 已搬进输入卡 dock 内部（与输入卡一起居中位移，
                     见 dockRef 那一段的 emptyState 注释） */}
                 {messages.map((m, idx) => (
@@ -4419,6 +4482,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         open={srcVisible}
         onClose={() => toggleSide('right')}
         onWidthChange={setViewerW}
+        reserve={viewerReserve}
         rootId={vaultRootId}
         sessionId={activeId ?? ''}
         sessionTitle={activeTitle}

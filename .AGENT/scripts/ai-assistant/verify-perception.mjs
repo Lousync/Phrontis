@@ -174,8 +174,10 @@ const countMaxLiteral = (SRC_CHATBODY.match(/\bMAX_ATTACHED_REFS\b/g) ?? []).len
 ok(countMaxLiteral >= 1,
   'C2 ChatBody 的 chip 上限读常量而非硬编码 4（list-drift 防线）',
   `MAX_ATTACHED_REFS 出现 ${countMaxLiteral} 次`)
-ok(!/length\s*>=\s*4\b/.test(SRC_CHATBODY),
-  'C3 ChatBody 无裸 `length >= 4` 字面量上限（同概念不得两份值）', '')
+// 只盯「附件数」这一个概念：`composerImages.images.length >= 4` 是图片上限，另一个概念
+// （2026-11 加图片输入时引入），旧的全量正则把它误报成违规；附件上限仍必须读常量。
+ok(!/attachedFiles[.\w]*\.length\s*>=\s*4\b|attachedFiles\.length\s*>=\s*4\b/.test(SRC_CHATBODY),
+  'C3 ChatBody 附件数量上限不得裸写 4（必须读 MAX_ATTACHED_REFS，同概念不得两份值）', '')
 
 ok(/attachedFiles/.test(SRC_AGENT),
   'C4 agentService 已接 attachedFiles 特判（骨架注入的前提）', '')
@@ -245,18 +247,48 @@ ok(!/readVaultRefText/.test(bsBody),
   'E3c ★ buildSystemPrompt 体内不得读盘（读盘 = 每轮内容可能不同 = 前缀不稳定）', '')
 
 // E4 ★ 正向：注入段确实被送进 composeContextWithDigest
-ok(/composeContextWithDigest\([^)]*requestInjection/.test(SRC_AGENT)
-  || /composeContextWithDigest\([^)]*,\s*requestInjection\s*\)/.test(SRC_AGENT),
-  'E4a ★ agentService 把 requestInjection 传进 composeContextWithDigest（真的走 user 层）', '')
+// 用括号配平取实参列表：`capHistoryImages(history)` 自带嵌套括号，旧正则 `[^)]*` 跨不过去，
+// 而注入段在 2026-11-23 从第 3 参（extraPrefix）挪到了第 4 参（suffix）。两者都以
+// `, requestInjection` 结尾，所以判据只看实参列表的尾部。
+function callArgsOf(src, name) {
+  const out = []
+  const needle = `${name}(`
+  let from = 0
+  while (true) {
+    const open = src.indexOf(needle, from)
+    if (open < 0) break
+    let i = open + needle.length
+    let depth = 1
+    let quote = ''
+    for (; i < src.length; i++) {
+      const ch = src[i]
+      if (quote) {
+        if (ch === '\\') { i++; continue }
+        if (ch === quote) quote = ''
+        continue
+      }
+      if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue }
+      if (ch === '(') depth++
+      else if (ch === ')') { depth--; if (depth === 0) break }
+    }
+    out.push(src.slice(open + needle.length, i))
+    from = i + 1
+  }
+  return out
+}
+const ccArgs = callArgsOf(SRC_AGENT, 'composeContextWithDigest')
+const hasInjectionArg = (args) => /,\s*requestInjection\s*$/.test(args)
+ok(ccArgs.some(hasInjectionArg),
+  'E4a ★ agentService 把 requestInjection 传进 composeContextWithDigest（真的走 user 层）',
+  `调用 ${ccArgs.length} 处`)
 ok(/const requestInjection\s*=/.test(SRC_AGENT),
   'E4b agentService 有 requestInjection 汇总变量（引用段 + 感知段合一）', '')
 // 两处 composeContextWithDigest 调用（首次装配 + 压缩后重装配）都要带注入段，
 // 否则压缩一触发注入段就静默消失
-const callSites = (SRC_AGENT.match(/composeContextWithDigest\(/g) ?? []).length
-const withInjection = (SRC_AGENT.match(/composeContextWithDigest\([^)]*requestInjection/g) ?? []).length
-ok(callSites >= 2 && withInjection === callSites,
+const withInjection = ccArgs.filter(hasInjectionArg).length
+ok(ccArgs.length >= 2 && withInjection === ccArgs.length,
   'E4c ★ 全部 composeContextWithDigest 调用点都带注入段（漏一处 = 压缩后注入静默消失）',
-  `调用 ${callSites} 处 / 带注入 ${withInjection} 处`)
+  `调用 ${ccArgs.length} 处 / 带注入 ${withInjection} 处`)
 
 // ===================== F 组：预算纯函数（B2） =====================
 

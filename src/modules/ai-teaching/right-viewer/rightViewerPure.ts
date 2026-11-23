@@ -20,8 +20,26 @@ export const VIEWER_MIN_WIDTH = 360
 export const VIEWER_MAX_WIDTH = 960
 /** 默认宽（SETTINGS 里 `aiTeachRightViewerWidth` 的默认值必须与这里一致） */
 export const VIEWER_DEFAULT_WIDTH = 480
-/** 给中栏保留的最小可读宽度：窗口不够宽时上限收窄到 `innerWidth - 这条` */
+/**
+ * **旧口径**（不再用于真实布局）：给中栏留 300px。
+ *
+ * 它只按 `innerWidth` 算，没扣活动栏 + 左栏，窗口一窄就把压力全给中栏
+ * （900px 窗下中栏只剩 ≈227px）。现在只剩「调用方没给 reserve」时的兼容缺省。
+ */
 export const VIEWER_RESERVED_WIDTH = 300
+/**
+ * 中栏最小可读宽度：查看器上限必须给中栏留出这么多，
+ * 否则正文一行只剩 4 个字、输入区工具条竖排（900×700 实机复现）。
+ */
+export const VIEWER_MIN_MIDDLE_WIDTH = 420
+/**
+ * 紧凑下限：窗口实在放不下（中栏留够 420 后连 360 都给不出）时，
+ * 查看器可以降到 300 —— 但不再往下。
+ * ★ 不做「自动关查看器 / 自动折左栏」腾地方：状态自己变，用户会懵。
+ */
+export const VIEWER_TIGHT_MIN_WIDTH = 300
+/** 取不到中栏左缘时的回退：活动栏 63 + 左栏默认 248 */
+export const VIEWER_MIDDLE_LEFT_FALLBACK = 63 + 248
 
 const TAB_LABELS: Readonly<Record<ViewerTabKey, string>> = {
   web: '网页',
@@ -76,28 +94,67 @@ export function shouldHideWebViewer(open: boolean, tab: ViewerTabKey | null): bo
 
 /* ============================== 宽度 ============================== */
 
-/** 当前窗口可用的宽度上限（夹在 MIN..MAX 之间，绝不返回小于 MIN 的值） */
-function upperWidth(innerWidth: number): number {
+/** 有效 reserve（NaN / 负数 / 未传一律视作「没给」） */
+function normalizeReserve(reserve: number | undefined | null): number | null {
+  return typeof reserve === 'number' && Number.isFinite(reserve) && reserve > 0 ? reserve : null
+}
+
+/**
+ * reserve = 中栏左缘 + 中栏最小可读宽度。
+ *
+ * 中栏左缘由调用方实测（`section.getBoundingClientRect().left`），它天然包含
+ * 活动栏 + 左栏（展开 / 折叠 / 拖宽都算在内）；取不到时回退
+ * `63 + 248（活动栏 + 左栏默认宽）+ 420`。
+ */
+export function viewerReserveWidth(middleLeft?: number | null): number {
+  const left = typeof middleLeft === 'number' && Number.isFinite(middleLeft) && middleLeft >= 0
+    ? middleLeft
+    : VIEWER_MIDDLE_LEFT_FALLBACK
+  return Math.round(left + VIEWER_MIN_MIDDLE_WIDTH)
+}
+
+/**
+ * 当前窗口可用的宽度上限。
+ *
+ * - 给了 reserve：`innerWidth - reserve`，下限 `VIEWER_TIGHT_MIN_WIDTH`（300）；
+ * - 没给 reserve：沿用旧口径 `innerWidth - VIEWER_RESERVED_WIDTH(300)`，下限仍是 360。
+ *
+ * 「下限跟着口径走」是刻意的：紧凑下限只在调用方明确知道中栏左缘时启用，
+ * 否则等于偷偷放宽了老调用方的下界。
+ */
+export function upperWidth(innerWidth: number, reserve?: number): number {
+  const safeReserve = normalizeReserve(reserve)
+  const floor = safeReserve == null ? VIEWER_MIN_WIDTH : VIEWER_TIGHT_MIN_WIDTH
   if (!Number.isFinite(innerWidth) || innerWidth <= 0) return VIEWER_MAX_WIDTH
-  // 分屏 / 小窗时 `innerWidth - 300` 可能低于 360：此时按 360 收，不要返回负数。
-  return Math.max(VIEWER_MIN_WIDTH, Math.min(VIEWER_MAX_WIDTH, innerWidth - VIEWER_RESERVED_WIDTH))
+  return Math.max(floor, Math.min(VIEWER_MAX_WIDTH, innerWidth - (safeReserve ?? VIEWER_RESERVED_WIDTH)))
 }
 
 /**
  * 宽度夹紧：坏值（非数字 / NaN / Infinity / <= 0）落回 480，再夹进视口可用区间。
+ *
+ * 下界是 `min(min, upper)` —— 窗口过窄导致上限低于 360 时，下界**跟着上限降下来**
+ * （绝不会出现 `min > max` 把夹紧反着用的老坑）；窗口正常时下界仍是 360。
  */
-export function clampViewerWidth(raw: unknown, innerWidth: number): number {
+export function clampViewerWidth(
+  raw: unknown,
+  innerWidth: number,
+  reserve?: number,
+  min: number = VIEWER_MIN_WIDTH,
+  max: number = VIEWER_MAX_WIDTH,
+): number {
+  const upper = Math.min(max, upperWidth(innerWidth, reserve))
+  const lower = Math.min(min, upper)
   const base =
     typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? raw : VIEWER_DEFAULT_WIDTH
-  return Math.round(Math.min(upperWidth(innerWidth), Math.max(VIEWER_MIN_WIDTH, base)))
+  return Math.round(Math.min(upper, Math.max(lower, base)))
 }
 
 /**
  * 首帧宽度：持久值可能来自 SETTINGS（unknown）或根本没写过。
  * 语义与 `clampViewerWidth` 一致，单独留一个名字是为了让调用点读起来是「初值」而不是「夹紧」。
  */
-export function initialViewerWidth(persisted: unknown, innerWidth: number): number {
-  return clampViewerWidth(persisted, innerWidth)
+export function initialViewerWidth(persisted: unknown, innerWidth: number, reserve?: number): number {
+  return clampViewerWidth(persisted, innerWidth, reserve)
 }
 
 /**

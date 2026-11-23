@@ -10,6 +10,8 @@
  * Locks:
  *   - pure: rail tab migration (lanes -> ask, progress/sources -> web, garbage -> web);
  *   - pure: width clamp (dead values -> 480, viewportless upper bound, innerWidth - 300);
+ *   - pure: reserve-aware upper bound (`middle-left + 420`, tight floor 300 at narrow windows,
+ *           legacy `innerWidth - 300` / 360 floor when no reserve is given);
  *   - pure: web native view must be hidden when closed or when another tab is active;
  *   - pure: tab labels + tab key guard, cross-checked against the frozen pane contracts;
  *   - static: pane kinds come from paneContracts and the tab strip is rendered by ViewerChrome,
@@ -47,6 +49,7 @@ const resizeSrc = read(`${DIR}/viewerResize.ts`)
 const pureSrc = read(`${DIR}/rightViewerPure.ts`)
 const contractsSrc = read(`${DIR}/paneContracts.ts`)
 const tabsSrc = read(`${DIR}/viewerTabs.ts`)
+const indexSrc = read('src/modules/ai-teaching/index.tsx')
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'right-viewer-shell-'))
 const loadStripped = async (src, name) => {
@@ -62,6 +65,8 @@ const tabsModel = await loadStripped(tabsSrc, 'viewerTabs')
 const {
   migrateRailTab, clampViewerWidth, initialViewerWidth, viewerWidthStyle,
   shouldHideWebViewer, tabLabel, isViewerTabKey,
+  upperWidth, viewerReserveWidth,
+  VIEWER_MIN_MIDDLE_WIDTH, VIEWER_TIGHT_MIN_WIDTH, VIEWER_MIDDLE_LEFT_FALLBACK,
 } = pure
 
 // ---------------------------------------------------------------- 1. migrateRailTab
@@ -95,6 +100,41 @@ check('persisted value path equals the clamp path',
 check('viewerWidthStyle collapses to 0 when closed',
   viewerWidthStyle(false, 480).width === '0px' && viewerWidthStyle(true, 480).width === '480px',
   `${viewerWidthStyle(false, 480).width} / ${viewerWidthStyle(true, 480).width}`)
+
+// ---------------------------------------------------------------- 2b. middle-readable reserve
+console.log('\n=== 2b. reserve-aware clamp: middle pane keeps a readable width ===')
+// 2026-11-23 缺陷：上限只按 innerWidth-300 算，900px 窗下查看器仍要 360 → 中栏只剩 ≈227px
+// （正文一行 4 个字、输入区工具条竖排）。reserve = 中栏左缘 + 420，窗口过窄时降到 300 一线。
+check('reserve helper = middle-left + 420 (fallback 63+248)',
+  viewerReserveWidth(311) === 311 + VIEWER_MIN_MIDDLE_WIDTH
+  && viewerReserveWidth(null) === VIEWER_MIDDLE_LEFT_FALLBACK + VIEWER_MIN_MIDDLE_WIDTH
+  && viewerReserveWidth(Number.NaN) === VIEWER_MIDDLE_LEFT_FALLBACK + VIEWER_MIN_MIDDLE_WIDTH,
+  `${viewerReserveWidth(311)} / ${viewerReserveWidth(null)}`)
+check('900 window + left open (reserve 311+420): upper is the 300 tight floor, not 360',
+  upperWidth(900, 311 + 420) === VIEWER_TIGHT_MIN_WIDTH,
+  String(upperWidth(900, 311 + 420)))
+check('900 window + left open: 480 clamps to 300 (not 360)',
+  clampViewerWidth(480, 900, 311 + 420) === 300, String(clampViewerWidth(480, 900, 311 + 420)))
+check('900 window + left collapsed (reserve 67+420): upper ~= 413',
+  upperWidth(900, 67 + 420) === 413 && clampViewerWidth(480, 900, 67 + 420) === 413,
+  `${upperWidth(900, 67 + 420)} / ${clampViewerWidth(480, 900, 67 + 420)}`)
+check('1280 window + left open: default 480 is left untouched',
+  upperWidth(1280, 311 + 420) === 549 && clampViewerWidth(480, 1280, 311 + 420) === 480,
+  `${upperWidth(1280, 311 + 420)} / ${clampViewerWidth(480, 1280, 311 + 420)}`)
+check('1024 window + left open: upper 293 -> 300 tight floor',
+  clampViewerWidth(480, 1024, 311 + 420) === 300, String(clampViewerWidth(480, 1024, 311 + 420)))
+check('no reserve keeps the legacy innerWidth-300 rule (360 floor)',
+  upperWidth(1600) === 960 && upperWidth(1000) === 700 && upperWidth(400) === 360
+  && clampViewerWidth(800, 1000) === 700 && clampViewerWidth(480, 400) === 360,
+  `${upperWidth(1600)} / ${upperWidth(1000)} / ${upperWidth(400)}`)
+check('drag lower bound follows upper when the window is too narrow (never min > max)',
+  clampViewerWidth(100, 900, 311 + 420) === 300
+  && clampViewerWidth(100, 700, 311 + 420) === 300
+  && clampViewerWidth(100, 1400, 311 + 420) === 360,
+  `${clampViewerWidth(100, 900, 311 + 420)} / ${clampViewerWidth(100, 700, 311 + 420)} / ${clampViewerWidth(100, 1400, 311 + 420)}`)
+check('tight floor never drops below 300 (no zero / negative width)',
+  clampViewerWidth(480, 400, 311 + 420) === 300 && clampViewerWidth(480, 0, 311 + 420) === 480,
+  String(clampViewerWidth(480, 400, 311 + 420)))
 
 // ---------------------------------------------------------------- 3. shouldHideWebViewer
 console.log('\n=== 3. shouldHideWebViewer: native view visibility ===')
@@ -206,6 +246,29 @@ check('body pollution is cleared on unmount', /return \(\) => \{[\s\S]*clearBody
 check('window resize re-clamps the width', /addEventListener\('resize'/.test(resizeSrc), '')
 check('hook returns the frozen API surface', ['width', 'setWidth', 'dragging', 'beginDrag', 'reset']
   .every((k) => new RegExp(`\\b${k}\\b`).test(resizeSrc)), '')
+
+// ---------------------------------------------------------------- 8. static: reserve wiring
+console.log('\n=== 8. static: middle-pane reserve wiring (index.tsx -> shell -> hook) ===')
+check('clamp rule lives in exactly one place (pure layer, imported by the hook)',
+  pureSrc.includes('export function clampViewerWidth') && !resizeSrc.includes('function clampWidth')
+  && resizeSrc.includes('clampViewerWidth'), 'duplicate clamp or missing import')
+check('index.tsx measures the middle section left edge',
+  indexSrc.includes('ref={attachMiddleSection}')
+  && indexSrc.includes('getBoundingClientRect()') && indexSrc.includes('rect.left'),
+  'middle section ref / measurement missing')
+check('index.tsx observes the middle section with a ResizeObserver',
+  indexSrc.includes('new ResizeObserver') && indexSrc.includes('attachMiddleSection')
+  && indexSrc.includes('middleSectionRef'), 'ResizeObserver wiring missing')
+check('index.tsx computes the reserve via the pure helper',
+  indexSrc.includes('viewerReserveWidth(') && indexSrc.includes('reserve={viewerReserve}'),
+  'reserve not computed / not passed')
+check('left rail reports width changes so the reserve is re-measured',
+  /onWidthChange=\{syncViewerReserve\}/.test(indexSrc), 'left panel onWidthChange missing')
+check('shell forwards reserve into useViewerWidth',
+  shellSrc.includes('reserve?: number') && shellSrc.includes('useViewerWidth({ open, reserve })'),
+  'reserve not forwarded')
+check('hook re-clamps when reserve changes',
+  /\[opts\.reserve, applyWidth, schedulePersist\]/.test(resizeSrc), 'reserve change effect missing')
 
 // ---------------------------------------------------------------- report
 const failed = checks.filter((c) => !c.pass)

@@ -797,15 +797,15 @@ function buildSystemPrompt(context?: AgentContextInfo): string {
   // ★ 前缀稳定红线（B2 纠正）：**这里只能放逐字稳定的内容**。
   // system + tools 是 prompt cache 前缀，一旦每轮变化（如 @ 引用骨架、感知素材）
   // 就会让整段 system + core 14 工具（≈7.7k tok）逐轮重算。
-  // @ 引用骨架与感知素材已挪到 `composeContextWithDigest` 的 extraPrefix（首条 user 消息层）。
+  // @ 引用骨架与感知素材已挪到 `composeContextWithDigest` 的 suffix（历史之后的 user 消息层）。
   // 本函数的入参 `context` 也由渲染层每轮现算，故只放「本轮正在看什么」这类
   // 短摘要 + 去重后的元数据（不含被引用笔记的正文骨架）。
   const refs = Array.isArray((context.data as Record<string, unknown> | undefined)?.attachedFiles)
     ? (context.data as Record<string, unknown>).attachedFiles as Array<{ title?: string; path?: string }>
     : []
   if (refs.length > 0) {
-    // 只列标题与路径（告诉模型「用户引用了这几篇」，正文骨架走 extraPrefix）
-    dataText = '用户为本轮对话引用了以下知识库笔记（其骨架见本轮消息开头的注入段）：\n' +
+    // 只列标题与路径（告诉模型「用户引用了这几篇」，正文骨架走本轮注入段）
+    dataText = '用户为本轮对话引用了以下知识库笔记（其骨架见本轮的注入段）：\n' +
       refs.map((r) => `— 《${String(r?.title ?? '')}》（${String(r?.path ?? '')}）`).join('\n')
   } else {
     try {
@@ -1729,8 +1729,8 @@ async function runAgentLoopInner(
     : baseSystem + schedulePersona + intelPersona + scopeInstHint + repoRulesHint + assistantConstraintHint + glossaryHint + profileHint + longTaskHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + endcourseRuleHint + teachLedgerRuleHint + wrapupRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + vaultScopeHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint + hookStartHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
-  // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
-  // 逐字稳定才命中（core 14 工具 ≈7.7k tok/轮）。B1 初版误放进 buildSystemPrompt，
+  // ★ 必须走 **user 消息层（本批起追加在历史之后）**、不能进 system：system + tools 是 prompt cache
+  // 前缀，逐字稳定才命中（core 14 工具 ≈7.7k tok/轮）。B1 初版误放进 buildSystemPrompt，
   // 引用一变前缀就失效；B2 纠正（开发负责人 2026-09-18 拍板「一并纠正」）。
   // 本段只对**本轮**有效，也因此不该沉淀成系统的长期人设。
   const rawContextRefs = Array.isArray((context?.data as Record<string, unknown> | undefined)?.attachedFiles)
@@ -1759,26 +1759,30 @@ async function runAgentLoopInner(
     })
     if (pr && pr.items.length > 0) perceptionInjection = buildPerceptionInjection({ items: pr.items, dropped: pr.dropped })
   }
-  // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放首条 user 消息层，
+  // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放 user 消息层，
   // 不放 system（它随会话内容递增而变，进 system 就是每生成一张图就把缓存前缀作废一次）
   const recentImagesHint = (!manual && source !== 'schedule' && source !== 'intel') ? buildRecentImagesHint(sessionId) : ''
   // 文本产物的「改哪一张」索引：只在教学面有用（产物工具也只在教学面可用）
   const recentArtifactsHint = source === 'aiTeaching' ? buildRecentArtifactsHint(sessionId) : ''
-  // 统一助手：缩窄作用域时把元数据清单进首条 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）。
+  // 统一助手：缩窄作用域时把元数据清单进 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）。
   // 整仓不列清单（成本高且无边界意义），只由 system 的作用域提示说明。
   const aiManifestHint = unifiedAssistant && !scopeAll
     ? buildScopeManifest(aiScope, textOfContent([...history].reverse().find((m) => m.role === 'user')?.content), false)
     : ''
-  // 首条 user 消息层注入（每轮变化的数据快照）：段内台账 / 日程 / 情报各自的数据快照 + 引用骨架 / 感知素材 ——
-  // 逐字会变的内容都只进这一层，不进 system（防打散 prompt cache 前缀）。
+  // 每轮变化的数据快照：段内台账 / 日程 / 情报 + 引用骨架 / 感知素材 / 产物索引 / 清单。
+  // 逐字会变 → 不进 system，也**不放在 messages 开头**：OpenAI 系按**前缀**自动缓存，
+  // messages[0] 每轮都变 = 整段会话前缀逐轮 miss。改由 composeContextWithDigest 的 suffix
+  // 追加在 history **之后**（贴近当前提问；前面整段前缀逐字稳定）。Anthropic 走显式
+  // cache_control（只挂 system/tools），本改动对它是纯收益侧对齐。
   // 【本段台账】放最前：它是段会话的「讲到哪」权威，其它注入都排在它之后。
   const requestInjection = [courseRequestHint, scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, recentArtifactsHint, aiManifestHint].filter(Boolean).join('\n\n')
 
-  // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
-  // 前缀必须逐字稳定，纪要变化只重建一次性前缀
+  // 纪要仍以首条 user 消息注入（它在历史之前：旧历史的摘要，位置语义不能动）；
+  // requestInjection 走第 4 参 suffix 追加在历史之后 —— 前缀（system + tools + 纪要 + 历史）
+  // 逐字稳定，才能被 OpenAI 系自动前缀缓存命中。
   let convo: AgentMessage[] = [
     { role: 'system', content: systemFull },
-    ...composeContextWithDigest(asm.digest?.text, buildHistoryWithImages(capHistoryImages(history)), requestInjection),
+    ...composeContextWithDigest(asm.digest?.text, buildHistoryWithImages(capHistoryImages(history)), undefined, requestInjection),
   ]
 
   // ---- 自动压缩预检（会话压缩 §6.1）：逼近触发线时先把旧轮折叠为纪要再发送 ----
@@ -1796,7 +1800,7 @@ async function runAgentLoopInner(
         compressed = { covered: cr.covered, digestChars: cr.digestChars ?? 0 }
         asm = assembleAgentHistory(sessionId)
         history = asm.history
-        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, buildHistoryWithImages(capHistoryImages(history)), requestInjection)]
+        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, buildHistoryWithImages(capHistoryImages(history)), undefined, requestInjection)]
       }
     }
   }

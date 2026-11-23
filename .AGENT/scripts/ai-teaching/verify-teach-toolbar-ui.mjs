@@ -14,6 +14,10 @@
  *      `PanelRightOpen` + `aria-expanded={false}` + `aria-label="展开工件分栏"`（2026-11-23 可达性修复：
  *      收起后页签条整棵 display:none，原来那枚展开图标永远看不见）；顶栏仍不恢复 chip；
  *      查看器打开时该按钮跟随查看器左缘（transform 让位），Toast 文案指向的就是它。
+ *   6. 抽屉贴底跟随（2026-11-23 竞态修复）：钉底循环**每帧复检** `stickRef`，用户 wheel / pointerdown
+ *      立即打断（`cancelTrayPin`）；钉底期间 `onConvScroll` 跳过贴底重算（否则程序化滚到底的几何
+ *      恒为贴底，会把用户上翻重新钉回 true）；`trayAnimating` 关窗与钉底窗口共用
+ *      `TRAY_ANIM_SETTLE_MS`，不再各写 +40 / +80。
  *
  * 2026-11-22 随死代码清理更新：`CourseProgress.tsx` / `RequirementsDrawer.tsx` 零 importer，文件已删除；
  * 原先「文件仍在（留作结课报告 / 本模块不再用）」的两条正向断言改为负向断言。
@@ -101,6 +105,44 @@ check('reduced-motion 关闭抓手过渡与脉冲',
 check('思考四档带 aria-pressed', count(tray, /aria-pressed=\{convoEffort === e\}/g) === 1)
 check('引用按钮带 aria-pressed', count(tray, /aria-pressed=\{quotesOpen && quotes\.length > 0\}/g) === 1)
 check('模型仍在最右（flex-1 占位后）', /<span className="flex-1" \/>[\s\S]{0,400}openModelMenu/.test(tray))
+
+/* ─────────── 2b. 抽屉贴底跟随：每帧复检 + 用户输入打断（2026-11-23 竞态修复） ─────────── */
+console.log('\n[贴底跟随] 钉底循环每帧复检；wheel / pointerdown 打断；时间窗同源')
+const cancelFn = slice(mod, 'const cancelTrayPin = useCallback', 'const pinTrayBottom = useCallback', 'cancel-pin')
+const pin = slice(mod, 'const pinTrayBottom = useCallback', '/** 收起瞬间的一次性加宽脉冲', 'pin-tray')
+const conv = slice(mod, 'const onConvScroll = useCallback', 'const jumpToTurn = useCallback', 'conv-scroll')
+const trayToggle = slice(mod, 'const toggleTray = useCallback', '/** 条目9', 'toggle-tray')
+const scrollTag = (mod.match(/<div ref=\{scrollRef\}[^>]*>/) ?? [''])[0]
+check('取消函数片段可定位', cancelFn.length > 150, `len=${cancelFn.length}`)
+check('取消函数：cancelAnimationFrame + 置 0 + stickRef=false + 浮标出现',
+  /cancelAnimationFrame\(trayPinRaf\.current\)/.test(cancelFn)
+  && /trayPinRaf\.current = 0/.test(cancelFn)
+  && /stickRef\.current = false/.test(cancelFn)
+  && /setJumpBottom\(true\)/.test(cancelFn))
+check('滚动容器挂着 onWheel / onPointerDown = cancelTrayPin',
+  scrollTag.length > 100 && scrollTag.includes('onWheel={cancelTrayPin}') && scrollTag.includes('onPointerDown={cancelTrayPin}'))
+check('打断不阻止默认行为（无 preventDefault）',
+  !scrollTag.includes('preventDefault') && !cancelFn.includes('preventDefault'))
+check('pin 片段可定位', pin.length > 200, `len=${pin.length}`)
+const stepAt = pin.indexOf('const step = (): void => {')
+const recheckAt = pin.indexOf('if (!stickRef.current) { trayPinRaf.current = 0; return }')
+const writeAt = pin.indexOf('c.scrollTop = c.scrollHeight')
+check('step 每帧复查 stickRef（且在写 scrollTop 之前）',
+  stepAt >= 0 && recheckAt > stepAt && writeAt > recheckAt, `step@${stepAt} / recheck@${recheckAt} / write@${writeAt}`)
+check('onConvScroll 在钉底期间跳过贴底判定（trayPinRaf 守卫）',
+  /if \(!trayPinRaf\.current\) \{/.test(conv) && conv.indexOf('if (!trayPinRaf.current)') < conv.indexOf('stickRef.current = near'))
+check('位置记忆 / 轮次测量仍在守卫之外',
+  conv.indexOf('convScroll.current.set(activeIdRef.current, c.scrollTop)') < conv.indexOf('if (!trayPinRaf.current)')
+  && conv.indexOf('remeasureTops()') > conv.indexOf('if (!trayPinRaf.current)'))
+check('两个时间窗同源：TRAY_ANIM_SETTLE_MS = COMPOSER_TRAY_ANIM_MS + 80',
+  mod.includes('const TRAY_ANIM_SETTLE_MS = COMPOSER_TRAY_ANIM_MS + 80'))
+check('贴底窗口用 TRAY_ANIM_SETTLE_MS', pin.includes('performance.now() + TRAY_ANIM_SETTLE_MS'))
+check('trayAnimating 关窗也用它', trayToggle.includes('}, TRAY_ANIM_SETTLE_MS)'))
+check('负向：不再有 +40 / +80 两个不同字面',
+  count(mod, /COMPOSER_TRAY_ANIM_MS \+ 40/g) === 0 && count(mod, /COMPOSER_TRAY_ANIM_MS \+ 80/g) === 1,
+  `40×${count(mod, /COMPOSER_TRAY_ANIM_MS \+ 40/g)} / 80×${count(mod, /COMPOSER_TRAY_ANIM_MS \+ 80/g)}`)
+check('卸载 cleanup 仍 cancel 钉底 raf',
+  /if \(trayPinRaf\.current\) cancelAnimationFrame\(trayPinRaf\.current\)\n  \}, \[\]\)/.test(mod))
 
 /* ───────────────────────── 3. 段条 / 行内要求条：零残留 ───────────────────────── */
 console.log('\n[删除] 段条 / 复习条「要求」/ 行内要求条 / 560px 模态 / 要求抽屉')

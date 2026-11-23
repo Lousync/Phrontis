@@ -227,7 +227,7 @@ check('旧字段 constraintsRaw 仍是四层原始正文', block.includes('const
 console.log('\n=== 7b. 台账分层：不进 system 分区（同段内 systemFull 逐字稳定） ===')
 const requestInjectionLine = (agentSrc.match(/const requestInjection = \[[^\]]*\]/) || [''])[0]
 const systemFullBlock = (agentSrc.match(/const systemFull = manual[\s\S]*?\n\n/) || [''])[0]
-check('★ 台账经 requestInjection（首条 user 消息层）注入', requestInjectionLine.includes('courseRequestHint'), requestInjectionLine.slice(0, 160))
+check('★ 台账经 requestInjection（历史之后的 user 消息层）注入', requestInjectionLine.includes('courseRequestHint'), requestInjectionLine.slice(0, 160))
 check('★ systemFull 拼接不含台账块（负向，防打散 prompt cache 前缀）',
   systemFullBlock !== '' && !systemFullBlock.includes('courseRequestHint') && !systemFullBlock.includes('台账'),
   systemFullBlock.slice(-120))
@@ -273,6 +273,82 @@ check('★ 同一段内连续两轮 system 段逐字相同（进度句与台账�
 check('★ 同一段内连续两轮请求级台账块随进度变化（不是冻结）',
   reqBlockRound1 !== reqBlockRound2 && reqBlockRound2.includes('已覆盖：资源分配图'), JSON.stringify(reqBlockRound2))
 check('无围栏轮次请求级注入为空（零成本）', requestBlockOf([]) === '', '')
+
+console.log('\n=== 7c. 注入位置：每轮变化段在历史之后（OpenAI 系自动前缀缓存） ===')
+// 压缩核心纯函数（只 import type，strip 后零依赖）
+const { mod: compressCore, tmpDir: compressTmp } = await loadStripped(
+  'electron/lib/agentCompressCore.ts',
+  'agentCompressCore.mjs',
+)
+const { composeContextWithDigest, DIGEST_PREFIX } = compressCore
+const HIST = [
+  { role: 'user', content: '第一问' },
+  { role: 'assistant', content: '第一答' },
+  { role: 'user', content: '当前提问' },
+]
+const DIGEST = '旧纪要正文'
+const SUFFIX = '【本轮注入】台账 / 日程 / 情报'
+
+// 1) 只有 suffix：[history..., suffix]，suffix 在最后
+const onlySuffix = composeContextWithDigest(null, HIST, null, SUFFIX)
+check('★ 只有 suffix 时追加在 history 之后（末条即注入段）',
+  onlySuffix.length === HIST.length + 1
+  && JSON.stringify(onlySuffix.slice(0, HIST.length)) === JSON.stringify(HIST)
+  && onlySuffix[onlySuffix.length - 1].role === 'user'
+  && onlySuffix[onlySuffix.length - 1].content === SUFFIX,
+  JSON.stringify(onlySuffix.map((m) => m.role + ':' + String(m.content).slice(0, 8))))
+
+// 2) 只有 digest：digest 在 history 之前（旧历史摘要的位置语义不能动）
+const onlyDigest = composeContextWithDigest(DIGEST, HIST)
+check('★ 只有 digest 时仍在 history 之前（首条 = 纪要）',
+  onlyDigest.length === HIST.length + 1
+  && onlyDigest[0].content === DIGEST_PREFIX + DIGEST
+  && JSON.stringify(onlyDigest.slice(1)) === JSON.stringify(HIST),
+  String(onlyDigest[0].content).slice(0, 20))
+
+// 3) digest + suffix：[digest, ...history, suffix]
+const both = composeContextWithDigest(DIGEST, HIST, null, SUFFIX)
+check('★ digest + suffix：[纪要, ...历史, 注入段]',
+  both.length === HIST.length + 2
+  && both[0].content === DIGEST_PREFIX + DIGEST
+  && JSON.stringify(both.slice(1, 1 + HIST.length)) === JSON.stringify(HIST)
+  && both[both.length - 1].content === SUFFIX,
+  JSON.stringify(both.map((m) => m.role + ':' + String(m.content).slice(0, 6))))
+
+// 3b) extraPrefix 仍保留「历史之前」的原语义（本批不改它的位置）
+const withExtra = composeContextWithDigest(null, HIST, '【前段】', SUFFIX)
+check('extraPrefix 仍在 history 之前，suffix 仍在最后',
+  withExtra.length === HIST.length + 2
+  && withExtra[0].content === '【前段】'
+  && JSON.stringify(withExtra.slice(1, 1 + HIST.length)) === JSON.stringify(HIST)
+  && withExtra[withExtra.length - 1].content === SUFFIX,
+  JSON.stringify(withExtra.map((m) => m.role + ':' + String(m.content).slice(0, 6))))
+
+// 4) 全空：与 history 逐项相同（不新增消息）
+const plain = composeContextWithDigest(null, HIST, null, null)
+check('★ 全空（digest / extraPrefix / suffix 都空）不新增消息',
+  plain.length === HIST.length && JSON.stringify(plain) === JSON.stringify(HIST), JSON.stringify(plain.length))
+check('全空等价的空串 / undefined 变体同样不新增消息',
+  composeContextWithDigest(null, HIST, '', '').length === HIST.length
+  && composeContextWithDigest(undefined, HIST, undefined, undefined).length === HIST.length, '')
+
+// 静态：两个调用点（首次装配 + 压缩后重装配）都把 requestInjection 放在第 4 个实参
+const CALL_4TH = /composeContextWithDigest\(asm\.digest\?\.text, buildHistoryWithImages\(capHistoryImages\(history\)\), undefined, requestInjection\)/g
+const callSites4 = (agentSrc.match(CALL_4TH) || []).length
+check('★ agentService 的两处调用点都把 requestInjection 传给第 4 参（第 3 参 undefined）',
+  callSites4 === 2, `匹配 ${callSites4} 处`)
+
+// 负向：不得再把 requestInjection 当第 3 参（extraPrefix = 历史之前）
+const prefixForm = /composeContextWithDigest\(asm\.digest\?\.text, buildHistoryWithImages\(capHistoryImages\(history\)\), requestInjection\)/g
+check('★ 负向：requestInjection 不再作为第 3 参（否则每轮打散会话前缀）',
+  (agentSrc.match(prefixForm) || []).length === 0, '')
+
+// 结构：suffix 只进 tail（在 history 之后），head 里没有 suffix 的痕迹
+const coreSrc = fs.readFileSync(path.join(ROOT, 'electron/lib/agentCompressCore.ts'), 'utf8')
+check('composeContextWithDigest 签名含第 4 参 suffix',
+  /suffix\?: string \| null/.test(coreSrc), '')
+check('合成顺序为 [...head, ...history, ...tail]',
+  /return \[\.\.\.head, \.\.\.history, \.\.\.tail\]/.test(coreSrc), '')
 
 console.log('\n=== 8. 双端一致性：src/lib/contextUsagePure.ts（渲染层镜像） ===')
 const UI_TRIO = (list) => JSON.stringify(list.map((c) => [c.key, c.label, c.field]))
@@ -357,4 +433,5 @@ console.log(`\n${failed.length === 0 ? 'PASS' : 'FAIL'} —— ${checks.length -
 try { fs.rmSync(usageTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
 try { fs.rmSync(usageUiTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
 try { fs.rmSync(ledgerTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
+try { fs.rmSync(compressTmp, { recursive: true, force: true }) } catch { /* 临时目录清理失败不影响结论 */ }
 process.exit(failed.length === 0 ? 0 : 1)

@@ -1231,12 +1231,20 @@ export function registerBuiltinTools(): void {
     module: 'knowledge',
   }, (args, ctx) => {
     const title = str(args.title).trim()
-    const contentMd = str(args.contentMd)
+    let contentMd = str(args.contentMd)
     if (!title) throw new Error('标题不能为空')
+    // 题单质量门（2026-11-23）：与 vault.write / write-batch / edit 同一道门。
+    // 位置必须在 stageToolOp **之前**：否则用户预览 / 确认的是未校正的正文，且不合格要等到
+    // 用户点「应用」才炸。校正后的 contentMd 要写回暂存参数，保证「预览 = 最终落盘」。
+    if (ctx?.source === 'aiTeaching' && hasQuizFence(contentMd)) {
+      const gated = gateQuizContentForWrite(String(ctx.sessionId ?? ''), title, contentMd, getSettingReader())
+      if (!gated.ok) throw new Error(gated.error)
+      contentMd = gated.content
+    }
     // 暂存前就解析目标：分类 / 空目录 / 空间根。解析失败当场回给模型改参数，
     // 不再拖到用户点「应用」才炸（v3.15.2）。
     const target = resolveKnowledgeTarget(args)
-    const stagedArgs = withResolvedTarget(args, target)
+    const stagedArgs = withResolvedTarget({ ...args, contentMd }, target)
     const staged = stageToolOp(ctx, {
       tool: 'builtin.knowledge.create-page',
       module: 'knowledge',
@@ -2898,6 +2906,8 @@ export function registerBuiltinTools(): void {
     let content = str(args.content)
     // 题单质量门（2026-11-23）：AI 教学场景下含 ```quiz 围栏的 .md 与其他写入口过同一道门。
     // 不是拒绝：strict 不合格会把重写提示抛给模型；warn 只收集告警；off 档 gate 逐字直通。
+    // 批量写 / 局部编辑（vault.write-batch / vault.edit）同样过这道门，避免只改一处留下旁路——
+    // 这里是对「含 quiz 围栏的 .md」写盘的共同口径，新增 .md 写入口也必须接上。
     if (ctx?.source === 'aiTeaching' && rel.toLowerCase().endsWith('.md') && hasQuizFence(content)) {
       const gated = gateQuizContentForWrite(String(ctx.sessionId ?? ''), baseNameOf(rel).replace(/\.md$/i, ''), content, getSettingReader())
       if (!gated.ok) throw new Error(gated.error)
@@ -3020,9 +3030,16 @@ export function registerBuiltinTools(): void {
       if (!rel) throw new Error(`第 ${i + 1} 条路径非法`)
       if (seen.has(rel)) throw new Error(`重复路径：${rel}`)
       seen.add(rel)
-      const content = args.ensureId === true && rel.toLowerCase().endsWith('.md')
+      let content = args.ensureId === true && rel.toLowerCase().endsWith('.md')
         ? ensureKnowledgeDocFrontmatter(baseNameOf(rel).replace(/\.md$/i, ''), str(item?.content))
         : str(item?.content)
+      // 题单质量门：与 vault.write 同一口径。校验在 writes.push 之前完成 → 任一条不合格整批中止，
+      // 不会出现「前半批进了暂存、后半批被拦」的中间态。
+      if (ctx?.source === 'aiTeaching' && rel.toLowerCase().endsWith('.md') && hasQuizFence(content)) {
+        const gated = gateQuizContentForWrite(String(ctx.sessionId ?? ''), baseNameOf(rel).replace(/\.md$/i, ''), content, getSettingReader())
+        if (!gated.ok) throw new Error(`第 ${i + 1} 条：${gated.error}`)
+        content = gated.content
+      }
       if (content.includes('\u0000')) throw new Error(`第 ${i + 1} 条内容含 NUL 字符，拒绝写入：${rel}`)
       assertCanWrite(rel, ctx)
       const abs = resolveSafe(root, rel)
@@ -3150,6 +3167,13 @@ export function registerBuiltinTools(): void {
       if (first < 0) throw new Error(`未找到待替换片段（截取前 60 字符）: ${oldText.slice(0, 60)}… 可先 vault.read 确认当前内容`)
       if (text.indexOf(oldText, first + oldText.length) >= 0) throw new Error('待替换片段在文件中出现多处，请提供更长更精确的 oldText（本工具一次只替换一处）')
       next = text.slice(0, first) + newText + text.slice(first + oldText.length)
+    }
+    // 题单质量门：看的是替换 / 追加后的**全文**（不是 newText 片段），与 vault.write 同一口径；
+    // append=true 往题单页末尾补一道题同样要过。整段在 commitOrStage 之前 → 不合格不落盘。
+    if (ctx?.source === 'aiTeaching' && rel.toLowerCase().endsWith('.md') && hasQuizFence(next)) {
+      const gated = gateQuizContentForWrite(String(ctx.sessionId ?? ''), baseNameOf(rel).replace(/\.md$/i, ''), next, getSettingReader())
+      if (!gated.ok) throw new Error(gated.error)
+      next = gated.content
     }
     const codec: FileCodecMeta = { encoding: dec.encoding, bom: dec.bom, eol: dec.eol, mode: st.mode & 0o777 }
     return commitOrStage(ctx, () => ({ kind: 'edit', relPath: rel, prev: text, next, codec }), () => {
@@ -4332,6 +4356,11 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
     module: 'quiz',
   }, (args, ctx) => {
+    // ★ 题单质量门**有意豁免**（2026-11-23，不是漏接）：本页正文是从错题本快照
+    //   **机械拼装**出来的（快照 → quiz 围栏），不是模型自由生成。若在这里严格过门，
+    //   一条历史坏快照（例如 answer 不在 options 里）会让整次组卷硬失败 —— 而修它的
+    //   正确位置是快照侧（答题落库时）/ 错题本数据本身，不该在组卷时把整卷炸掉。
+    //   故：gen-paper 不过 gateQuizContentForWrite；新增**模型写正文**的 .md 入口仍需接门。
     // 暂存前解析目标（同 knowledge.create-page）：失败当场回给模型，不拖到应用期
     const target = resolveKnowledgeTarget(args)
     const stagedArgs = withResolvedTarget(args, target)

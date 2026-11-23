@@ -119,9 +119,42 @@ export function isNotesFileKind(v: unknown): v is NotesFileKind {
 
 /* ============================== 小工具 ============================== */
 
-/** 路径比较键：统一分隔符 + 小写（Windows 文件系统大小写不敏感，同文件不该开两个页签） */
-export function pathKey(relPath: unknown): string {
-  return String(relPath ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').toLowerCase()
+/**
+ * 路径比较键：统一分隔符（`\` → `/`）+ 去首尾斜杠 + **按平台决定是否折大小写**。
+ *
+ * 为什么平台相关：Windows（与未来的 macOS）文件系统大小写不敏感，`A.md` / `a.md` 是同一个文件，
+ * 同一个文件开两个页签会让两个实例的 mtime 基线互相踩；Linux 上它们是**两个真实文件**，
+ * 无条件小写会把两个文件塌成一个页签，第二页签开不出来、`activeId` 只能回退。
+ *
+ * 为什么不顶层 `import { IS_LINUX } from '../../lib/platform'`：本文件会被契约脚本 strip 后
+ * **单独装载到临时目录**（`verify-right-viewer-shell.mjs` 不解析相对 import），顶层 import 会让
+ * 那份副本 `ERR_MODULE_NOT_FOUND`。故这里惰性求值，判据与 `src/lib/platform.ts` 的 `IS_LINUX`
+ * 完全一致（同一个 `window.api.platform` 字段 + 同一个 typeof 守卫）；Node 契约脚本无 window，
+ * 补 `process.platform` 兜底 —— 否则脚本里平台判据恒为「非 Linux」，Linux 行为无从断言。
+ */
+let defaultCaseInsensitive: boolean | null = null
+
+function platformCaseInsensitive(): boolean {
+  if (defaultCaseInsensitive !== null) return defaultCaseInsensitive
+  let platform = ''
+  if (typeof window !== 'undefined' && window.api && typeof window.api.platform === 'string') {
+    platform = window.api.platform
+  } else {
+    const proc = (globalThis as { process?: { platform?: unknown } }).process
+    platform = proc && typeof proc.platform === 'string' ? proc.platform : ''
+  }
+  defaultCaseInsensitive = platform !== 'linux'
+  return defaultCaseInsensitive
+}
+
+/**
+ * `opts.caseInsensitive` 省略时随平台（Linux 敏感，其它不敏感）。
+ * 分隔符归一与首尾斜杠剥离两种模式都保留，唯一变化是大小写。
+ */
+export function pathKey(relPath: unknown, opts?: { caseInsensitive?: boolean }): string {
+  const key = String(relPath ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  const caseInsensitive = opts?.caseInsensitive ?? platformCaseInsensitive()
+  return caseInsensitive ? key.toLowerCase() : key
 }
 
 /** 文件名（去目录）；无扩展名原样返回 */
@@ -272,19 +305,27 @@ export function tabById(tabs: readonly ViewerTab[], id: string | null | undefine
   return tabs.find((t) => t.id === id) ?? null
 }
 
-/** 同文件去重（笔记 / 画像 / 要求 一律按 relPath） */
-export function findNotesTab(tabs: readonly ViewerTab[], relPath: unknown): NotesViewerTab | null {
-  const key = pathKey(relPath)
+/** 同文件去重（笔记 / 画像 / 要求 一律按 relPath）；`opts` 只给契约脚本显式指定大小写口径 */
+export function findNotesTab(
+  tabs: readonly ViewerTab[],
+  relPath: unknown,
+  opts?: { caseInsensitive?: boolean },
+): NotesViewerTab | null {
+  const key = pathKey(relPath, opts)
   if (!key) return null
-  for (const t of tabs) if (t.type === 'notes' && pathKey(t.relPath) === key) return t
+  for (const t of tabs) if (t.type === 'notes' && pathKey(t.relPath, opts) === key) return t
   return null
 }
 
-/** 同书去重（不同书可多开） */
-export function findBooksTabByBook(tabs: readonly ViewerTab[], relPath: unknown): BooksViewerTab | null {
-  const key = pathKey(relPath)
+/** 同书去重（不同书可多开）；`opts` 同 `findNotesTab` */
+export function findBooksTabByBook(
+  tabs: readonly ViewerTab[],
+  relPath: unknown,
+  opts?: { caseInsensitive?: boolean },
+): BooksViewerTab | null {
+  const key = pathKey(relPath, opts)
   if (!key) return null
-  for (const t of tabs) if (t.type === 'books' && t.relPath && pathKey(t.relPath) === key) return t
+  for (const t of tabs) if (t.type === 'books' && t.relPath && pathKey(t.relPath, opts) === key) return t
   return null
 }
 
@@ -533,9 +574,12 @@ function str(v: unknown): string {
 /**
  * 反序列化（宽容）：坏 JSON / 坏项 / 未知 type / 重复 id / 重复文件一律丢弃，绝不抛。
  * 笔记与电子书额外做**同文件去重**：一个文件只允许一个页签，否则两个实例的
- * mtime 基线会互相踩（PLAN §7.2 / §7.3）。
+ * mtime 基线会互相踩（PLAN §7.2 / §7.3）。`opts` 只给契约脚本显式指定大小写口径。
  */
-export function parseViewerState(raw: unknown): ViewerStateV2 | null {
+export function parseViewerState(
+  raw: unknown,
+  opts?: { caseInsensitive?: boolean },
+): ViewerStateV2 | null {
   const obj = asRecord(raw)
   if (!obj || obj.v !== 2 || !Array.isArray(obj.tabs)) return null
   const ids = new Set<string>()
@@ -561,7 +605,7 @@ export function parseViewerState(raw: unknown): ViewerStateV2 | null {
     }
     if (r.type === 'notes') {
       const relPath = str(r.relPath).replace(/\\/g, '/')
-      const key = pathKey(relPath)
+      const key = pathKey(relPath, opts)
       if (key && noteKeys.has(key)) continue
       if (key) noteKeys.add(key)
       const fileKind = isNotesFileKind(r.fileKind) ? r.fileKind : inferNotesFileKind(relPath)
@@ -575,7 +619,7 @@ export function parseViewerState(raw: unknown): ViewerStateV2 | null {
     }
     if (r.type === 'books') {
       const relPath = str(r.relPath).replace(/\\/g, '/') || null
-      const key = relPath ? pathKey(relPath) : ''
+      const key = relPath ? pathKey(relPath, opts) : ''
       if (key && bookKeys.has(key)) continue
       if (key) bookKeys.add(key)
       const name = str(r.name)

@@ -8,6 +8,8 @@
  * 两类断言：
  *   A. 纯函数真实实现执行 —— strip 类型后 import `viewerTabs.ts`（零运行时依赖），
  *      验证创建 / 去重 / 关闭邻位 / 保活采样 / 溢出采样 / 序列化 / 宽容解析 / 旧键迁移 / 不可变。
+ *      `pathKey` 的大小写口径按平台（Linux 敏感 / Windows 不敏感）；契约显式传
+ *      `{ caseInsensitive: true|false }` 两种模式都断言，另有一条钉住缺省值随平台。
  *   B. 渲染层接线静态断言 —— 防「加了页签却没接持久化 / 没做去重 / 草稿落了库」这类
  *      静默失配（编译不报错，只有用户能发现）。
  *
@@ -101,7 +103,32 @@ check('empty first question falls back to a plain title', firstQuestionTitle('  
 
 /* ---------------------------------------------------------------- 2. 小工具 */
 console.log('\n=== 2. path helpers ===')
-check('pathKey normalises slashes and case', pathKey('AI教学\\X\\A.MD') === 'ai教学/x/a.md', pathKey('AI教学\\X\\A.MD'))
+check('pathKey (case-insensitive) normalises slashes and case',
+  pathKey('AI教学\\X\\A.MD', { caseInsensitive: true }) === 'ai教学/x/a.md',
+  pathKey('AI教学\\X\\A.MD', { caseInsensitive: true }))
+check('pathKey case-insensitive mode folds A/B.MD == a\\b.md == a/b.md/',
+  pathKey('A/B.MD', { caseInsensitive: true }) === pathKey('a\\b.md', { caseInsensitive: true })
+  && pathKey('a\\b.md', { caseInsensitive: true }) === pathKey('a/b.md/', { caseInsensitive: true }))
+check('pathKey case-insensitive mode strips leading/trailing slashes',
+  pathKey('/a/b.md/', { caseInsensitive: true }) === 'a/b.md')
+check('pathKey case-sensitive mode keeps A/B.md apart from a/b.md',
+  pathKey('A/B.md', { caseInsensitive: false }) !== pathKey('a/b.md', { caseInsensitive: false }))
+check('pathKey case-sensitive mode still folds slashes and trailing slashes',
+  pathKey('a\\b.md', { caseInsensitive: false }) === pathKey('a/b.md/', { caseInsensitive: false })
+  && pathKey('a/b.md/', { caseInsensitive: false }) === 'a/b.md',
+  pathKey('a/b.md/', { caseInsensitive: false }))
+check('pathKey case-sensitive mode keeps a real case difference in the directory',
+  pathKey('Notes/A.md', { caseInsensitive: false }) !== pathKey('notes/a.md', { caseInsensitive: false }))
+// 缺省口径随平台：Linux 大小写敏感（两个真实文件），Windows / macOS 不敏感（同一个文件）。
+// 本断言直接钉住缺省行为，防止有人把 pathKey 改回「无条件小写」。
+const hostIsLinux = process.platform === 'linux'
+check(`pathKey default follows the host platform (${process.platform}: ${hostIsLinux ? 'case-sensitive' : 'case-insensitive'})`,
+  hostIsLinux
+    ? pathKey('A.md') !== pathKey('a.md')
+    : pathKey('A.md') === pathKey('a.md'),
+  JSON.stringify([pathKey('A.md'), pathKey('a.md')]))
+check('pathKey default never depends on separator style or trailing slashes',
+  pathKey('a\\b.md') === pathKey('a/b.md/'))
 check('baseName keeps the extension', baseName('a/b/c.md') === 'c.md')
 check('stemOf drops the extension but keeps dotfiles', stemOf('a/b.md') === 'b' && stemOf('a/.keep') === '.keep')
 check('clipTitle collapses whitespace and truncates',
@@ -115,10 +142,18 @@ check('inferNotesFileKind recognises the two session docs',
 console.log('\n=== 3. dedupe lookups ===')
 const pool = [web, note, makeBooksTab('t7', { relPath: 'books/a.epub' }), laneTab, draftTab]
 const wholeDraftTab = makeAskTab('t9', { draft: draftOf() })
-check('same note file hits regardless of slash style / case',
-  findNotesTab(pool, 'AI教学/X/产物/笔记.MD')?.id === 't2')
+check('same note file hits regardless of slash style / case (case-insensitive lookup)',
+  findNotesTab(pool, 'AI教学/X/产物/笔记.MD', { caseInsensitive: true })?.id === 't2')
+check('NEGATIVE: case-sensitive findNotesTab does not hit a differently-cased path',
+  findNotesTab(pool, 'ai教学/x/产物/笔记.MD', { caseInsensitive: false }) === null)
+check('case-sensitive findNotesTab still hits the same path with other slashes',
+  findNotesTab(pool, 'AI教学\\x\\产物\\笔记.md', { caseInsensitive: false })?.id === 't2')
 check('missing note returns null', findNotesTab(pool, 'nope.md') === null)
-check('same book hits by relPath', findBooksTabByBook(pool, 'books/A.EPUB')?.id === 't7')
+check('same book hits by relPath (case-insensitive lookup)',
+  findBooksTabByBook(pool, 'books/A.EPUB', { caseInsensitive: true })?.id === 't7')
+check('NEGATIVE: case-sensitive findBooksTabByBook requires an exact-case relPath',
+  findBooksTabByBook(pool, 'books/A.EPUB', { caseInsensitive: false }) === null
+  && findBooksTabByBook(pool, 'books/a.epub', { caseInsensitive: false })?.id === 't7')
 check('shelf tab is not a book hit', findBooksTabByBook(pool, '') === null)
 check('lane tab found by laneId', findAskTabByLane(pool, 'lane-1')?.id === 't5')
 check('draft is never found by laneId', findAskTabByLane(pool, '') === null)
@@ -252,7 +287,7 @@ const tolerant = parseViewerState({
     { id: 'k7', type: 'books', relPath: 'b.pdf' },
     { id: 'k8', type: 'books', relPath: 'B.PDF' },
   ],
-})
+}, { caseInsensitive: true })
 check('parser drops junk without throwing', tolerant.tabs.length === 3, String(tolerant.tabs.length))
 check('NEGATIVE: parser drops non-http(s) web tabs by id',
   !tolerant.tabs.some((t) => t.id === 'k2') && tolerant.tabs.some((t) => t.id === 'k3'))
@@ -266,6 +301,28 @@ check('parser falls back to the first tab when activeId is gone',
 const emptyParsed = parseViewerState({ v: 2, tabs: [], activeId: 'x' })
 check('empty tab list parses to null active (zero-tab state is legitimate)',
   emptyParsed.tabs.length === 0 && emptyParsed.activeId === null)
+
+// Linux 口径：`Notes/A.md` 与 `notes/a.md` 是两个真实文件，恢复时两个页签都必须留下
+const twoCaseNotes = {
+  v: 2,
+  activeId: 'cs2',
+  tabs: [
+    { id: 'cs1', type: 'notes', relPath: 'Notes/A.md' },
+    { id: 'cs2', type: 'notes', relPath: 'notes/a.md' },
+  ],
+}
+const sensitiveParsed = parseViewerState(twoCaseNotes, { caseInsensitive: false })
+check('case-sensitive parse keeps two note tabs that differ only in case',
+  sensitiveParsed.tabs.length === 2, String(sensitiveParsed.tabs.length))
+check('case-sensitive parse keeps the second tab active',
+  sensitiveParsed.activeId === 'cs2', String(sensitiveParsed.activeId))
+check('case-sensitive parse keeps both relPaths untouched',
+  sensitiveParsed.tabs.map((t) => t.relPath).join('|') === 'Notes/A.md|notes/a.md',
+  sensitiveParsed.tabs.map((t) => t.relPath).join('|'))
+const insensitiveParsed = parseViewerState(twoCaseNotes, { caseInsensitive: true })
+check('case-insensitive parse still dedupes the same note file',
+  insensitiveParsed.tabs.length === 1 && insensitiveParsed.activeId === 'cs1',
+  `${insensitiveParsed.tabs.length} / ${insensitiveParsed.activeId}`)
 
 /* ---------------------------------------------------------------- 8. 迁移 */
 console.log('\n=== 8. legacy migration ===')
@@ -387,6 +444,49 @@ check('new note is created by the shell helper',
 check('a note tab reports its real relPath after opening', /relCbRef\.current\?\.\(target\)/.test(notesPane))
 check('editor is still lazy-loaded', /lazy\(\s*\(\)\s*=>/.test(notesPane) && /<Suspense/.test(notesPane))
 check('no alert() / confirm() in the notes pane', !/\balert\s*\(/.test(notesPane) && !/\bconfirm\s*\(/.test(notesPane))
+
+console.log('\n=== 13. closing tab revival (static) ===')
+/**
+ * 缺陷背景：关页签有 190ms 视觉留拍，这期间页签仍在 `tabs` 里、仍能被 findXxxTab 命中，
+ * 但 `liveIds` 已把它过滤掉。若此时「激活」它（点页签 / openNote / openWeb / 外部请求），
+ * 结果是内容区空白且到点被定时器删掉 —— 用户看到「点了没反应 + 页签闪一下消失」。
+ * 修法是**复活**而不是复用：撤定时器 + 从 closingIds 摘出，再激活。
+ */
+const sliceBetween = (src, startMark, endMark) => {
+  const i = src.indexOf(startMark)
+  if (i < 0) return ''
+  const j = src.indexOf(endMark, i + startMark.length)
+  return j < 0 ? src.slice(i) : src.slice(i, j)
+}
+
+const reviveBody = sliceBetween(shell, 'const reviveClosing = useCallback(', 'const selectTab = useCallback(')
+const selectBody = sliceBetween(shell, 'const selectTab = useCallback(', '/** 请某个页签「再打开一次」')
+const closeBody = sliceBetween(shell, 'const closeTab = useCallback(', "/* ------------------------------------------------------------ 外部请求 */")
+const bookBody = sliceBetween(shell, 'const openBook = useCallback(', '/** 打开 / 聚焦已落库的旁问')
+
+check('shell defines reviveClosing as a stable useCallback', reviveBody.length > 0)
+check('reviveClosing cancels the pending removal timer',
+  /clearTimeout\(t\)/.test(reviveBody) && /closeTimersRef\.current\.delete\(id\)/.test(reviveBody))
+check('reviveClosing drops the id from closingIds via a filter',
+  /setClosingIds\(\(prev\) => \(prev\.includes\(id\) \? prev\.filter\(\(x\) => x !== id\) : prev\)\)/.test(reviveBody))
+check('reviveClosing tests the timer id against undefined (0 is a valid timer id)',
+  /const t = closeTimersRef\.current\.get\(id\)/.test(reviveBody)
+  && /if \(t !== undefined\)/.test(reviveBody)
+  && !/if \(t\)\s*\{/.test(reviveBody))
+check('selectTab revives the tab before activating it',
+  selectBody.indexOf('reviveClosing(id)') >= 0
+  && selectBody.indexOf('reviveClosing(id)') < selectBody.indexOf('activateTab(')
+  && selectBody.indexOf('reviveClosing(id)') < selectBody.indexOf('apply('))
+check('NEGATIVE: closeTab never goes through selectTab (would revive the tab it is closing)',
+  closeBody.length > 0 && !/selectTab\(/.test(closeBody) && !/reviveClosing\(/.test(closeBody))
+check('closeTab keeps the post-flush existence guard and the 190ms leave-one-frame animation',
+  /if \(!tabById\(tabsRef\.current, id\)\) return/.test(closeBody) && /}, 190\)/.test(closeBody))
+check('every existing-tab activation path outside selectTab revives first',
+  // openBook 复用「当前书架页签」是唯一不经 selectTab 的现有页签激活路径
+  bookBody.length > 0 && /reviveClosing\(shelfTab\.id\)/.test(bookBody)
+  && bookBody.indexOf('reviveClosing(shelfTab.id)') < bookBody.indexOf('apply(next, shelfTab.id)'))
+check('liveIds still excludes closing tabs (revival is the only way back in)',
+  /closingIds\.length \? ids\.filter\(\(id\) => !closingIds\.includes\(id\)\) : ids/.test(shell))
 
 /* ---------------------------------------------------------------- 报告 */
 const failed = checks.filter((c) => !c.pass)

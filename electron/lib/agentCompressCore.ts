@@ -139,24 +139,35 @@ export function normalizeDigestOutput(text: string): string {
  * 上下文合成：纪要以**首条 user 消息**注入（system+tools 是 prompt cache 前缀，
  * 必须逐字稳定——纪要只在压缩时变化，变化时前缀重建是一次性成本）。
  *
- * `extraPrefix`（v3.4.0 批次 B2 新增）：**每轮变化的上下文注入段**（@ 引用骨架 / 感知素材）。
- * 它们与纪要同层注入首条 user 消息，而**不进 system** —— 理由：
- *  - system + tools 是 prompt cache 前缀，逐字稳定才能命中（core 14 工具 ≈7.7k tok/轮）；
- *  - B1 初版把骨架塞进 `buildSystemPrompt`（= system），引用一变 system 就变 →
- *    **缓存前缀全量失效**，每轮多付整段 system + tools 的钱。B2 一并纠正。
- *  - 注入首条 user 消息也更符合语义：素材只对**本轮**有效，不该沉淀成系统的长期人设。
+ * 注入位置分三层（2026-11-23 批次：为 OpenAI 系**自动前缀缓存**对齐）：
+ *  - 纪要（`digestText`）与 `extraPrefix`：history **之前**（head）；
+ *  - `suffix`：history **之后**（tail），一条末尾 user 消息。
  *
- * 顺序：`extraPrefix` 在纪要**之后**（纪要是历史、注入段是当下，越靠近当前用户消息
- * 越贴合注意力；且纪要变化频率更低，放前面更利于其内部缓存）。
+ * 为什么每轮变化的注入放 suffix（末尾）：
+ *  - OpenAI / 兼容端点按**前缀**自动命中缓存；只要 `messages[0]` 每轮都变（段内台账 /
+ *    日程 / 情报 / 引用骨架 / 感知素材 / 产物索引 / 清单 都在变），整个会话前缀就逐轮
+ *    miss，等于每轮重付 system + tools + 全部历史的钱。挪到末尾后，前面整段逐字稳定，
+ *    只有末段注入自己付钱。
+ *  - Anthropic 侧走显式 `cache_control`、只挂 system / tools，本来不受影响；这是纯收益侧改。
+ *  - 与「别把逐轮变化的内容塞进 system」（B2 纠正）是同一红线：越靠前的东西越贵。
+ *    素材仍不进 system——它只对**本轮**有效，不该沉淀成系统的长期人设。
+ *
+ * 为什么纪要不能挪到末尾：它是**被压缩旧历史的替身**，语义上必须先于历史出现；且它只在
+ * 压缩时变化（低频），留在前面不破坏前缀。`extraPrefix` 保留「历史之前」的原语义。
+ * 末尾追加 user 消息已是本仓库既有做法（`resumeInjection` / 虚拟首轮同样在历史后追加）。
  */
 export function composeContextWithDigest<T extends BudgetMessage>(
   digestText: string | null | undefined,
   history: T[],
   extraPrefix?: string | null,
+  suffix?: string | null,
 ): Array<T | { role: 'user'; content: string }> {
   const head: Array<{ role: 'user'; content: string }> = []
   if (digestText) head.push({ role: 'user' as const, content: DIGEST_PREFIX + digestText })
   if (extraPrefix) head.push({ role: 'user' as const, content: extraPrefix })
-  if (head.length === 0) return [...history]
-  return [...head, ...history]
+  const tail: Array<{ role: 'user'; content: string }> = suffix
+    ? [{ role: 'user' as const, content: suffix }]
+    : []
+  if (head.length === 0 && tail.length === 0) return [...history]
+  return [...head, ...history, ...tail]
 }

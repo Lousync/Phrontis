@@ -5,7 +5,8 @@ import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel, getWorkspaceOfSession } from './aiTeachingWorkspaces'
-import { getSessionUnitFolderRel, unitFolderRel } from './aiTeachingCourse'
+import { getSessionUnitFolderRel, unitFolderRel, gateQuizContentForWrite } from './aiTeachingCourse'
+import { hasQuizFence } from './quizDocPure'
 import { assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import { sourceKeyFromUnitRel } from './aiTeachingLayoutPure'
 import { normalizeSourceTarget, registerAiTeachingScopeHandlers, type AiTeachSourceTarget } from './aiTeachingScope'
@@ -905,11 +906,19 @@ export function editArtifactText(
     }
     const applied = applyArtifactEdits(text, edits, append)
     if (!applied.ok) return { ok: false, error: applied.error }
-    const next = applied.next
+    let next = applied.next
     if (isMindmap && !parseMindmap(next)) {
       return { ok: false, error: '修改后的思维导图 JSON 不合法（需含 kind:"mindmap" 与 root.text），已取消写入' }
     }
     if (next === text) return { ok: true, relPath: n.rel, changed: 0, lines: text.split('\n').length }
+    // 题单质量门（2026-11-23）：看的是替换 / 追加**全部应用后**的全文，不是 edits 片段。
+    // 与 vault.write / vault.edit 同一口径：strict 不合格就不落盘，把重写提示当 error 回给模型
+    // （本函数返回结构是 { ok: false, error }，不 throw）。off 档 gate 逐字直通。
+    if (ext === 'md' && hasQuizFence(next)) {
+      const gated = gateQuizContentForWrite(sessionId, basename(n.rel).replace(/\.md$/i, ''), next, getSetting)
+      if (!gated.ok) return { ok: false, error: gated.error }
+      next = gated.content
+    }
     if (Buffer.byteLength(next, 'utf8') > MAX_ARTIFACT_EDIT_BYTES) return { ok: false, error: '修改后超过 1MB，拒绝写入' }
     writeFileSync(abs, next, 'utf-8')
     try { broadcast(BROADCAST_CHANNEL.wsExternalChange, { relPath: n.rel }) } catch { /* 广播失败不影响写入 */ }

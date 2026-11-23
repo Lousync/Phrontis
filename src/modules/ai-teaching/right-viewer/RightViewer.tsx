@@ -192,13 +192,18 @@ export interface RightViewerProps {
    * 中栏用 `padding-right` 跟着同一条曲线让位，壳是宽度的唯一持有者。
    */
   onWidthChange?: (width: number) => void
+  /**
+   * 中栏 reserve（`中栏左缘 + 中栏最小可读宽`，由页面实测后传入）。
+   * 缺省 = 旧口径 `innerWidth - 300`；传入后窗口过窄时查看器降到紧凑下限 300。
+   */
+  reserve?: number
 }
 
 export function RightViewer(props: RightViewerProps): JSX.Element {
   const {
     open, onClose, rootId, sessionId, sessionTitle, workspaceId,
     request, onOpenInEditor, onOpenFullscreen, onQuote, onFloat,
-    anchorMessageId, onTabChange, onWidthChange,
+    anchorMessageId, onTabChange, onWidthChange, reserve,
   } = props
 
   /* ------ 首帧页签（迁移只跑一次） ------ */
@@ -223,7 +228,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   /** 旁问运行态变化（保活保护项；值只用来驱动重算） */
   const [runTick, bumpRun] = useReducer((x: number) => x + 1, 0)
 
-  const { width, dragging, beginDrag, reset } = useViewerWidth({ open })
+  const { width, dragging, beginDrag, reset } = useViewerWidth({ open, reserve })
   const reducedMotion = usePrefersReducedMotion()
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -273,10 +278,31 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
 
   /* ------------------------------------------------------------ 打开 / 聚焦 */
 
+  /**
+   * 复活「正在播关闭动效」的页签：撤掉待移除定时器 + 从 `closingIds` 摘出。
+   *
+   * 关页签有 190ms 的视觉留拍，这段窗口里页签**仍在 `tabs` 里**，因此
+   * `findWebTab` / `findNotesTab` / `findBooksTabByBook` 依然能命中它；但 `liveIds`
+   * 会把 `closingIds` 排除，于是「激活它 → 内容区空白 → 到点被定时器删掉并跳到邻位」，
+   * 用户看到的是「点了没反应 + 页签闪一下消失」。凡是激活**已存在**页签的入口，
+   * 都必须先复活它，再激活。
+   */
+  const reviveClosing = useCallback((id: string) => {
+    // 浏览器里 setTimeout 的返回值可能是 0，只能判 `undefined`，不能判真值
+    const t = closeTimersRef.current.get(id)
+    if (t !== undefined) {
+      clearTimeout(t)
+      closeTimersRef.current.delete(id)
+    }
+    setClosingIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : prev))
+  }, [])
+
   const selectTab = useCallback((id: string) => {
+    // 必须先复活：同一帧里 `liveIds` 才不会继续把它过滤掉
+    reviveClosing(id)
     const r = activateTab(tabsRef.current, id, Date.now())
     apply(r.tabs, id)
-  }, [apply])
+  }, [apply, reviveClosing])
 
   /** 请某个页签「再打开一次」某样东西（地址 / 文件）；seq 单调递增，pane 只认「变了」 */
   const sendPaneReq = useCallback((tabId: string, req: Omit<PaneOpenRequest, 'seq'>) => {
@@ -354,6 +380,8 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
       ?? [...tabsRef.current].reverse().find((t): t is Extract<ViewerTab, { type: 'books' }> => t.type === 'books' && !t.relPath)
       ?? null
     if (shelfTab) {
+      // 书架页签可能正在播关闭动效（仍在 tabs 里）：复用前先复活，否则内容区空白 + 到点被删
+      reviveClosing(shelfTab.id)
       const next = updateTab(tabsRef.current, shelfTab.id, {
         relPath: rel,
         name: String(name ?? '').trim(),
@@ -365,7 +393,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     const tab = makeBooksTab(newTabId(), { relPath: rel, name }, Date.now())
     apply(appendTab(tabsRef.current, tab).tabs, tab.id)
     return tab.id
-  }, [apply, selectTab])
+  }, [apply, reviveClosing, selectTab])
 
   /** 打开 / 聚焦已落库的旁问（同一 lane 去重）。 */
   const openAskLane = useCallback((lane: AgentSideLaneInfo): string => {
@@ -503,6 +531,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     // flush 是异步的：期间页签可能已被别的路径关掉
     if (!tabById(tabsRef.current, id)) return
     // 活动页签立即切走（内容切换不跟着动效等），页签本体留一拍再移除（190ms ≈ 220ms × 0.82）
+    // 注意：这里**不能**走 `selectTab` —— 它会 reviveClosing，等于把刚关掉的页签复活。
     const preview = closeTabById(tabsRef.current, activeIdRef.current, id)
     activeIdRef.current = preview.activeId
     setActiveId(preview.activeId)

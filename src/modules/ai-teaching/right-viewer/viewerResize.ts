@@ -3,6 +3,8 @@
  *
  * 方案：`docs/ai-teaching-right-viewer-plan.md` §3.3（360–960、innerWidth-300、4px dead-zone、
  * 双击回 480）与 §5.1 / §5.3（`aiTeachRightViewerWidth` 走 SETTINGS）。
+ * 2026-11-23：上限改成 `innerWidth - reserve`，`reserve = 中栏左缘 + 420`（由调用方实测传入），
+ * 窗口过窄时查看器降到紧凑下限 300（不再把中栏压到一行 4 个字）。
  * 拖拽口径对齐 `src/components/shared/ResizablePanel.tsx`：pointerdown + capture、
  * 越过 dead-zone 才进拖拽态、**四路收尾**（pointerup / pointercancel / lostpointercapture / 卸载）。
  *
@@ -15,9 +17,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { getSettingRaw, setSettingRaw } from '../../../lib/ipc'
-import {
-  VIEWER_DEFAULT_WIDTH, VIEWER_MAX_WIDTH, VIEWER_MIN_WIDTH, VIEWER_RESERVED_WIDTH,
-} from './rightViewerPure'
+import { VIEWER_DEFAULT_WIDTH, VIEWER_MAX_WIDTH, VIEWER_MIN_WIDTH, clampViewerWidth } from './rightViewerPure'
 
 /** SETTINGS 键（`src/lib/settings.ts` 已注册，默认 480、范围 360–960） */
 export const VIEWER_WIDTH_SETTING_KEY = 'aiTeachRightViewerWidth'
@@ -35,6 +35,11 @@ export interface UseViewerWidthOptions {
   min?: number
   max?: number
   defaultWidth?: number
+  /**
+   * `reserve = 中栏左缘 + VIEWER_MIN_MIDDLE_WIDTH`（调用方实测后传入）。
+   * 缺省 = 旧口径 `innerWidth - VIEWER_RESERVED_WIDTH(300)`，行为与改造前一致。
+   */
+  reserve?: number
 }
 
 export interface UseViewerWidthResult {
@@ -45,15 +50,6 @@ export interface UseViewerWidthResult {
   reset: () => void
 }
 
-/** 夹进 [min, min(max, innerWidth - 300)]；分屏过窄时按 min 收，不返回负数 */
-function clampWidth(raw: number, min: number, max: number, innerWidth: number): number {
-  const upper = Number.isFinite(innerWidth) && innerWidth > 0
-    ? Math.max(min, Math.min(max, innerWidth - VIEWER_RESERVED_WIDTH))
-    : max
-  const base = Number.isFinite(raw) && raw > 0 ? raw : VIEWER_DEFAULT_WIDTH
-  return Math.round(Math.min(upper, Math.max(min, base)))
-}
-
 export function useViewerWidth(opts: UseViewerWidthOptions): UseViewerWidthResult {
   const min = opts.min ?? VIEWER_MIN_WIDTH
   const max = opts.max ?? VIEWER_MAX_WIDTH
@@ -61,7 +57,8 @@ export function useViewerWidth(opts: UseViewerWidthOptions): UseViewerWidthResul
 
   // 首帧用「默认宽 + 当前视口」：持久值走异步 IPC，等它回来会闪一下，
   // 而默认宽本来就在合法区间内，先画出来再夹紧最稳。
-  const [width, setWidthState] = useState(() => clampWidth(defaultWidth, min, max, window.innerWidth))
+  const [width, setWidthState] = useState(() =>
+    clampViewerWidth(defaultWidth, window.innerWidth, opts.reserve, min, max))
   const [dragging, setDragging] = useState(false)
 
   const widthRef = useRef(width)
@@ -80,6 +77,9 @@ export function useViewerWidth(opts: UseViewerWidthOptions): UseViewerWidthResul
   boundsRef.current = { min, max }
   const defaultRef = useRef(defaultWidth)
   defaultRef.current = defaultWidth
+  /** 中栏 reserve（左缘 + 最小可读宽）：每次夹紧都读「此刻」的值，避免闭包拿旧 reserve */
+  const reserveRef = useRef(opts.reserve)
+  reserveRef.current = opts.reserve
 
   /** 清掉 body 污染 —— 收尾路径**必须**都走到这里，否则整窗永久不能选中文本 */
   const clearBody = useCallback(() => {
@@ -96,7 +96,7 @@ export function useViewerWidth(opts: UseViewerWidthOptions): UseViewerWidthResul
 
   const applyWidth = useCallback((next: number): number => {
     const b = boundsRef.current
-    const clamped = clampWidth(next, b.min, b.max, window.innerWidth)
+    const clamped = clampViewerWidth(next, window.innerWidth, reserveRef.current, b.min, b.max)
     widthRef.current = clamped
     setWidthState(clamped)
     return clamped
@@ -215,11 +215,11 @@ export function useViewerWidth(opts: UseViewerWidthOptions): UseViewerWidthResul
     return () => { cancelled = true }
   }, [applyWidth])
 
-  // 窗口变化：上限跟着 `innerWidth - 300` 走，超限时收窄并落盘（缩放窗口不该丢宽度记忆）
+  // 窗口变化：上限跟着 `innerWidth - reserve` 走，超限时收窄并落盘（缩放窗口不该丢宽度记忆）
   useEffect(() => {
     const onResize = () => {
       const b = boundsRef.current
-      const next = clampWidth(widthRef.current, b.min, b.max, window.innerWidth)
+      const next = clampViewerWidth(widthRef.current, window.innerWidth, reserveRef.current, b.min, b.max)
       if (next === widthRef.current) return
       applyWidth(next)
       schedulePersist()
@@ -227,6 +227,18 @@ export function useViewerWidth(opts: UseViewerWidthOptions): UseViewerWidthResul
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [applyWidth, schedulePersist])
+
+  /**
+   * 中栏 reserve 变化（左栏拖宽 / 折叠 / 窗口缩放导致中栏左缘移动）→ 重夹一次。
+   * 只收不放：reserve 变小时不主动把查看器撑宽（用户的宽度记忆优先，拖宽是他自己的事）。
+   */
+  useEffect(() => {
+    const b = boundsRef.current
+    const next = clampViewerWidth(widthRef.current, window.innerWidth, opts.reserve, b.min, b.max)
+    if (next === widthRef.current) return
+    applyWidth(next)
+    schedulePersist()
+  }, [opts.reserve, applyWidth, schedulePersist])
 
   // 面板关掉时若还在拖（快捷键 / 外部关闭），立刻收尾，别把 select-none 留在 body 上
   useEffect(() => {
