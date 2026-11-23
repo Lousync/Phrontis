@@ -49,7 +49,7 @@ const count = (src, re) => (src.match(re) ?? []).length
 
 /* ───────────────────────── 1. 顶栏：面包屑 + 一枚图标 ───────────────────────── */
 console.log('\n[顶栏] 面包屑 + 一枚「打开右侧栏」')
-const bar = slice(mod, 'v3.8.0 §二：顶栏瘦身', 'ref={rowRef}', 'top-bar')
+const bar = slice(mod, 'v3.8.0 §二：顶栏瘦身', '<div className="relative flex flex-1 min-h-0">', 'top-bar')
 check('顶栏片段可定位', bar.length > 200, `len=${bar.length}`)
 check('顶栏 button 只有 2 个（面包屑 + 右栏图标）', count(bar, /<button/g) === 2, `实际 ${count(bar, /<button/g)}`)
 check('右栏图标是内联 SVG 18×14', bar.includes('width="18" height="14" viewBox="0 0 18 14"'))
@@ -255,64 +255,89 @@ check('点击进现有结课流程 startEndFlow(activeWs, 1)', mod.includes('sta
 check('卡片进对话流（不 sticky、跟随消息滚动）', !/endCourseFence\?\.idx === idx[\s\S]{0,300}sticky/.test(mod))
 check('不新增 AI 工具（builtinTools 未动）', !read('electron/lib/builtinTools.ts').includes('endcourse'))
 
-/* ───────────────────── 5. 工件分栏折叠开关（2026-11-23 补回可见出口） ───────────────────── */
-console.log('\n[工件栏] 页签条右端一枚折叠/展开开关（顶栏不恢复 chip）')
-const pane = read('src/modules/ai-teaching/ArtifactsPane.tsx')
-const strip = slice(pane, '{/* 页签条：icon+名称+✕', '{/* 工具条：落盘路径', 'art-strip')
-check('页签条片段可定位', strip.length > 400, `len=${strip.length}`)
-check('导入 lucide 两态图标 PanelRightClose / PanelRightOpen',
-  /import \{[^}]*PanelRightClose[^}]*\} from 'lucide-react'/.test(pane) && /import \{[^}]*PanelRightOpen[^}]*\} from 'lucide-react'/.test(pane))
-const toggle = slice(pane, '{/* 分栏折叠/展开（2026-11-23）', '{/* 全部页签下拉（F-3 P1）', 'art-toggle')
-check('开关片段可定位', toggle.length > 200, `len=${toggle.length}`)
-check('开关在页签条内（✕ 页签之后、工具条之前）', strip.includes('onToggleOpen(!open)'))
-check('点击 = onToggleOpen(!open)（沿用宿主 applyArtOpen）', strip.includes('onClick={() => onToggleOpen(!open)}'))
-check('aria-expanded 接 open', strip.includes('aria-expanded={!!open}'))
-check('两态图标：展开时 PanelRightClose、收起时 PanelRightOpen',
-  /\{open \? <PanelRightClose size=\{11\} \/> : <PanelRightOpen size=\{11\} \/>\}/.test(strip))
-check('图标 11px（< 16px）+ p-1 命中区 + 与 ⤢ 同语言（rounded-md / transition-colors）',
-  /p-1 rounded-md transition-colors/.test(toggle) && !toggle.includes('transition-all'))
-check('两态 data-tip 各一句（收起 / 展开）',
-  strip.includes("data-tip={open ? '收起工件分栏（页签保留，可再点展开）' : '展开工件分栏'}")
-  && strip.includes("aria-label={open ? '收起工件分栏（页签保留，可再点展开）' : '展开工件分栏'}"))
-check('props 只追加可选（open? / onToggleOpen?）',
-  pane.includes('open?: boolean') && pane.includes('onToggleOpen?: (v: boolean) => void'))
-check('无 onToggleOpen 时不渲染（全宽阅读实例不需要收起分栏）', /\{onToggleOpen && \(/.test(toggle))
-check('index 分栏实例接线 open={artOpen} / onToggleOpen={applyArtOpen}',
-  mod.includes('open={artOpen}') && count(mod, /onToggleOpen=\{applyArtOpen\}/g) === 1,
-  `实际 ${count(mod, /onToggleOpen=\{applyArtOpen\}/g)}`)
-check('applyArtOpen 仍持久化 aiTeach.artOpen', mod.includes("localStorage.setItem('aiTeach.artOpen'"))
-check('负向：顶栏没有恢复「工件分栏」chip', !bar.includes('工件分栏') && !bar.includes('onToggleOpen') && !bar.includes('<PanelRight'))
-check('负向：页签条之外没有第二处开关（onToggleOpen 只出现在该 button + 签名）',
-  count(pane, /onToggleOpen/g) === 4, `实际 ${count(pane, /onToggleOpen/g)}`)
+/* ───────────────────── 5. 右侧栏统一：工件栏退役，文件页签并入查看器（2026-11-23） ───────────────────── */
+// 2026-11-23 方案 `docs/ai-teaching-right-viewer-unify-plan.md` §2 / §7.3 / §9：
+// 工件栏（ArtifactsPane / ArtTab / aiTeach.artOpen / 贴边展开按钮 / 本次改动）整体退役，
+// 右侧只剩查看器；以下断言守住「旧栏零残留 + 新链路真的接上」。
+console.log('\n[右侧栏] 工件栏退役 —— 右侧只剩查看器（文件走 file 页签）')
+const pane = read('src/modules/ai-teaching/right-viewer/FilePane.tsx')
+const shell = read('src/modules/ai-teaching/right-viewer/RightViewer.tsx')
+const chrome = read('src/modules/ai-teaching/right-viewer/ViewerChrome.tsx')
+const contracts = read('src/modules/ai-teaching/right-viewer/paneContracts.ts')
+const vtabs = read('src/modules/ai-teaching/right-viewer/viewerTabs.ts')
+check('负向：index 不再渲染 / 引入 ArtifactsPane', !mod.includes('ArtifactsPane'))
+check('负向：工件栏两个文件已删除',
+  !existsSync(join(ROOT, 'src/modules/ai-teaching/ArtifactsPane.tsx'))
+  && !existsSync(join(ROOT, 'src/modules/ai-teaching/artifacts.ts')))
+check('负向：工件栏开合 / 写入分流已删（applyArtOpen / ArtTab / changeOpensInArtifactPane）',
+  !mod.includes('applyArtOpen') && !mod.includes('ArtTab') && !mod.includes('changeOpensInArtifactPane'))
+check('负向：旧右栏状态与宽度记忆已删（artOpen / artZoom / aiTeachArtWidth）',
+  !mod.includes('artOpen') && !mod.includes('artZoom') && !mod.includes('aiTeachArtWidth'))
+check('负向：贴边展开入口与焦点搬运已删（artEdgeBtnRef / artFocusToEdgeRef / 工件子树锚点）',
+  !mod.includes('artEdgeBtnRef') && !mod.includes('artFocusToEdgeRef') && !mod.includes('data-ai-teach-art-pane'))
+check('负向：打开查看器时「先收起工件栏」的互斥 Toast 已删', !mod.includes('展开工件分栏'))
+const rvAt = mod.indexOf('<RightViewer')
+check('查看器由 srcVisible 控制开合（模块内唯一右栏实例）',
+  rvAt > 0 && count(mod, /<RightViewer/g) === 1 && /<RightViewer[\s\S]{0,600}open=\{srcVisible\}/.test(mod),
+  `rv@${rvAt} / 实例 ${count(mod, /<RightViewer/g)}`)
+check('中栏让位按查看器宽度（paddingRight: viewerW）',
+  mod.includes('paddingRight: srcVisible && viewerW > 0 ? viewerW : 0'))
+check('文件打开统一走 openViewerFile（旧 openArtFile 已删）',
+  /const openViewerFile = useCallback/.test(mod) && !mod.includes('openArtFile'))
+check('左栏树 / 素材 / 收藏都接 openViewerFile（不再有第二套打开链路）',
+  mod.includes('onOpenFile={(rel) => void openViewerFile(rel)}')
+  && mod.includes('void openViewerFile(f.rel, { name: f.name })')
+  && mod.includes('void openViewerFile(a.rel, { title: a.title })'))
+check('「本次改动」清单已删（无 lastChanges / 面板标题）',
+  !mod.includes('lastChanges') && !/>本次改动/.test(mod))
+check('file 页签进 VIEWER_TABS，props 契约在 paneContracts',
+  /key: 'file', label: '文件'/.test(contracts) && contracts.includes('export interface FilePaneProps'))
+check('FilePane 按 fileKind 分派四类渲染器（html / 导图 / 图片 / pptx）',
+  pane.includes('<ArtHtmlView') && pane.includes('<MindMapView') && pane.includes('<ImmersiveImageView')
+  && pane.includes('docsPptxPages'))
+check('文件页签跨重启持久化（generating 占位不落库）',
+  /function isGeneratingFileTab\(tab: ViewerTab\)/.test(vtabs)
+  && /tabs\.filter\(\(t\) => !isDraftAskTab\(t\) && !isGeneratingFileTab\(t\)\)/.test(vtabs)
+  && /type: 'file',\s*relPath: String\(tab\.relPath/.test(vtabs))
+check('同一路径不重复开（跨笔记 / 文件页签去重）',
+  /const hit = findAnyPathTab\(tabsRef\.current, rel\)/.test(shell) && vtabs.includes('export function findAnyPathTab'))
+check('AI 产物走 begin / commit / drop 三种模式（宿主只发请求，壳维护页签）',
+  /mode: 'begin', fileKind/.test(mod) && /mode: 'commit', fileKind/.test(mod) && /mode: 'drop'/.test(mod)
+  && !mod.includes('setArtTabs'))
+check('文件页签自己订阅外部写（外部改完原地重读，不靠宿主转派）',
+  pane.includes('onWsExternalChange') && pane.includes("addEventListener('kb:file-saved'"))
+check('页签 ✕ 与头部「关闭面板」是两枚不同按钮（不会误关整个查看器）',
+  /aria-label=\{`关闭 \$\{title\}`\}/.test(chrome) && /aria-label="关闭面板"/.test(chrome))
+check('其余页签没被 file 挤掉（web / notes / books / ask 仍由壳分派）',
+  ['<WebPane', '<NotesPane', '<BooksPane', '<AskPane', '<FilePane'].every((t) => shell.includes(t)))
+check('右栏开合仍是 Ctrl+Alt+B（顶栏图标与快捷键同一入口）',
+  /if \(e\.altKey\) \{ if \(!srcVisible\) openRail\(\); else toggleSide\('right'\) \}/.test(mod))
 
-/* ─────────── 5b. 收起态入口：折叠容器之外（2026-11-23 可达性修复） ─────────── */
-console.log('\n[工件栏·收起态] 折叠容器之外的贴边展开入口 + 焦点 + Toast')
-const panelEnd = mod.indexOf('</ResizablePanel>', mod.indexOf('storageKey="aiTeachArtWidth"'))
-const edge = slice(mod, '{/* 收起态展开入口（2026-11-23 可达性修复）', '{/* ⤢ 全宽阅读', 'art-edge')
-check('收起态入口片段可定位', edge.length > 300, `len=${edge.length}`)
-check('入口在折叠容器之外（ResizablePanel 闭合标签之后）',
-  panelEnd > 0 && mod.indexOf('{/* 收起态展开入口') > panelEnd)
-check('渲染条件包含 !artOpen（收起态才出现）', /\{artExpanded && !artOpen && !artZoom && \(/.test(edge))
-check('入口不在 visible={...} 的子树里', !edge.includes('visible={') && !edge.includes('<ResizablePanel'))
-check('图标 = PanelRightOpen（与页签条那枚同语言）', edge.includes('<PanelRightOpen size={12} />'))
-check('aria-expanded={false} + aria-label="展开工件分栏"',
-  edge.includes('aria-expanded={false}') && edge.includes('aria-label="展开工件分栏"'))
-check('点击展开 = applyArtOpen(true)，且查看器占右侧时先让它让位',
-  /onClick=\{\(\) => \{[\s\S]{0,260}if \(srcVisible\) toggleSide\('right'\)[\s\S]{0,120}applyArtOpen\(true\)/.test(edge))
-check('窄贴边：w-3.5 + 右缘定位 + 竖向居中', edge.includes('w-3.5') && edge.includes('right-0') && edge.includes('top-1/2'))
-check('查看器让位用 transform + viewerW（不新增 CSS 令牌 / 不写 transition-all）',
-  edge.includes('viewerW') && edge.includes('transform:') && !edge.includes('transition-all'))
-check('动效有 prefers-reduced-motion 降级', edge.includes('artReducedMotion'))
-check('收起时焦点从被隐藏的页签条挪到贴边入口（同 toggleTray 口径）',
-  /artFocusToEdgeRef/.test(mod) && /artEdgeBtnRef\.current\?\.focus\(\)/.test(mod))
-check('焦点判据锚在工件子树根节点（data-ai-teach-art-pane）',
-  mod.includes("closest('[data-ai-teach-art-pane]')") && pane.includes('data-ai-teach-art-pane'))
-check('Toast 指向真实入口（中栏右缘「展开工件分栏」按钮）',
-  mod.includes('点中栏右缘的「展开工件分栏」按钮即可再打开（会先收起查看器）'))
-check('负向：Toast 不再指向不存在的「页签条右端展开按钮」',
-  !mod.includes('页签条右端的展开按钮'))
-check('负向：顶栏没有第二处开关（入口文案不出现在顶栏）',
-  !bar.includes('展开工件分栏') && !bar.includes('PanelRightOpen') && !bar.includes('artOpen'))
+/* ─────────── 5b. 查看器全屏：ViewerChrome 承担（取代旧工件栏 ⤢ 全宽态） ─────────── */
+console.log('\n[查看器·全屏] ViewerChrome 的 expanded / onToggleExpand（铺满模块 + Esc 可退）')
+check('全屏按钮在 ViewerChrome（Maximize2 / Minimize2 两态图标）',
+  chrome.includes('Maximize2') && chrome.includes('Minimize2') && chrome.includes('onToggleExpand'))
+check('按钮是开关态：aria-pressed={expanded} + 两态 aria-label / data-tip',
+  /aria-pressed=\{expanded\}/.test(chrome) && chrome.includes("aria-label={expanded ? '退出全屏' : '全屏'}")
+  && chrome.includes("data-tip={expanded ? '退出全屏（Esc）' : '全屏'}"))
+check('壳内 expanded state + 关面板自动复位',
+  /const \[expanded, setExpanded\] = useState\(false\)/.test(shell)
+  && /if \(!open && expanded\) setExpanded\(false\)/.test(shell))
+check('全屏 = 铺满整个模块区域（left 0 / width 100%）',
+  /const style = full[\s\S]{0,160}left: 0, right: 0, width: '100%'/.test(shell))
+check('全屏态 z-40 + data-viewer-expanded 供实机 / 选择器判据',
+  /full \? 'z-40' : 'z-30'/.test(shell) && /data-viewer-expanded=\{full \? '1' : undefined\}/.test(shell))
+check('全屏时向宿主上报宽度 0（中栏不需要让位）',
+  /onWidthChangeRef\.current\?\.\(open && !expanded \? width : 0\)/.test(shell))
+check('Esc 退出全屏（只在全屏时挂监听，且不吞页签条弹层的 Esc）',
+  /if \(!full\) return[\s\S]{0,400}if \(e\.key !== 'Escape' \|\| e\.defaultPrevented\) return[\s\S]{0,120}setExpanded\(false\)/.test(shell))
+check('退出全屏后焦点回到全屏按钮（键盘用户不掉到 body）',
+  /wasExpandedRef\.current = true/.test(shell) && /expandBtnRef\.current\?\.focus\(\{ preventScroll: true \}\)/.test(shell))
+check('全屏时不渲染左缘拖动条（没有右栏宽度可调）',
+  /全屏时不渲染[\s\S]{0,200}\{!full && \(/.test(shell))
+check('负向：顶栏没有恢复「工件分栏」chip / 宽度 key 分栏',
+  !bar.includes('工件分栏') && !bar.includes('onToggleOpen')
+  && !mod.includes('storageKey="aiTeachArtWidth"'))
 
 
 console.log(`\n[OK] ${pass} PASS / [FAIL] ${fail} FAIL`)

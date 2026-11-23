@@ -18,7 +18,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error'
  * 简答题卡：题干 → 作答框（自动保存）→ 折叠参考答案 → 自评。
  *
  * 状态真源是页面级 QuizRecordStore；无 store（AI 聊天单题快检）时退化为本地状态，
- * 可作答/自评但不落盘。正式题单必须由 PageEditor / ArtifactsPane 提供 store。
+ * 可作答/自评但不落盘。正式题单必须由 PageEditor / FilePane 提供 store。
  */
 export function ShortAnswerCard({ quiz, redo = false }: Props) {
   const store = useQuizStore()

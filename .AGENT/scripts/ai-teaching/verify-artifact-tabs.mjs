@@ -1,15 +1,17 @@
 /**
- * 契约：AI 教学工件栏页签条的溢出可达性（v3.16.1 F-3）。
+ * 契约：右侧查看器页签条的溢出可达性（原工件栏 F-3 契约，2026-11-23 迁到 ViewerChrome）。
  *
- * 失败模式：页签条自己 `overflow-x-auto` + 隐藏滚动条，但没有滚轮横滚 / 渐隐 / 激活归位，
- * 鼠标用户够不到被裁掉的页签；更糟的是 ⤢ 全屏按钮和页签在同一个滚动容器里，页签一多
- * 按钮跟着滚出视野（功能入口直接消失）。
+ * 失败模式（原样保留）：页签条自己 `overflow-x-auto` + 隐藏滚动条，但没有滚轮接管 / 渐隐 /
+ * 激活归位，鼠标用户够不到被裁掉的页签；更糟的是固定动作（`+` / `⤢` / `×`）和页签在同一个
+ * 滚动容器里，页签一多按钮跟着滚出视野（功能入口直接消失）。
  *
- * 修法：复用页面条的 `useStripScroll` + `StripEdges`，并把固定动作移出滚动容器。
+ * 现在页签条在 `right-viewer/ViewerChrome.tsx`：溢出判定用 `stripOverflow`（纯函数，见
+ * verify-right-viewer-tabs.mjs），溢出时右缘 `mask-image` 渐隐；固定动作在滚动容器**之外**。
+ * 工件栏（ArtifactsPane）退役后本脚本不再读它，只锁查看器这一份实现。
  *
  * 跑法：node .AGENT/scripts/ai-teaching/verify-artifact-tabs.mjs
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { stripComments, walkSourceFiles } from '../shared/strip-comments.mjs'
@@ -18,7 +20,8 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../../..')
 const read = (p) => stripComments(readFileSync(join(repo, p), 'utf8').replace(/\r\n/g, '\n'))
 
-const pane = read('src/modules/ai-teaching/ArtifactsPane.tsx')
+const chrome = read('src/modules/ai-teaching/right-viewer/ViewerChrome.tsx')
+const shell = read('src/modules/ai-teaching/right-viewer/RightViewer.tsx')
 
 let pass = 0
 const fails = []
@@ -28,78 +31,86 @@ function ok(cond, label, detail = '') {
   return false
 }
 
-console.log('=== A. 复用页面条溢出基建 ===')
-ok(/import \{ useStripScroll, StripEdges \} from '\.\.\/\.\.\/components\/workbench\/useStripScroll'/.test(pane),
-  'A1 import useStripScroll / StripEdges')
-ok(/const strip = useStripScroll\(`\$\{activeId \?\? ''\}\|\$\{tabs\.length\}`\)/.test(pane),
-  'A2 revealKey = 激活页签 + 页签数（切换 / 新增都会归位）')
-ok(/ref=\{setStripNode\}/.test(pane) && /strip\.setNode\(node\)/.test(pane),
-  'A3 滚动容器挂 setStripNode（同时喂给 useStripScroll 与溢出计数）')
-ok(/<StripEdges edges=\{strip\.edges\} \/>/.test(pane), 'A4 渲染左右渐隐')
-ok(/kb-edge-strip/.test(pane), 'A5 滚动容器走 .kb-edge-strip（隐藏滚动条，渐隐替代提示）')
-ok(/data-wb-active=\{t\.id === activeId \? '1' : '0'\}/.test(pane),
-  'A6 每个页签带 data-wb-active（useStripScroll 的激活选择器契约）')
+console.log('=== A. 复用页签条溢出基建（stripOverflow + 实测宽度） ===')
+ok(/import \{[\s\S]{0,300}?stripOverflow,[\s\S]{0,300}?\} from '\.\/viewerTabs'/.test(chrome)
+  && /stripOverflow\(widths, el\.clientWidth, 1\)\.overflowing/.test(chrome),
+  'A1 overflow 判定走 viewerTabs 的 stripOverflow（不手写阈值）')
+ok(/const measure = \(\) => \{[\s\S]{0,300}?setOverflowing/.test(chrome)
+  && /new ResizeObserver\(measure\)/.test(chrome) && /ro\.observe\(el\)/.test(chrome),
+  'A2 按实测宽度采样（ResizeObserver 跟面板拖宽）')
+ok(/style=\{overflowing \? \{[\s\S]{0,240}?maskImage: 'linear-gradient\(to right/.test(chrome),
+  'A3 溢出时右缘 mask-image 渐隐（不明显裁掉页签名）')
+ok(/overflow-x-auto/.test(chrome) && /\[scrollbar-width:none\]/.test(chrome) && /\[&::-webkit-scrollbar\]:hidden/.test(chrome),
+  'A4 滚动容器：overflow-x-auto + 隐藏滚动条（靠渐隐 / 下拉替代提示）')
+ok(/if \(e\.key === 'ArrowRight'\)/.test(chrome) && /e\.key === 'ArrowLeft'/.test(chrome)
+  && /e\.key === 'Home'/.test(chrome) && /e\.key === 'End'/.test(chrome),
+  'A5 键盘 ←/→/Home/End 在页签间移动（含循环）')
+ok(/tabRefs\.current\[activeId\]\?\.scrollIntoView\(\{ inline: 'nearest'/.test(chrome),
+  'A6 激活页签自动滚进视野（8+ 页签仍能找回）')
+ok(/const listButton = \(/.test(chrome) && /narrow \|\| overflowing \? '' : 'hidden'/.test(chrome),
+  'A7 「全部页签」入口在窄头部或溢出时可见（不靠隐藏滚动条猜）')
 
 console.log('\n=== B. 固定动作与可滚内容分离 ===')
-ok(!/flex-1 min-w-\[8px\]/.test(pane), 'B1 旧的 flex-1 占位已删除（它会把 ⤢ 推进滚动区）')
+ok(!/flex-1 min-w-\[8px\]/.test(chrome), 'B1 旧的 flex-1 占位不再出现（它会把固定动作推进滚动区）')
 {
-  // 结构顺序：滚动容器 → StripEdges → 全部页签按钮 → ⤢；后两者都在滚动容器外
-  const iEdges = pane.indexOf('<StripEdges edges={strip.edges} />')
-  const iAllTabs = pane.indexOf('ref={allTabsBtnRef}')
-  const iExpand = pane.indexOf('{tab && !tab.generating && tab.rel && (')
-  ok(iEdges > 0 && iAllTabs > iEdges && iExpand > iAllTabs,
-    'B2 ⤢ / 全部页签按钮都位于滚动容器与 StripEdges 之后（结构上不参与横向滚动）')
+  // 渲染顺序：滚动容器（role="tablist"）→ 全部页签 → + → ⤢ → ×
+  const iStrip = chrome.indexOf('role="tablist"')
+  const iList = chrome.indexOf('{!narrow && listButton}')
+  const iPlus = chrome.indexOf('{plusButton}')
+  const iExpand = chrome.indexOf('{expandButton}')
+  const iClose = chrome.indexOf('{closePanelButton}')
+  ok(iStrip > 0 && iList > iStrip && iPlus > iList && iExpand > iPlus && iClose > iExpand,
+    'B2 滚动容器 → 全部页签 → + → ⤢ → × 的结构顺序（后四者不参与横向滚动）',
+    `strip@${iStrip} / list@${iList} / plus@${iPlus} / expand@${iExpand} / close@${iClose}`)
 }
-ok(/className="shrink-0 flex items-center gap-0\.5 px-2 pt-1\.5 pb-0 select-none"/.test(pane),
-  'B3 页签行外层只负责左右布局，不再自己 overflow-x-auto')
-ok(!/overflow-x-auto[^"]*\[scrollbar-width:none\]/.test(pane),
-  'B4 负向：不再使用「隐藏滚动条且无提示」的裸滚动容器')
-
-console.log('\n=== C. 行为口径（纯函数契约由 verify-strip-overflow 覆盖）===')
-ok(/items-center gap-0\.5 overflow-x-auto/.test(pane), 'C1 滚动容器保留 flex 单行不换行')
-ok(/const tabMaxWidth = widthPx < 300 \? 96 : widthPx < 420 \? 132 : 170/.test(pane)
-  && /style=\{\{ maxWidth: tabMaxWidth \}\}/.test(pane),
-  'C2 页签宽度按分栏宽度自适应（窄分栏 96 / 132，正常 170）')
-
-console.log('\n=== D. 全部页签下拉（P1） ===')
-ok(/useAnchoredMenu\(allTabsBtnRef, allTabsMenuRef, 248\)/.test(pane),
-  'D1 「全部页签」按钮锚定弹出（useAnchoredMenu，视口钳位 / 外部点击关闭）')
-ok(/全部页签 · \{tabs\.length\}/.test(pane) && /\{tabs\.map\(t => \(/.test(pane),
-  'D2 下拉列出全部页签（不是只列被裁掉的）')
-ok(/onClick=\{\(\) => \{ onActivate\(t\.id\); allTabsMenu\.close\(\) \}\}/.test(pane),
-  'D3 点条目 = 激活该页签并收起菜单')
-ok(/<Check size=\{10\} className="shrink-0 text-\[var\(--accent\)\]" \/>/.test(pane),
-  'D4 当前激活页签在列表里有对勾')
-ok(/const \[hiddenTabs, setHiddenTabs\] = useState\(0\)/.test(pane)
-  && /r\.left < cr\.left - 1 \|\| r\.right > cr\.right \+ 1/.test(pane),
-  'D5 溢出计数按真实矩形测量「完全滚出可视区」的页签数')
-ok(/\{hiddenTabs > 0 && \([\s\S]{0,200}?>\+\{hiddenTabs\}<\/span>/.test(pane),
-  'D6 有溢出时按钮上直接显示未显示数量（不只靠 tooltip）')
-ok(/hiddenTabs > 0 \? `，\$\{hiddenTabs\} 个未显示` : ''/.test(pane),
-  'D7 tooltip 带「共 N 个 / M 个未显示」的完整口径')
-
-console.log('\n=== E. 页签右键菜单（P1） ===')
-ok(/onContextMenu=\{e => \{ e\.preventDefault\(\); e\.stopPropagation\(\); setTabMenu\(/.test(pane),
-  'E1 页签右键打开菜单并阻止冒泡')
-ok(/<FileContextMenu x=\{tabMenu\.x\} y=\{tabMenu\.y\} items=\{tabMenuItems\}/.test(pane),
-  'E2 复用共享 FileContextMenu（视口钳位 / Esc / 外部点击）')
-for (const [label, re] of [
-  ['关闭', /key: 'close', label: '关闭'/],
-  ['关闭其他', /key: 'others', label: others\.length \? `关闭其他（\$\{others\.length\}）`/],
-  ['关闭右侧', /key: 'right', label: right\.length \? `关闭右侧（\$\{right\.length\}）`/],
-  ['全部关闭', /key: 'all', label: all\.length \? `全部关闭（\$\{all\.length\}）`/],
-]) ok(re.test(pane), `E3 菜单项：${label}`)
-ok(/const canClose = \(t: ArtTab\) => !t\.generating/.test(pane),
-  'E4 生成中的页签不参与批量关闭（与单页签 ✕ 禁关同一口径）')
 {
-  // 批量关闭会在同一 tick 连续调 closeArtTab；只靠 effect 回填 artTabsRef 时后一次读到旧数组，
-  // setState 互相覆盖 → 表象「全部关闭只关掉一个」。
-  const teachIndex = read('src/modules/ai-teaching/index.tsx')
-  ok(/artTabsRef\.current = nextTabs[\s\S]{0,80}?setArtTabs\(nextTabs\)/.test(teachIndex),
-    'E5 closeArtTab 同步回填 artTabsRef（批量关闭不会互相覆盖）')
+  // 滚动容器的子元素只能是页签本身（固定动作若挂在里面就会跟着滚走）
+  const iStrip = chrome.indexOf('role="tablist"')
+  const iList = chrome.indexOf('{!narrow && listButton}')
+  const block = iStrip >= 0 && iList > iStrip ? chrome.slice(iStrip, iList) : ''
+  ok(block.length > 100 && block.includes('tabs.map((t) => renderTab(t))')
+    && !block.includes('iconBtnCls') && !block.includes('plusButton'),
+    'B3 滚动容器内部只挂页签（没有 + / ⤢ / × 混进去）')
 }
+ok(/const iconBtnCls = 'flex h-6 w-6 shrink-0/.test(chrome)
+  && /const plusButton = \(/.test(chrome) && /const expandButton = \(/.test(chrome)
+  && /const closePanelButton = \(/.test(chrome),
+  'B4 三枚固定动作各自是头部常量（与页签条生命周期解耦）')
+ok(/const listButton = \(/.test(chrome)
+  && /aria-label=\{`切换页签：\$\{tabTitleOf\(activeTab\)\}`\}/.test(chrome),
+  'B5 窄头部把当前页签名本身做成下拉入口（固定动作仍在条外）')
 
-console.log('\n=== F. 同类哨兵：隐藏滚动条的条目条必须接 useStripScroll ===')
+console.log('\n=== C. 溢出兜底：全部页签下拉（列出全部，不只被裁掉的） ===')
+ok(/const \[menu, setMenu\] = useState<MenuKind>\('none'\)/.test(chrome) && /openMenu\('tablist'\)/.test(chrome),
+  'C1 头部菜单状态机（tablist 与新建菜单互斥）')
+ok(/aria-haspopup="dialog"[\s\S]{0,300}?aria-expanded=\{menu === 'tablist'\}/.test(chrome),
+  'C2 「全部页签」按钮 aria-haspopup + aria-expanded 接线')
+ok(/tabs\.map\(\(t\) => renderTab\(t, true\)\)/.test(chrome), 'C3 下拉列出全部页签')
+ok(/onClick=\{\(\) => \{ setMenu\('none'\); onSelect\(tab\.id\) \}\}/.test(chrome)
+  && /onCloseTab\(tab\.id\)/.test(chrome),
+  'C4 点条目 = 激活该页签并收起菜单（行内 ✕ 仍可关）')
+ok(/aria-selected=\{active\}/.test(chrome) && /max-h-\[330px\] overflow-y-auto/.test(chrome),
+  'C5 列表带选中态 + 高度上限（长列表自己滚）')
+
+console.log('\n=== D. 工件栏已退役：查看器是唯一页签条 ===')
+ok(!shell.includes('ArtifactsPane') && !shell.includes('artTabs'), 'D1 RightViewer 不再挂工件栏')
+ok(!chrome.includes('ArtTab') && !chrome.includes('ArtifactsPane'), 'D2 ViewerChrome 不引用工件栏类型')
+ok(!existsSync(join(repo, 'src/modules/ai-teaching/ArtifactsPane.tsx'))
+  && !existsSync(join(repo, 'src/modules/ai-teaching/artifacts.ts')),
+  'D3 工件栏两个文件已删除（不存在第二份页签条实现）')
+ok((chrome.match(/overflow-x-auto/g) || []).length === 1,
+  'D4 模块内只有一处裸横向滚动容器（其余横向条不得回潮）',
+  `实际 ${(chrome.match(/overflow-x-auto/g) || []).length}`)
+
+console.log('\n=== E. 固定动作自身可辨识（窄头部 / 图标态仍有 aria-label） ===')
+ok(/aria-label="新建页签"/.test(chrome) && /aria-label="全部页签"/.test(chrome)
+  && /aria-label="关闭面板"/.test(chrome)
+  && /aria-label=\{expanded \? '退出全屏' : '全屏'\}/.test(chrome),
+  'E1 + / ⌄ / ⤢ / × 四枚固定动作都有 aria-label（图标没有可见文字）')
+ok(/data-viewer-menu-trigger="1"/.test(chrome) && /onMenuOpenChange\(menu !== 'none'\)/.test(chrome),
+  'E2 弹层开合上报壳（网页原生视图据此让位）')
+
+console.log('\n=== F. 同类哨兵：隐藏滚动条的条目条必须接溢出基建 ===')
 {
   // `.kb-edge-strip` 把滚动条藏掉是为了不占盒高；代价是「看不出能滚」。
   // 任何新条目条使用它，就必须同时给滚轮接管 + 渐隐 + 激活归位，否则又回到 F-3 的老路。
@@ -116,23 +127,11 @@ console.log('\n=== F. 同类哨兵：隐藏滚动条的条目条必须接 useStr
     offenders.join('、'))
 }
 
-console.log('\n=== G. 原地改产物：同路径页签刷新、不新开（2026-11-17）===')
-{
-  const teachIndex = read('src/modules/ai-teaching/index.tsx')
-  ok(/const exists = artTabsRef\.current\.some\(t => !t\.generating && t\.id === a\.rel\)/.test(teachIndex),
-    'G1 完成事件先判同路径页签是否已开')
-  ok(/rest\.some\(t => t\.id === a\.rel\)[\s\S]{0,160}?rest\.map\(t => t\.id === a\.rel/.test(teachIndex),
-    'G2 已开则原地更新元信息（不再 push 第二个页签）')
-  ok(/if \(exists \|\| a\.updated\) setHtmlSeq\(prev => \(\{ \.\.\.prev, \[a\.rel\]: \(prev\[a\.rel\] \?\? 0\) \+ 1 \}\)\)/.test(teachIndex),
-    'G3 原地更新递增加载序号，查看器重读磁盘')
-  ok(teachIndex.includes('已更新：${fileName}（复用原文件）'), 'G4 Toast 区分「已更新」与「已生成」')
-  ok(/if \(tab\.kind === 'html' \|\| tab\.kind === 'mindmap' \|\| tab\.kind === 'image'\)/.test(teachIndex),
-    'G5 工具栏 ⟳ 对 html / mindmap / image 都生效')
-  ok(teachIndex.includes('onWsExternalChange') && teachIndex.includes('artTabsRef.current.find(t => !t.generating && t.rel === rel)'),
-    'G6 vault.edit / artifact.edit 的外部写也刷新打开中的工件')
-  ok(/<MindMapView[^>]*reloadSeq=\{htmlSeq\[tab\.rel\] \?\? 0\}/.test(pane), 'G7 MindMapView 接 reloadSeq')
-  ok(/<ImmersiveImageView[^>]*reloadSeq=\{htmlSeq\[tab\.rel\] \?\? 0\}/.test(pane), 'G8 ImmersiveImageView 接 reloadSeq')
-}
+console.log('\n=== G. 核心不变量：固定动作不随内容滚走 ===')
+ok(/className="flex min-w-0 flex-1 items-center gap-px overflow-x-auto/.test(chrome),
+  'G1 滚动容器只吃剩余宽度（min-w-0 flex-1），固定动作宽度不被挤掉')
+ok(/\{!narrow && listButton\}[\s\S]{0,200}?\{plusButton\}[\s\S]{0,200}?\{expandButton\}[\s\S]{0,200}?\{closePanelButton\}/.test(chrome),
+  'G2 四枚固定动作连排在滚动容器之后（页签再多也固定在右端）')
 
 console.log('\n========================================')
 if (fails.length === 0) {

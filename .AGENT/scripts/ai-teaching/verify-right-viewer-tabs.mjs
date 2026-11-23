@@ -46,12 +46,15 @@ fs.writeFileSync(tmpFile, stripTypeScriptTypes(read(`${DIR}/viewerTabs.ts`), { m
 const T = await import(pathToFileURL(tmpFile).href)
 
 const {
-  makeWebTab, makeNotesTab, makeBooksTab, makeAskTab, noteTabTitle, draftTitle,
-  firstQuestionTitle, tabTitleOf, inferNotesFileKind, pathKey, baseName, stemOf, clipTitle,
-  tabById, findNotesTab, findBooksTabByBook, findAskTabByLane, findDraftTab, findWebTab,
+  makeWebTab, makeNotesTab, makeBooksTab, makeAskTab, makeFileTab,
+  noteTabTitle, draftTitle, firstQuestionTitle, tabTitleOf,
+  inferNotesFileKind, isFilePaneKind, pathKey, baseName, stemOf, clipTitle,
+  tabById, findNotesTab, findFileTab, findAnyPathTab,
+  findBooksTabByBook, findAskTabByLane, findDraftTab, findWebTab,
   firstTabOfType, isDraftAskTab, appendTab, updateTab, activateTab, closeTabById,
   selectLiveIds, stripOverflow, serializeViewerState, parseViewerState,
-  migrateLegacyViewerState, parseLegacyWebTabs, VIEWER_LIVE_WINDOW, VIEWER_WEB_LIVE_CAP,
+  migrateLegacyViewerState, parseLegacyWebTabs,
+  VIEWER_LIVE_WINDOW, VIEWER_WEB_LIVE_CAP, VIEWER_FILE_LIVE_CAP,
 } = T
 
 const draftOf = (over = {}) => ({
@@ -100,6 +103,27 @@ check('draft is only for laneId-less ask tabs', isDraftAskTab(draftTab) === true
 check('first question becomes the lane title (clipped to 16)',
   firstQuestionTitle('### 为什么上界要用闭区间？如果 hi 取 n 会怎样？') === '为什么上界要用闭区间？如果 hi', firstQuestionTitle('## hi'))
 check('empty first question falls back to a plain title', firstQuestionTitle('   ') === '旁问')
+
+/* ---------------------------------------------------------------- 1b. 文件页签工厂 */
+console.log('\n=== 1b. file tab factory ===')
+const fileHtml = makeFileTab('f1', { relPath: 'AI教学/x/演示\\示意图.html', fileKind: 'html', page: 0 }, 11)
+check('file tab derives the title from the file name',
+  fileHtml.type === 'file' && fileHtml.title === '示意图', fileHtml.title)
+check('file tab normalises slashes and keeps page 0 (0 is a real page)',
+  fileHtml.relPath === 'AI教学/x/演示/示意图.html' && fileHtml.page === 0,
+  `${fileHtml.relPath} / ${fileHtml.page}`)
+const genFile = makeFileTab('f2', { fileKind: 'image', generating: true, slug: 'img-1' }, 12)
+check('generating file tab without a path falls back to a plain title',
+  genFile.relPath === '' && genFile.generating === true && genFile.title === '文件' && genFile.slug === 'img-1',
+  JSON.stringify(genFile))
+check('runtime-only fields are omitted when not passed',
+  !('rev' in fileHtml) && !('slug' in fileHtml) && !('generating' in fileHtml), JSON.stringify(fileHtml))
+check('file pane kind guard accepts exactly html / image / mindmap / pptx',
+  ['html', 'image', 'mindmap', 'pptx'].every((k) => isFilePaneKind(k))
+  && !isFilePaneKind('note') && !isFilePaneKind('') && !isFilePaneKind(null))
+check('tabTitleOf uses the stem and keeps an explicit generating title',
+  tabTitleOf(makeFileTab('f3', { relPath: 'a/b/导图.json', fileKind: 'mindmap' })) === '导图'
+  && tabTitleOf({ ...genFile, title: '正在生成示意图' }) === '正在生成示意图')
 
 /* ---------------------------------------------------------------- 2. 小工具 */
 console.log('\n=== 2. path helpers ===')
@@ -169,6 +193,35 @@ check('only one web tab is kept: findWebTab picks the first',
 check('firstTabOfType ignores other kinds', firstTabOfType(pool, 'books')?.id === 't7')
 check('tabById returns null for empty ids', tabById(pool, null) === null && tabById(pool, 't7')?.id === 't7')
 
+/* ---------------------------------------------------------------- 3b. 文件去重 / 跨类型去重 */
+console.log('\n=== 3b. file dedupe + cross-type path dedupe ===')
+const filePool = [
+  note,
+  makeFileTab('f10', { relPath: 'AI教学/x/产物/示意图.html', fileKind: 'html' }),
+  makeFileTab('f11', { relPath: 'AI教学/x/产物/图片.PNG', fileKind: 'image' }),
+]
+check('same file tab hits regardless of slash style / case (case-insensitive lookup)',
+  findFileTab(filePool, 'AI教学\\X\\产物\\示意图.HTML', { caseInsensitive: true })?.id === 'f10')
+check('NEGATIVE: case-sensitive findFileTab does not hit a differently-cased path',
+  findFileTab(filePool, 'ai教学/x/产物/示意图.html', { caseInsensitive: false }) === null)
+check('findFileTab never returns a notes tab that shares the path',
+  findFileTab([note], 'AI教学/x/产物/笔记.md') === null)
+check('missing file returns null', findFileTab(filePool, 'nope.html') === null)
+check('findAnyPathTab hits the notes tab for an md path',
+  findAnyPathTab(filePool, 'AI教学/x/产物/笔记.md')?.type === 'notes')
+check('findAnyPathTab hits the file tab for a non-md path (slash / case tolerant)',
+  findAnyPathTab(filePool, 'AI教学\\x\\产物\\图片.png', { caseInsensitive: true })?.id === 'f11')
+check('findAnyPathTab sees a cross-type clash even when both kinds claim the path',
+  (() => {
+    const clashNote = makeNotesTab('cn', { relPath: 'x/a.md' })
+    const clashFile = makeFileTab('cf', { relPath: 'x/a.md', fileKind: 'html' })
+    return findAnyPathTab([clashNote, clashFile], 'x/a.md')?.id === 'cn'
+      && findAnyPathTab([clashFile, clashNote], 'x/a.md')?.id === 'cf'
+  })())
+check('NEGATIVE: findAnyPathTab ignores books / web / unknown paths',
+  findAnyPathTab([makeBooksTab('b1', { relPath: 'x/a.pdf' })], 'x/a.pdf') === null
+  && findAnyPathTab(filePool, 'nope.html') === null)
+
 /* ---------------------------------------------------------------- 4. 变更 / 关闭 */
 console.log('\n=== 4. append / activate / close (neighbour rule) ===')
 const base = [makeWebTab('a', {}, 1), makeNotesTab('b', { relPath: 'b.md' }, 2), makeBooksTab('c', {}, 3)]
@@ -228,6 +281,17 @@ check('running side lanes are never evicted', askLive.includes('a2') && askLive.
 const manySnap = clone(many)
 selectLiveIds({ tabs: many, activeId: 'n9', dirtyIds: [], runningIds: [] })
 check('selectLiveIds does not mutate the tabs or their order', same(many, manySnap))
+
+/* ---------------------------------------------------------------- 5b. 文件保活配额 */
+console.log('\n=== 5b. file live cap ===')
+const fileTabs = Array.from({ length: 5 }, (_, i) =>
+  makeFileTab(`lf${i}`, { relPath: `f${i}.html`, fileKind: 'html' }, i))
+const fileLive = selectLiveIds({ tabs: fileTabs, activeId: 'lf4', dirtyIds: [], runningIds: [] })
+check('file panes are capped at VIEWER_FILE_LIVE_CAP (3)',
+  VIEWER_FILE_LIVE_CAP === 3 && fileLive.length === 3, `${VIEWER_FILE_LIVE_CAP} / ${fileLive.length}`)
+check('the active file tab always stays live', fileLive.includes('lf4'))
+check('file cap keeps the most recently active instead of the oldest',
+  fileLive.includes('lf3') && !fileLive.includes('lf0'), fileLive.join(','))
 
 /* ---------------------------------------------------------------- 6. 溢出 */
 console.log('\n=== 6. stripOverflow: measured widths, not count ===')
@@ -323,6 +387,58 @@ const insensitiveParsed = parseViewerState(twoCaseNotes, { caseInsensitive: true
 check('case-insensitive parse still dedupes the same note file',
   insensitiveParsed.tabs.length === 1 && insensitiveParsed.activeId === 'cs1',
   `${insensitiveParsed.tabs.length} / ${insensitiveParsed.activeId}`)
+
+/* ---------------------------------------------------------------- 7b. 文件页签持久化 */
+console.log('\n=== 7b. file persistence ===')
+const fileState = [
+  makeNotesTab('pn', { relPath: 'x/预览.md', previewDefault: true }, 1),
+  makeFileTab('ph', { relPath: 'x/示意图.html', fileKind: 'html', slug: 'v1' }, 2),
+  makeFileTab('pp', { relPath: 'x/课件.pptx', fileKind: 'pptx', page: 3 }, 3),
+  makeFileTab('pg', { fileKind: 'image', generating: true, slug: 'img-9' }, 4),
+]
+const fileSer = serializeViewerState(fileState, 'pg')
+check('serialize drops the generating file placeholder',
+  fileSer.tabs.length === 3 && !fileSer.tabs.some((t) => t.id === 'pg'),
+  JSON.stringify(fileSer.tabs.map((t) => t.id)))
+check('activeId pointing at a generating placeholder falls back to the first kept tab',
+  fileSer.activeId === 'pn', String(fileSer.activeId))
+check('serialize keeps only relPath / fileKind / page for file tabs',
+  (() => {
+    const tab = fileSer.tabs.find((t) => t.id === 'ph')
+    return !!tab && tab.type === 'file'
+      && tab.relPath === 'x/示意图.html' && tab.fileKind === 'html'
+      && !('slug' in tab) && !('rev' in tab) && !('page' in tab) && !('generating' in tab)
+  })())
+check('serialize persists the pptx page', fileSer.tabs.find((t) => t.id === 'pp')?.page === 3)
+check('serialize persists previewDefault only when it is true',
+  fileSer.tabs.find((t) => t.id === 'pn')?.previewDefault === true
+  && !('previewDefault' in serializeViewerState([makeNotesTab('p0', { relPath: 'x/a.md' })], 'p0').tabs[0]))
+
+const fileParsed = parseViewerState({
+  v: 2,
+  activeId: 'pf1',
+  tabs: [
+    { id: 'pf1', type: 'file', relPath: 'x/示意图.html', fileKind: 'html', page: 0 },
+    { id: 'pf2', type: 'file', relPath: 'x/示意图.html', fileKind: 'image' },
+    { id: 'pf3', type: 'file', relPath: '', fileKind: 'image' },
+    { id: 'pf4', type: 'file', relPath: 'x/bad.html', fileKind: 'note' },
+    { id: 'pf5', type: 'file', relPath: 'x/导图.json', fileKind: 'mindmap' },
+  ],
+}, { caseInsensitive: false })
+check('parse accepts file tabs and drops empty relPath / invalid fileKind',
+  fileParsed.tabs.length === 2 && !fileParsed.tabs.some((t) => t.id === 'pf3' || t.id === 'pf4'),
+  fileParsed.tabs.map((t) => t.id).join(','))
+check('parse dedupes file tabs by path',
+  fileParsed.tabs.filter((t) => t.relPath === 'x/示意图.html').length === 1)
+check('parse keeps page 0 and the file kind',
+  fileParsed.tabs[0].id === 'pf1' && fileParsed.tabs[0].page === 0 && fileParsed.tabs[0].fileKind === 'html')
+const fileRound = parseViewerState(JSON.parse(JSON.stringify(fileSer)))
+check('file state round-trips through serialize -> parse',
+  fileRound.tabs.length === 3 && fileRound.activeId === 'pn' && fileRound.v === 2,
+  JSON.stringify([fileRound.tabs.length, fileRound.activeId]))
+check('round-trip keeps previewDefault / pptx page',
+  fileRound.tabs.find((t) => t.id === 'pn')?.previewDefault === true
+  && fileRound.tabs.find((t) => t.id === 'pp')?.page === 3)
 
 /* ---------------------------------------------------------------- 8. 迁移 */
 console.log('\n=== 8. legacy migration ===')

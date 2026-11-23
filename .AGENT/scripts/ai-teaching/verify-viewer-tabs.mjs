@@ -259,6 +259,57 @@ check('activateDormant does not mutate input', same(dormantState, dormantSnap))
 const wokenAgain = activateDormant(woken, 's1', 0)
 check('activateDormant is idempotent', same(woken, wokenAgain))
 
+/* ---------------------------------------------------------------- 8. right-viewer file tab */
+console.log('\n=== 8. right-viewer file tab: cross-type path dedupe ===')
+const RV_DIR = 'src/modules/ai-teaching/right-viewer'
+const rvTabsSrc = fs.readFileSync(path.join(ROOT, RV_DIR, 'viewerTabs.ts'), 'utf8')
+const rvTmpFile = path.join(tmpDir, 'rightViewerTabs.mjs')
+fs.writeFileSync(rvTmpFile, stripTypeScriptTypes(rvTabsSrc, { mode: 'strip' }))
+const RV = await import(pathToFileURL(rvTmpFile).href)
+
+const rvNote = RV.makeNotesTab('rv-n', { relPath: 'AI教学/x/笔记.md', previewDefault: true })
+const rvHtml = RV.makeFileTab('rv-f', { relPath: 'AI教学/x/示意图.html', fileKind: 'html' })
+const rvPptx = RV.makeFileTab('rv-p', { relPath: 'AI教学/x/课件.pptx', fileKind: 'pptx', page: 2 })
+const rvPool = [rvNote, rvHtml, rvPptx]
+
+check('file tab title comes from the file stem', RV.tabTitleOf(rvHtml) === '示意图')
+check('file kind guard accepts the four file kinds',
+  ['html', 'image', 'mindmap', 'pptx'].every((k) => RV.isFilePaneKind(k))
+  && !RV.isFilePaneKind('notes'))
+check('findFileTab dedupes the same non-md path (slash / case tolerant)',
+  RV.findFileTab(rvPool, 'AI教学\\x\\示意图.html', { caseInsensitive: true })?.id === 'rv-f')
+check('findAnyPathTab dedupes across notes and file kinds',
+  RV.findAnyPathTab(rvPool, 'AI教学/x/笔记.md')?.id === 'rv-n'
+  && RV.findAnyPathTab(rvPool, 'AI教学/x/示意图.html')?.id === 'rv-f')
+check('NEGATIVE: findAnyPathTab does not fold different paths together',
+  RV.findAnyPathTab(rvPool, 'AI教学/x/别的.md') === null)
+check('generating file placeholder is not persisted but regular ones are',
+  (() => {
+    const gen = RV.makeFileTab('rv-g', { fileKind: 'image', generating: true, slug: 'img' })
+    const state = RV.serializeViewerState([...rvPool, gen], 'rv-g')
+    return state.tabs.length === 3
+      && !state.tabs.some((t) => t.id === 'rv-g')
+      && state.activeId === 'rv-n'
+  })())
+check('file tab page survives a serialize -> parse round trip',
+  (() => {
+    const state = RV.serializeViewerState([rvPptx], 'rv-p')
+    const back = RV.parseViewerState(JSON.parse(JSON.stringify(state)))
+    return back.tabs.length === 1 && back.tabs[0].page === 2
+  })())
+check('parse drops file tabs with an invalid kind or an empty relPath',
+  (() => {
+    const back = RV.parseViewerState({
+      v: 2,
+      tabs: [
+        { id: 'g1', type: 'file', relPath: '', fileKind: 'image' },
+        { id: 'g2', type: 'file', relPath: 'a.html', fileKind: 'pdf' },
+      ],
+      activeId: 'g1',
+    })
+    return back.tabs.length === 0 && back.activeId === null
+  })())
+
 /* ---------------------------------------------------------------- 报告 */
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) {

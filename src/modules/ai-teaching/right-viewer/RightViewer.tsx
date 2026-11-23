@@ -5,14 +5,18 @@
  *       + `docs/ai-teaching-right-viewer-plan.md` §3（交互）/ §5（持久化）/ §9（动效与 a11y）
  * 内核决策：C7 overlay 可调宽 · D5 懒加载 + 关页签卸载、**切页签只隐藏不卸载**（本版加保活窗口）
  *
- * 这个文件只做「壳」：页签集合 / 页签条 / 宽度 / 持久化 / 保活窗口 / 去重 / 网页视图可见性。
- * 四个 kind 的业务都在各自 pane 里；壳只按 `paneContracts.ts`（冻结契约）传公共上下文。
+ * 这个文件只做「壳」：页签集合 / 页签条 / 宽度 / 持久化 / 保活窗口 / 去重 / 网页视图可见性
+ * / 全屏放大。
+ * 五个 kind 的业务都在各自 pane 里；壳只按 `paneContracts.ts`（冻结契约）传公共上下文。
  *
  * 三条新纪律（本版新增，改之前先读）：
- *   1. **一个笔记 / 电子书页签 = 一个文件 / 一本书**；同文件再去点 = 聚焦已有页签，不新开
+ *   1. **一个笔记 / 文件 / 电子书页签 = 一个文件 / 一本书**；同文件再去点 = 聚焦已有页签，不新开
  *      （两个实例各持一份 mtime 基线，保存必然互相踩，见 PLAN §7.2 / §7.3）；
  *   2. **保活窗口**：同时挂载 ≤6 个 pane，超出按 LRU 卸载；脏笔记与运行中的旁问永不淘汰；
  *   3. **旁问草稿**：`laneId === null` 的旁问页签不持久化、关掉即丢，首问发出后才落库。
+ *
+ * 文件页签（`type: 'file'`，2026-11-23 并入工件栏）：所有入口都走本文件的 `openFile()`；
+ * AI 产物按 `ViewerOpenRequest.mode` 的 begin / commit / drop 维护「生成中」占位，完成后原地转正。
  */
 
 import {
@@ -25,18 +29,19 @@ import { showToast } from '../../../lib/toast'
 import type { AgentSideLaneInfo } from '../../../types'
 import {
   VIEWER_LS_KEYS, isViewerTabKey,
-  type PaneOpenRequest, type ViewerPaneType,
+  type FilePaneKind, type PaneOpenRequest, type ViewerOpenRequest, type ViewerPaneType,
 } from './paneContracts'
 import { shouldHideWebViewer, viewerWidthStyle } from './rightViewerPure'
 import { useViewerWidth } from './viewerResize'
 import { ViewerChrome, ViewerEmptyCard } from './ViewerChrome'
 import { createSessionNote } from './noteFileOps'
 import {
-  VIEWER_LIVE_WINDOW, activateTab, appendTab, closeTabById, findAskTabByLane, findBooksTabByBook,
-  findDraftTab, findNotesTab, findWebTab, firstTabOfType, inferNotesFileKind, makeAskTab,
-  makeBooksTab, makeNotesTab, makeWebTab, migrateLegacyViewerState, parseViewerState,
-  selectLiveIds, serializeViewerState, stemOf, tabById, updateTab,
-  type AskDraft, type NotesFileKind, type ViewerStateV2, type ViewerTab,
+  VIEWER_LIVE_WINDOW, activateTab, appendTab, closeTabById, findAnyPathTab, findAskTabByLane,
+  findBooksTabByBook, findDraftTab, findFileTab, findNotesTab, findWebTab, firstTabOfType,
+  inferNotesFileKind, isFilePaneKind, makeAskTab, makeBooksTab, makeFileTab, makeNotesTab,
+  makeWebTab, migrateLegacyViewerState, parseViewerState, selectLiveIds, serializeViewerState,
+  stemOf, tabById, updateTab,
+  type AskDraft, type FileViewerTab, type NotesFileKind, type ViewerStateV2, type ViewerTab,
 } from './viewerTabs'
 
 /* ============================== pane 装载 ============================== */
@@ -64,6 +69,7 @@ function lazyPane(load: () => Promise<unknown>, named: string): LazyExoticCompon
 const WebPane = lazyPane(() => import('./WebPane'), 'WebPane')
 const NotesPane = lazyPane(() => import('./NotesPane'), 'NotesPane')
 const BooksPane = lazyPane(() => import('./BooksPane'), 'BooksPane')
+const FilePane = lazyPane(() => import('./FilePane'), 'FilePane')
 const AskPane = lazyPane(() => import('./AskPane'), 'AskPane')
 
 function PaneLoading(): JSX.Element {
@@ -180,11 +186,20 @@ export interface RightViewerProps {
   sessionTitle: string
   workspaceId: string
   /** 外部一次性请求：打开并聚焦某类内容；seq 递增（同路径重复点击也要触发） */
-  request?: { tab: ViewerPaneType; seq: number; url?: string; relPath?: string; name?: string; ask?: unknown } | null
+  request?: ViewerOpenRequest | null
   onOpenInEditor: (relPath: string) => void
   onOpenFullscreen?: (relPath: string) => void
+  /**
+   * 文件页签「讲解此页」：只把页信息交给宿主，发送逻辑留在宿主（课件页签保留该动作）。
+   */
+  onTalkPage?: (page: { name: string; page: number; n: number; text: string }) => void
   onQuote: (text: string) => void
   onFloat: (laneId: string) => void
+  /**
+   * 当前活动页签对应的仓库相对路径（笔记 / 文件 / 电子书）；其它类型或面板关闭为 null。
+   * 左栏文件树用它回显「正在看哪个文件」——工件栏退役后宿主不再持有页签状态。
+   */
+  onActivePathChange?: (relPath: string | null) => void
   anchorMessageId?: string
   onTabChange?: (tab: ViewerPaneType) => void
   /**
@@ -202,8 +217,8 @@ export interface RightViewerProps {
 export function RightViewer(props: RightViewerProps): JSX.Element {
   const {
     open, onClose, rootId, sessionId, sessionTitle, workspaceId,
-    request, onOpenInEditor, onOpenFullscreen, onQuote, onFloat,
-    anchorMessageId, onTabChange, onWidthChange, reserve,
+    request, onOpenInEditor, onOpenFullscreen, onTalkPage, onQuote, onFloat,
+    onActivePathChange, anchorMessageId, onTabChange, onWidthChange, reserve,
   } = props
 
   /* ------ 首帧页签（迁移只跑一次） ------ */
@@ -227,6 +242,10 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   const [focusToken, setFocusToken] = useState(0)
   /** 旁问运行态变化（保活保护项；值只用来驱动重算） */
   const [runTick, bumpRun] = useReducer((x: number) => x + 1, 0)
+  /** 全屏放大（⤢）：覆盖整个 AI 教学模块区域；Esc / 再点一次退出，关面板时自动复位 */
+  const [expanded, setExpanded] = useState(false)
+  /** 全屏时的实测宽度：pane / 页签条靠它做宽度自适应（此刻记忆宽度不是可见宽度） */
+  const [expandedWidth, setExpandedWidth] = useState(0)
 
   const { width, dragging, beginDrag, reset } = useViewerWidth({ open, reserve })
   const reducedMotion = usePrefersReducedMotion()
@@ -259,6 +278,12 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   onTabChangeRef.current = onTabChange
   const onWidthChangeRef = useRef(onWidthChange)
   onWidthChangeRef.current = onWidthChange
+  const onTalkPageRef = useRef(onTalkPage)
+  onTalkPageRef.current = onTalkPage
+  const onActivePathChangeRef = useRef(onActivePathChange)
+  onActivePathChangeRef.current = onActivePathChange
+  /** 全屏按钮（退出全屏后焦点回到它） */
+  const expandBtnRef = useRef<HTMLButtonElement | null>(null)
 
   const apply = useCallback((nextTabs: ViewerTab[], nextActive: string | null) => {
     tabsRef.current = nextTabs
@@ -327,7 +352,13 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   /** 打开 / 聚焦笔记文件；同文件去重（两个实例各持一份 mtime 基线会互相踩）。 */
   const openNote = useCallback((
     relPath: string,
-    meta?: { title?: string; fileKind?: NotesFileKind; ownerSessionId?: string | null },
+    meta?: {
+      title?: string
+      fileKind?: NotesFileKind
+      ownerSessionId?: string | null
+      /** 文件树 / 素材点开：默认进预览（仅 .md 生效） */
+      previewDefault?: boolean
+    },
   ): string => {
     const rel = String(relPath ?? '').replace(/\\/g, '/').trim()
     if (!rel) {
@@ -351,6 +382,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
       fileKind: kind,
       ownerSessionId: meta?.ownerSessionId ?? (kind === 'note' ? null : (sessionIdRef.current || null)),
       title: meta?.title,
+      previewDefault: meta?.previewDefault,
     }, Date.now())
     apply(appendTab(tabsRef.current, tab).tabs, tab.id)
     return tab.id
@@ -480,6 +512,178 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     apply(updateTab(tabsRef.current, tabId, patch), activeIdRef.current)
   }, [apply])
 
+  /* ------------------------------------------------------------ 文件统一入口 */
+
+  /**
+   * 打开 / 聚焦仓库内的任意文件。**所有文件入口都必须走它**（文件树 / 素材 / 产物 /
+   * 导图节点 ref）：跨 `notes` / `file` 两种页签按路径去重，避免同一文件开出两个实例。
+   *
+   * 分派规则（方案 §4.2）：`meta.fileKind` 有值 → 文件页签；否则一律笔记页签
+   * （md / txt / 非导图 json），`previewDefault` 只对笔记页签生效。
+   */
+  const openFile = useCallback((
+    relPath: string,
+    meta?: { fileKind?: FilePaneKind; title?: string; previewDefault?: boolean; page?: number },
+  ): string => {
+    const rel = String(relPath ?? '').replace(/\\/g, '/').trim()
+    // 空路径不造空文件页签（生成中占位只走 begin）：退回笔记空页签，保持旧口径
+    if (!rel) return openNote('')
+    // 跨类型去重：命中就聚焦；文件页签 bump `rev` 重读，笔记页签走一次性请求重新读盘
+    const hit = findAnyPathTab(tabsRef.current, rel)
+    if (hit) {
+      if (hit.type === 'file') {
+        patchTab(hit.id, {
+          rev: (hit.rev ?? 0) + 1,
+          ...(meta?.page !== undefined ? { page: meta.page } : {}),
+        })
+      } else {
+        sendPaneReq(hit.id, { relPath: rel, name: meta?.title })
+      }
+      selectTab(hit.id)
+      return hit.id
+    }
+    if (meta?.fileKind) {
+      const tab = makeFileTab(newTabId(), {
+        relPath: rel,
+        fileKind: meta.fileKind,
+        title: meta?.title,
+        page: meta?.page,
+      }, Date.now())
+      apply(appendTab(tabsRef.current, tab).tabs, tab.id)
+      return tab.id
+    }
+    // 笔记页签复用 openNote：文件种类推导与画像 / 要求的会话归属只有那一处口径
+    return openNote(rel, { title: meta?.title, previewDefault: meta?.previewDefault })
+  }, [apply, openNote, patchTab, selectTab, sendPaneReq])
+
+  /* ------------------------------------------------------------ AI 产物占位协议 */
+
+  /** 生成中占位查找：给了 slug 就按 slug 匹配，没给就找「无 slug 的生成中」 */
+  const findGenerating = useCallback((slug?: string): FileViewerTab | null => {
+    const key = String(slug ?? '').trim()
+    for (const t of tabsRef.current) {
+      if (t.type !== 'file' || t.generating !== true) continue
+      if (key ? t.slug === key : !t.slug) return t
+    }
+    return null
+  }, [])
+
+  /**
+   * `begin`：AI 开始生成 → 生成中占位（按 slug 合并，不重复开；自动成为活动页签）。
+   * 宿主在发请求时已经把查看器展开，壳这里只维护页签。
+   */
+  const beginArtifact = useCallback((input: {
+    fileKind: FilePaneKind
+    slug?: string
+    name?: string
+    page?: number
+  }): void => {
+    const slug = String(input.slug ?? '').trim()
+    const fileKind: FilePaneKind = isFilePaneKind(input.fileKind) ? input.fileKind : 'html'
+    const title = String(input.name ?? '').trim()
+    const existing = findGenerating(slug)
+    if (existing) {
+      if (title) patchTab(existing.id, { title })
+      selectTab(existing.id)
+      return
+    }
+    // 占位 id 按 slug 稳定复用（commit 后就地转正）；但上一轮同名产物可能还开着正式页签，
+    // 那时必须换一次性 id —— 重复 id 会让 tabById / React key 同时指错页签。
+    const genId = tabById(tabsRef.current, `gen:${slug || fileKind}`)
+      ? newTabId()
+      : `gen:${slug || fileKind}`
+    const tab = makeFileTab(genId, {
+      fileKind,
+      generating: true,
+      slug,
+      title,
+      page: input.page,
+    }, Date.now())
+    apply(appendTab(tabsRef.current, tab).tabs, tab.id)
+  }, [apply, findGenerating, patchTab, selectTab])
+
+  /**
+   * `commit`：生成完成 → 占位原地转正式页签。
+   *
+   * 同一 `relPath` 已经有正式页签时**不新开**：删掉占位、聚焦已有页签并 bump `rev`
+   * 让它重读盘（同一文件两个实例会互相踩 mtime 基线）。
+   */
+  const commitArtifact = useCallback((input: {
+    fileKind: FilePaneKind
+    slug?: string
+    relPath: string
+    name?: string
+    page?: number
+  }): void => {
+    const rel = String(input.relPath ?? '').replace(/\\/g, '/').trim()
+    if (!rel) return
+    const fileKind: FilePaneKind = isFilePaneKind(input.fileKind) ? input.fileKind : 'html'
+    const title = String(input.name ?? '').trim() || stemOf(rel) || '文件'
+    const ph = findGenerating(input.slug)
+    if (!ph) {
+      openFile(rel, { fileKind, title: input.name, page: input.page })
+      return
+    }
+    const formal = findFileTab(tabsRef.current, rel)
+    if (formal && formal.id !== ph.id) {
+      const closed = closeTabById(tabsRef.current, activeIdRef.current, ph.id)
+      apply(closed.tabs, formal.id)
+      patchTab(formal.id, {
+        rev: (formal.rev ?? 0) + 1,
+        ...(input.page !== undefined ? { page: input.page } : {}),
+      })
+      return
+    }
+    // 原地转正：`generating` / `slug` 必须摘掉（前者决定持久化与禁关，后者是占位身份）
+    const next = tabsRef.current.map((t): ViewerTab => {
+      if (t.id !== ph.id || t.type !== 'file') return t
+      const page = input.page !== undefined
+        ? input.page
+        : (typeof t.page === 'number' ? t.page : undefined)
+      const out: FileViewerTab = {
+        id: t.id,
+        type: 'file',
+        title,
+        lastActiveAt: Date.now(),
+        relPath: rel,
+        fileKind,
+        rev: (t.rev ?? 0) + 1,
+      }
+      if (page !== undefined) out.page = page
+      return out
+    })
+    apply(activateTab(next, ph.id, Date.now()).tabs, ph.id)
+  }, [activateTab, apply, findGenerating, openFile, patchTab])
+
+  /**
+   * `drop`：生成失败 / 停止 → 直接移除生成中占位（不走关闭动效，占位本来就没有内容）。
+   * 活动页签落回邻位：优先右侧邻页，没有就退左侧，最后一个 → 零态。
+   */
+  const dropArtifact = useCallback((slug?: string): void => {
+    const key = String(slug ?? '').trim()
+    const drop = new Set<string>()
+    for (const t of tabsRef.current) {
+      if (t.type !== 'file' || t.generating !== true) continue
+      if (key && t.slug !== key) continue
+      drop.add(t.id)
+    }
+    if (drop.size === 0) return
+    const next = tabsRef.current.filter((t) => !drop.has(t.id))
+    let nextActive = activeIdRef.current
+    if (!nextActive || drop.has(nextActive)) {
+      const at = tabsRef.current.findIndex((t) => t.id === activeIdRef.current)
+      const right = next.find((t) => tabsRef.current.indexOf(t) > at)
+      nextActive = (right ?? next[next.length - 1])?.id ?? null
+    }
+    apply(next, nextActive)
+    drop.forEach((id) => {
+      closeTimersRef.current.delete(id)
+      cbCacheRef.current.forEach((_v, key2) => {
+        if (key2.startsWith(`${id}:`)) cbCacheRef.current.delete(key2)
+      })
+    })
+  }, [apply])
+
   const registerFlush = useCallback((tabId: string) => {
     let fn = flushRegistrarRef.current.get(tabId)
     if (!fn) {
@@ -511,7 +715,8 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
    */
   const closeTab = useCallback(async (id: string) => {
     const tab = tabById(tabsRef.current, id)
-    if (!tab || closeTimersRef.current.has(id)) return
+    // 生成中的文件占位禁关（旧工件栏口径）：完成时壳会原地转正；中途关掉只会「又冒出来」
+    if (!tab || (tab.type === 'file' && tab.generating) || closeTimersRef.current.has(id)) return
     const flush = flushRef.current.get(id)
     if (flush) {
       const closable = await flush().catch(() => true)
@@ -556,17 +761,52 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     lastReqSeqRef.current = request.seq
     const type = request.tab
     if (!isViewerTabKey(type)) return
+    const rel = String(request.relPath ?? '').replace(/\\/g, '/').trim()
+    const mode = request.mode ?? 'open'
 
+    // AI 产物协议：不带 mode 一律按普通打开处理，老调用方形状不变
+    if (mode === 'drop') {
+      dropArtifact(request.slug)
+      return
+    }
+    if (mode === 'begin') {
+      beginArtifact({
+        fileKind: isFilePaneKind(request.fileKind) ? request.fileKind : 'html',
+        slug: request.slug,
+        name: request.name,
+        page: request.page,
+      })
+      return
+    }
+    if (mode === 'commit') {
+      commitArtifact({
+        fileKind: isFilePaneKind(request.fileKind) ? request.fileKind : 'html',
+        slug: request.slug,
+        relPath: rel,
+        name: request.name,
+        page: request.page,
+      })
+      return
+    }
+
+    if (type === 'file') {
+      // 空路径不造空文件页签（生成中占位只走 begin）
+      if (!rel) return
+      openFile(rel, {
+        fileKind: isFilePaneKind(request.fileKind) ? request.fileKind : undefined,
+        title: request.name,
+        page: request.page,
+      })
+      return
+    }
     if (type === 'notes') {
-      const rel = String(request.relPath ?? '').replace(/\\/g, '/').trim()
       const hit = rel ? findNotesTab(tabsRef.current, rel) : null
-      const id = openNote(rel, { title: request.name })
+      const id = openNote(rel, { title: request.name, previewDefault: request.previewDefault })
       // 已经开着同一个文件：让它重新读一次盘（文件被删后 ensure 又建回来的场景）
       if (hit) sendPaneReq(id, { relPath: rel, name: request.name })
       return
     }
     if (type === 'books') {
-      const rel = String(request.relPath ?? '').replace(/\\/g, '/').trim()
       const hit = rel ? findBooksTabByBook(tabsRef.current, rel) : null
       const id = openBook(rel, request.name)
       if (hit) sendPaneReq(id, { relPath: rel, name: request.name })
@@ -625,7 +865,8 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
       }
     }
     openWholeDraft()
-  }, [request, openNote, openBook, openWeb, selectTab, openAskDraft, openWholeDraft, apply, sendPaneReq])
+  }, [request, openNote, openBook, openWeb, selectTab, openAskDraft, openWholeDraft, apply, sendPaneReq,
+    openFile, beginArtifact, commitArtifact, dropArtifact])
 
   /* ------------------------------------------------------------ 持久化 */
 
@@ -668,12 +909,73 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     setFocusToken((n) => n + 1)
   }, [open])
 
-  // 占宽上报（关闭报 0）：中栏让位与查看器宽度走同一条曲线
+  /* ------------------------------------------------------------ 全屏（⤢） */
+
+  /** 全屏只在面板打开时成立：关面板即复位（下次打开回到原宽度） */
+  const full = open && expanded
+
+  // 关面板 → 退出全屏（不把全屏态留给下一次打开）
   useEffect(() => {
-    onWidthChangeRef.current?.(open ? width : 0)
-  }, [open, width])
+    if (!open && expanded) setExpanded(false)
+  }, [open, expanded])
+
+  // 全屏时实测可见宽度：pane 的窄栏适配 / 页签条的收起阈值都按这个值判
+  useEffect(() => {
+    if (!full) return
+    const el = rootRef.current
+    if (!el) return
+    const measure = () => {
+      const next = Math.round(el.getBoundingClientRect().width)
+      if (next > 0) setExpandedWidth((prev) => (prev === next ? prev : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [full])
+
+  // Esc 退出全屏：只在全屏时挂；`stopPropagation` 免得被外层（页面 / 弹窗）再吃一次。
+  // 故意走冒泡阶段的 window 监听：页签条弹层自己的 Esc 会先 `stopPropagation` 关菜单，
+  // 那一拍不该顺手把全屏也退掉。
+  useEffect(() => {
+    if (!full) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      e.stopPropagation()
+      setExpanded(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [full])
+
+  // 退出全屏后把焦点交回全屏按钮（键盘用户不至于掉到 body）
+  const wasExpandedRef = useRef(false)
+  useEffect(() => {
+    if (full) {
+      wasExpandedRef.current = true
+      return
+    }
+    if (!wasExpandedRef.current) return
+    wasExpandedRef.current = false
+    if (!open) return
+    expandBtnRef.current?.focus({ preventScroll: true })
+  }, [full, open])
+
+  // 占宽上报（关闭 / 全屏都报 0）：全屏时中栏不需要让位，退出后按原宽度恢复
+  useEffect(() => {
+    onWidthChangeRef.current?.(open && !expanded ? width : 0)
+  }, [open, width, expanded])
 
   const activeType = tabById(tabs, activeId)?.type ?? null
+
+  /** 活动页签的仓库相对路径：文件树高亮用（笔记 / 文件 / 电子书才有意义） */
+  const activeTab = tabById(tabs, activeId)
+  const activePath = activeTab && (activeTab.type === 'notes' || activeTab.type === 'file' || activeTab.type === 'books')
+    ? (activeTab.relPath || null)
+    : null
+  useEffect(() => {
+    onActivePathChangeRef.current?.(open ? activePath : null)
+  }, [open, activePath])
 
   // 页签类型变化 → 顶栏按钮的 tooltip / 记忆（值没变就不回调，避免每次改标题都通知一次）
   useEffect(() => {
@@ -712,7 +1014,12 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
 
   /* ------------------------------------------------------------ 渲染 */
 
-  const style = viewerWidthStyle(open, width)
+  // 全屏：铺满整个模块区域（含左栏）；宽度过渡与收起共用同一条曲线，退回来仍走记忆宽度
+  const style = full
+    ? { left: 0, right: 0, width: '100%', minWidth: '0px' }
+    : viewerWidthStyle(open, width)
+  /** pane / 页签条能看见的宽度（全屏时是实测值，不是记忆宽度） */
+  const viewWidth = full && expandedWidth > 0 ? expandedWidth : width
 
   /** 该页签有没有一次性请求（外链换址 / 同一文件重新读盘） */
   const reqFor = (tabId: string): PaneOpenRequest | null =>
@@ -723,7 +1030,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     const ctx = {
       rootId,
       workspaceId,
-      width,
+      width: viewWidth,
       active,
       open,
       tabId: tab.id,
@@ -753,6 +1060,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
             {...ctx}
             request={reqFor(tab.id)}
             initialRelPath={tab.relPath}
+            initialPreview={tab.previewDefault}
             fileKind={tab.fileKind}
             ownerSessionId={tab.ownerSessionId}
             displayName={tab.title}
@@ -763,6 +1071,30 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
             registerFlush={registerFlush(tab.id)}
             onRequestOpenNote={cached(`${tab.id}:openNote`, () => (rel: string) => { openNote(rel) })}
             onRequestNewNote={cached(`${tab.id}:newNote`, () => () => { void newNote() })}
+          />
+        </PaneSlot>
+      )
+    }
+    if (tab.type === 'file') {
+      return (
+        <PaneSlot key={tab.id} tabId={tab.id} active={active}>
+          <FilePane
+            {...ctx}
+            request={reqFor(tab.id)}
+            initialRelPath={tab.relPath}
+            fileKind={tab.fileKind}
+            generating={tab.generating}
+            slug={tab.slug}
+            rev={tab.rev ?? 0}
+            page={tab.page}
+            displayName={tab.title}
+            onTitleChange={cached(`${tab.id}:title`, () => (t: string) => setTitle(tab.id, t))}
+            onPageChange={cached(`${tab.id}:page`, () => (p: number) => patchTab(tab.id, { page: p }))}
+            onOpenInEditor={onOpenInEditor}
+            onOpenFileRef={cached(`${tab.id}:fileRef`, () => (rel: string) => { openFile(rel) })}
+            onTalkPage={cached(`${tab.id}:talk`, () => (
+              p: { name: string; page: number; n: number; text: string },
+            ) => onTalkPageRef.current?.(p))}
           />
         </PaneSlot>
       )
@@ -806,8 +1138,11 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     <div
       ref={rootRef}
       data-right-viewer="1"
+      data-viewer-expanded={full ? '1' : undefined}
       inert={!open}
-      className={`absolute top-0 right-0 bottom-0 z-30 flex flex-col overflow-hidden bg-[var(--bg-primary)] ${
+      className={`absolute top-0 right-0 bottom-0 flex flex-col overflow-hidden bg-[var(--bg-primary)] ${
+        full ? 'z-40' : 'z-30'
+      } ${
         open ? 'border-l border-[var(--border-color)] shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.35)]' : 'shadow-none'
       }`}
       style={{
@@ -818,30 +1153,36 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
           : 'width var(--dur-std) var(--ease-kb), box-shadow var(--dur-std) var(--ease-kb)',
       }}
     >
-      {/* 左缘手柄：8px 热区、内贴（不外探避免与自己那条 border-l 形成双线） */}
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="拖拽调整宽度，双击复位"
-        data-tip="拖拽调整宽度，双击复位"
-        className="group absolute top-0 bottom-0 left-0 z-10"
-        style={{ width: 8, cursor: 'col-resize' }}
-        onPointerDown={beginDrag}
-        onDoubleClick={reset}
-      >
+      {/* 左缘手柄：8px 热区、内贴（不外探避免与自己那条 border-l 形成双线）。
+          全屏时不渲染：这时候没有「右栏宽度」可调，拖它就是拖整块模块。 */}
+      {!full && (
         <div
-          className={`absolute inset-y-0 left-0 w-px transition-colors ${
-            dragging ? 'bg-[var(--accent)]' : 'bg-transparent group-hover:bg-[var(--accent)]/40'
-          }`}
-        />
-      </div>
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="拖拽调整宽度，双击复位"
+          data-tip="拖拽调整宽度，双击复位"
+          className="group absolute top-0 bottom-0 left-0 z-10"
+          style={{ width: 8, cursor: 'col-resize' }}
+          onPointerDown={beginDrag}
+          onDoubleClick={reset}
+        >
+          <div
+            className={`absolute inset-y-0 left-0 w-px transition-colors ${
+              dragging ? 'bg-[var(--accent)]' : 'bg-transparent group-hover:bg-[var(--accent)]/40'
+            }`}
+          />
+        </div>
+      )}
 
       <ViewerChrome
         tabs={tabs}
         activeId={activeId}
-        width={width}
+        width={viewWidth}
         closingIds={closingIds}
         autoFocusToken={focusToken}
+        expanded={full}
+        expandButtonRef={expandBtnRef}
+        onToggleExpand={() => setExpanded((v) => !v)}
         onSelect={selectTab}
         onCloseTab={requestClose}
         onClosePanel={onClose}

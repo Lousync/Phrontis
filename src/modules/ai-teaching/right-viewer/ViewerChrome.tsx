@@ -3,9 +3,10 @@
  *
  * 形态（PLAN §3 A + §10）：
  *   · ≥400px：单行页签条（图标 + 标题，当前页签贴条首、下划线 + 更宽额度），
- *     溢出时右缘渐隐并出现 `⌄`（全部页签）；`+` / `×` 固定在右端；
+ *     溢出时右缘渐隐并出现 `⌄`（全部页签）；`+` / `⤢` / `×` 固定在右端；
  *   · <400px：收成「当前页签名 + `⌄`」，不再硬塞半截页签名；
- *   · 页签自己的 `×` 只在 hover / 当前页签显形；头部 `×` 永远是「关面板」。
+ *   · 页签自己的 `×` 只在 hover / 当前页签显形；头部 `×` 永远是「关面板」；
+ *   · `⤢` 是**查看器全屏**（覆盖整个模块区域），与「关闭面板」并排、`Esc` 可退。
  *
  * 弹层都在头部内部绝对定位（面板根 `overflow-hidden` 已把它们裁在面板内）：
  * 打开时由壳 `webPaneHideAll()`，关闭后再 bump 令牌让网页原生视图回来。
@@ -13,9 +14,12 @@
 
 import {
   useCallback, useEffect, useLayoutEffect, useRef, useState,
-  type KeyboardEvent as ReactKeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent, type RefObject,
 } from 'react'
-import { BookOpen, ChevronDown, FileText, Globe, List, MessageCircle, NotebookPen, Plus, User, X } from 'lucide-react'
+import {
+  BookOpen, ChevronDown, FileCode2, FileText, Globe, Image as ImageIcon, List,
+  Maximize2, MessageCircle, Minimize2, Network, NotebookPen, Plus, Presentation, User, X,
+} from 'lucide-react'
 import type { AgentSideLaneInfo } from '../../../types'
 import type { ViewerPaneType } from './paneContracts'
 import {
@@ -30,15 +34,25 @@ const TYPE_ICONS: Record<ViewerPaneType, typeof Globe> = {
   web: Globe,
   notes: NotebookPen,
   books: BookOpen,
+  // `file` 不进 `+` 菜单（没有通用文件选择器）；这里只是保住 Record 完整，实际图标走 fileKind
+  file: FileText,
   ask: MessageCircle,
 }
 
-/** 页签图标：会话文件（画像 / 要求）用语义图标，其余按 kind */
+/** 页签图标：会话文件（画像 / 要求）用语义图标；文件页签按 `fileKind`；其余按 kind */
 function TabIcon({ tab, size = 12 }: { tab: ViewerTab; size?: number }) {
   if (tab.type === 'notes') {
     if (tab.fileKind === 'profile') return <User size={size} className="shrink-0 opacity-65" />
     if (tab.fileKind === 'constraints') return <List size={size} className="shrink-0 opacity-65" />
     return <FileText size={size} className="shrink-0 opacity-65" />
+  }
+  if (tab.type === 'file') {
+    const Icon =
+      tab.fileKind === 'html' ? FileCode2
+        : tab.fileKind === 'image' ? ImageIcon
+          : tab.fileKind === 'mindmap' ? Network
+            : Presentation
+    return <Icon size={size} className="shrink-0 opacity-65" />
   }
   const Icon = TYPE_ICONS[tab.type]
   return <Icon size={size} className="shrink-0 opacity-65" />
@@ -82,6 +96,11 @@ export interface ViewerChromeProps {
   onSelect: (id: string) => void
   onCloseTab: (id: string) => void
   onClosePanel: () => void
+  /** 全屏放大（覆盖整个模块区域）；再点一次退出 */
+  expanded: boolean
+  onToggleExpand: () => void
+  /** 全屏按钮的引用：退出全屏后壳把焦点交回它 */
+  expandButtonRef?: RefObject<HTMLButtonElement | null>
   onNewTab: (type: ViewerPaneType) => void
   /** 问整段对话（新建整段草稿页签） */
   onNewWholeAsk: () => void
@@ -94,7 +113,8 @@ export interface ViewerChromeProps {
 export function ViewerChrome(props: ViewerChromeProps) {
   const {
     tabs, activeId, width, closingIds, autoFocusToken,
-    onSelect, onCloseTab, onClosePanel, onNewTab, onNewWholeAsk, onOpenLane, onMenuOpenChange,
+    onSelect, onCloseTab, onClosePanel, expanded, onToggleExpand, expandButtonRef,
+    onNewTab, onNewWholeAsk, onOpenLane, onMenuOpenChange,
   } = props
 
   const [menu, setMenu] = useState<MenuKind>('none')
@@ -202,6 +222,8 @@ export function ViewerChrome(props: ViewerChromeProps) {
     const active = tab.id === activeId
     const isClosing = closing.has(tab.id)
     const title = tabTitleOf(tab)
+    /** 生成中的文件占位禁关（旧工件栏口径）：完成后由壳原地转正，关掉会让页签「自己又冒出来」 */
+    const canClose = !(tab.type === 'file' && tab.generating)
     if (forList) {
       return (
         <div
@@ -222,16 +244,18 @@ export function ViewerChrome(props: ViewerChromeProps) {
             <span className={active ? 'text-[var(--accent)]' : ''}><TabIcon tab={tab} /></span>
             <span className="min-w-0 flex-1 truncate">{title}</span>
           </button>
-          <button
-            type="button"
-            aria-label={`关闭 ${title}`}
-            data-tip="关闭页签"
-            tabIndex={-1}
-            onClick={() => onCloseTab(tab.id)}
-            className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
-          >
-            <X size={10} />
-          </button>
+          {canClose && (
+            <button
+              type="button"
+              aria-label={`关闭 ${title}`}
+              data-tip="关闭页签"
+              tabIndex={-1}
+              onClick={() => onCloseTab(tab.id)}
+              className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+            >
+              <X size={10} />
+            </button>
+          )}
         </div>
       )
     }
@@ -258,16 +282,18 @@ export function ViewerChrome(props: ViewerChromeProps) {
           <span className={active ? 'text-[var(--accent)] [&>*]:opacity-100' : ''}><TabIcon tab={tab} /></span>
           <span className="min-w-0 truncate">{title}</span>
         </button>
-        <button
-          type="button"
-          aria-label={`关闭 ${title}`}
-          data-tip="关闭页签"
-          tabIndex={active ? 0 : -1}
-          onClick={() => onCloseTab(tab.id)}
-          className={`mr-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-opacity hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] group-hover:opacity-100 group-focus-within:opacity-100 ${active ? 'opacity-100' : 'opacity-0'}`}
-        >
-          <X size={10} />
-        </button>
+        {canClose && (
+          <button
+            type="button"
+            aria-label={`关闭 ${title}`}
+            data-tip="关闭页签"
+            tabIndex={active ? 0 : -1}
+            onClick={() => onCloseTab(tab.id)}
+            className={`mr-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-opacity hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] group-hover:opacity-100 group-focus-within:opacity-100 ${active ? 'opacity-100' : 'opacity-0'}`}
+          >
+            <X size={10} />
+          </button>
+        )}
         {/* 当前页签下划线：静态 2px（不新增 keyframes；切换由内容 .kb-view-in 承担） */}
         {active && (
           <span aria-hidden className="pointer-events-none absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-[var(--accent)]" />
@@ -305,6 +331,24 @@ export function ViewerChrome(props: ViewerChromeProps) {
       className={`${iconBtnCls} text-[var(--text-muted)]`}
     >
       <X size={14} />
+    </button>
+  )
+
+  /**
+   * 全屏（⤢）：把查看器铺满整个 AI 教学模块区域（含左栏）。
+   * `aria-pressed` 而不是 `aria-expanded` —— 这是开关态，不是「展开某个菜单」。
+   */
+  const expandButton = (
+    <button
+      ref={expandButtonRef}
+      type="button"
+      aria-label={expanded ? '退出全屏' : '全屏'}
+      aria-pressed={expanded}
+      data-tip={expanded ? '退出全屏（Esc）' : '全屏'}
+      onClick={onToggleExpand}
+      className={iconBtnCls}
+    >
+      {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
     </button>
   )
 
@@ -368,6 +412,7 @@ export function ViewerChrome(props: ViewerChromeProps) {
 
       {!narrow && listButton}
       {plusButton}
+      {expandButton}
       {closePanelButton}
 
       {/* ---------- 浮层：新建菜单 / 全部页签 / 旁问历史 ---------- */}

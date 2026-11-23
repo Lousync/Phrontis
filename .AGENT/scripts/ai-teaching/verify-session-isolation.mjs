@@ -40,8 +40,10 @@ check('查看登记按 activeId + isActive（切模块后不吞角标）',
 console.log('\n=== B. 旧 run 晚到不污染新会话 ===')
 check('refreshMessages 前后都校验 desiredSid',
   (teach.match(/activeIdRef\.current !== sid/g) || []).length >= 2, '')
+// 2026-11-23：openSession 里新增了「切会话先 drop 生成中占位」6 行，把同步赋值挤出了 500 字符窗口。
+// 窗口放宽到 900（仍锚在同一个函数体内，语义不变：同步写 activeIdRef 早于 refreshMessages）。
 check('openSession 同步写 activeIdRef（避免 effect 时序误杀首载）',
-  /const openSession[\s\S]{0,500}activeIdRef\.current = sid/.test(teach), '')
+  /const openSession[\s\S]{0,900}activeIdRef\.current = sid/.test(teach), '')
 check('onAgentStep 按 sessionId 过滤（不再按 chatId）',
   /onAgentStep\(\(\{ sessionId, step \}\)/.test(teach) && /sessionId !== activeIdRef\.current/.test(teach), '')
 check('停止按 sessionId（agentAbortSession，不再 abort chatId）',

@@ -110,11 +110,12 @@ check('注入说明含建课工具指引', course.includes('course.outline.write
 // 单点细节（工具 schema / 适配器端点 / 尺寸解析）在 ai-tools-audit/verify-image-tool.mjs 里，
 // 这里只锁「教学面这条链子是不是真的接上了」—— 断了的表象都是"点了没反应"。
 const sources = read('electron/lib/aiTeachingSources.ts')
-const artifacts = read('src/modules/ai-teaching/artifacts.ts')
-const pane = read('src/modules/ai-teaching/ArtifactsPane.tsx')
 const tree = read('src/modules/ai-teaching/AiTeachFileTree.tsx')
 const teachIdx = read('src/modules/ai-teaching/index.tsx')
 const imgFmt = read('src/lib/imageFormats.ts')
+const filePane = read('src/modules/ai-teaching/right-viewer/FilePane.tsx')
+const viewerShell = read('src/modules/ai-teaching/right-viewer/RightViewer.tsx')
+const viewerTabsSrc = read('src/modules/ai-teaching/right-viewer/viewerTabs.ts')
 
 console.log('\n[阶段二 · 落盘] aiTeachingSources.writeImage')
 check('导出 writeImage', sources.includes('export function writeImage'))
@@ -129,13 +130,18 @@ check("按 ctx.source === 'aiTeaching' 分流（不按 sessionId 空值判）",
 check('教学面无会话归属 -> 直接拒绝', tools.includes('image 在 AI 教学面需要会话归属'))
 check('普通对话面仍落 .attachments/', tools.includes('stageImageVersioned(root, str(args.slug), buf)'))
 
-console.log('\n[阶段二 · 工件栏] ArtTab / ArtifactsPane')
-check("ArtTab.kind 含 'image'", /kind: 'md' \| 'html' \| 'pptx' \| 'mindmap' \| 'image'/.test(artifacts))
-check('ArtTab 带 w/h/bytes 元信息字段', artifacts.includes('w?: number') && artifacts.includes('h?: number') && artifacts.includes('bytes?: number'))
-check('ArtifactsPane 渲染图片页签', pane.includes("tab.kind === 'image'") && pane.includes('<ImmersiveImageView'))
-check('图片页签复用批 3 查看器（不另造一份）', pane.includes("components/shared/image/ImmersiveImageView"))
-check('生成中占位有 image 文案与落点说明', pane.includes('image 正在生成图片…') && pane.includes('产出将写入会话 outputs/ 目录'))
-check('图片页签不给「编辑」也不给 ⟳', (pane.match(/tab\.kind !== 'image'/g) || []).length >= 2)
+console.log('\n[阶段二 · 文件页签] FilePane / viewerTabs')
+check("FilePaneKind 含 'image'", /export type FilePaneKind = 'html' \| 'image' \| 'mindmap' \| 'pptx'/.test(viewerTabsSrc))
+check('工件栏页签模型已删除（ArtTab / ArtifactsPane 文件不再存在）',
+  !existsSync(join(ROOT, 'src/modules/ai-teaching/artifacts.ts'))
+  && !existsSync(join(ROOT, 'src/modules/ai-teaching/ArtifactsPane.tsx')))
+check('FilePane 渲染图片页签', filePane.includes("fileKind === 'image'") && filePane.includes('<ImmersiveImageView'))
+check('图片页签复用批 3 查看器（不另造一份）', filePane.includes("components/shared/image/ImmersiveImageView"))
+check('生成中占位按 fileKind 取文案（图片 = 图片）',
+  filePane.includes("image: '图片'") && filePane.includes('正在生成{GEN_LABEL[fileKind]}…'))
+check('图片页签不给「编辑」入口（只有 html 有「在编辑器中打开」）',
+  /fileKind === 'html' && onOpenInEditor/.test(filePane)
+  && !/fileKind === 'image'[\s\S]{0,260}onOpenInEditor/.test(filePane))
 
 console.log('\n[阶段二 · 文件树] AiTeachFileTree 图片接查看器')
 check('新增 onOpenImage 回调', tree.includes('onOpenImage?: (rel: string) => void'))
@@ -146,17 +152,28 @@ check('点击/右键图片走工件栏页签', tree.includes('onOpenImage(n.relP
 console.log('\n[阶段二 · 会话接线] ai-teaching/index.tsx')
 check('占位页签与完成事件同一条 slug 回落规则',
   (teachIdx.match(/\|\| 'image'/g) || []).length >= 2)
-check('artifact kind=image -> 图片页签（不再是直接 return）',
-  teachIdx.includes("a.kind === 'image'") && teachIdx.includes("kind: 'image', rel: a.rel"))
-check('openArtFile 认图片扩展名（排在文本兜底之前）',
-  /isRenderableImagePath\(rel\)[\s\S]{0,300}kind: 'image'/.test(teachIdx))
+check('artifact kind=image -> 文件页签（begin / commit 同一 slug 回落）',
+  teachIdx.includes("a.kind === 'image'") && teachIdx.includes("mode: 'commit', fileKind: 'image'"))
+check('openViewerFile 认图片扩展名（排在文本兜底之前）',
+  /isRenderableImagePath\(rel\)[\s\S]{0,320}fileKind: 'image'/.test(teachIdx)
+  && teachIdx.indexOf('isRenderableImagePath(rel)') < teachIdx.indexOf('/\\.(?:md|markdown|txt)$/i'))
 check('文件树 onOpenImage 已接上', teachIdx.includes('onOpenImage={treeOpenArt}'))
-check('「本次改动」里图片 / 示意图 / 导图进工件栏（不发 kb-open-note）',
-  teachIdx.includes('const changeOpensInArtifactPane')
-  && teachIdx.includes("tool === 'visual.html' || tool === 'image'")
-  && teachIdx.includes("tool === 'artifact.edit' && /\\.(?:html?|json)$/i"))
-check('图片页签不进「按文本回读」那份清单', teachIdx.includes("t.kind !== 'image' && (rel ? t.rel === rel : t.kind === 'md')"))
-check('切回会话能恢复图片页签（docRel 纳入 image）', teachIdx.includes("t.kind === 'image') ? t.rel : null"))
+check('负向：「本次改动」清单已删除（无 lastChanges / changeOpensInArtifactPane）',
+  !teachIdx.includes('lastChanges') && !teachIdx.includes('changeOpensInArtifactPane')
+  && !teachIdx.includes('本次改动（'))
+check('负向：图片页签不再走「按文本回读」（宿主没有 artTabsRef / syncSessionFiles）',
+  !teachIdx.includes('artTabsRef') && !teachIdx.includes('syncSessionFiles'))
+{
+  const osAt = teachIdx.indexOf('const openSession = useCallback')
+  const osEnd = teachIdx.indexOf('}, [refreshMessages', osAt)
+  const openSessionBody = osAt >= 0 && osEnd > osAt ? teachIdx.slice(osAt, osEnd) : ''
+  check('切会话不再按会话恢复产物页签（openSession 不读 nav.arts / 不重开文件）',
+    openSessionBody.length > 200 && !openSessionBody.includes('readNav(')
+    && !openSessionBody.includes('nav.arts') && !openSessionBody.includes('openViewerFile'))
+}
+check('查看器页签全局持久化：serializeViewerState 支持 file',
+  /type: 'file',\s*relPath: String\(tab\.relPath/.test(viewerTabsSrc)
+  && /serializeViewerState\(tabs, activeId\)/.test(viewerShell))
 
 // ---- 2026-11-17：产物原地修改（改图不再生成 v2）----
 // 断的是「链子有没有接上」：落盘覆盖 / relPath / artifact.edit / 同路径页签刷新。
@@ -186,9 +203,12 @@ check('artifact.edit 串行（不与只读工具并行）', read('electron/lib/a
 check('trace 透传 updated', agent.includes('updated: d.updated === true'))
 check('artifact.edit 也产出 artifact 事件', agent.includes("realName === 'artifact.edit'") && agent.includes("kind: ext === 'md' ? 'md'"))
 check('本会话最近产物索引（改哪一张不必猜路径）', agent.includes('本会话最近的产物') && agent.includes('recentArtifactsHint'))
-check('同路径页签原地刷新（不新开）', teachIdx.includes('const exists = artTabsRef.current.some')
-  && teachIdx.includes('setHtmlSeq(prev => ({ ...prev, [a.rel]'))
-check('监听外部写刷新打开中的工件', teachIdx.includes('onWsExternalChange') && teachIdx.includes('artTabsRef.current.find(t => !t.generating && t.rel === rel)'))
+check('同路径页签原地刷新（由壳 commitArtifact 负责，宿主不再维护页签数组）',
+  /mode: 'commit', fileKind/.test(teachIdx) && !teachIdx.includes('artTabsRef')
+  && /const formal = findFileTab\(tabsRef\.current, rel\)/.test(viewerShell))
+check('监听外部写刷新打开中的文件页签',
+  filePane.includes('onWsExternalChange') && filePane.includes("addEventListener('kb:file-saved'")
+  && read('src/modules/ai-teaching/right-viewer/NotesPane.tsx').includes("addEventListener('kb:file-saved'"))
 check('讲义同名覆盖且保留 frontmatter id', course.includes('hasQuizFence(text)') && course.includes('forceFrontmatterId(body, prevId)'))
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)

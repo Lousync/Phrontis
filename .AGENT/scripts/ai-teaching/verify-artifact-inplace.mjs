@@ -10,10 +10,15 @@
  *
  * 跑法：node .AGENT/scripts/ai-teaching/verify-artifact-inplace.mjs
  */
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   ARTIFACT_EDIT_EXTS, MAX_ARTIFACT_EDIT_BYTES, MAX_ARTIFACT_EDITS,
   normalizeArtifactRel, resolveProductFileRel, applyArtifactEdits,
 } from '../../../electron/lib/aiTeachingArtifactPure.ts'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 
 let pass = 0
 const fails = []
@@ -100,6 +105,41 @@ console.log('\n=== D. 常量口径 ===')
 ok(ARTIFACT_EDIT_EXTS.join(',') === 'html,json,md', 'D1 只改文本类产物')
 ok(MAX_ARTIFACT_EDIT_BYTES === 1024 * 1024, 'D2 大小上限 1MB')
 ok(MAX_ARTIFACT_EDITS === 10, 'D3 单次最多 10 组替换')
+
+console.log('\n=== E. 渲染侧原地刷新（2026-11-23 工件栏 → 查看器 file 页签） ===')
+{
+  // 原地改产物在渲染侧只有两条出口：壳的 commitArtifact（同路径不新开）+ 文件页签自己订阅外部写。
+  // 这两条都在纯函数之外，只能静态断言接线；缺任一条的表象是「改完还是旧图 / 旧讲义」。
+  const shell = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/right-viewer/RightViewer.tsx'), 'utf8')
+  const filePane = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/right-viewer/FilePane.tsx'), 'utf8')
+  const notesPane = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/right-viewer/NotesPane.tsx'), 'utf8')
+  const vtabs = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/right-viewer/viewerTabs.ts'), 'utf8')
+  ok(/const formal = findFileTab\(tabsRef\.current, rel\)/.test(shell)
+    && /const closed = closeTabById\(tabsRef\.current, activeIdRef\.current, ph\.id\)/.test(shell)
+    && /apply\(closed\.tabs, formal\.id\)/.test(shell),
+    'E1 同 relPath 已有正式页签 → 删占位并聚焦已有（不新开第二份）')
+  ok(/patchTab\(formal\.id, \{\s*rev: \(formal\.rev \?\? 0\) \+ 1/.test(shell),
+    'E2 聚焦已有页签时 bump rev，查看器重读磁盘')
+  ok(/rev: \(t\.rev \?\? 0\) \+ 1/.test(shell) && shell.includes('原地转正：`generating` / `slug` 必须摘掉'),
+    'E3 占位原地转正式：摘掉 generating / slug 并 bump rev')
+  ok(/onWsExternalChange\(\(p\) => \{[\s\S]{0,200}?bump\(\)/.test(filePane)
+    && /addEventListener\('kb:file-saved', onSaved\)/.test(filePane),
+    'E4 文件页签自己订阅 ws:external-change + kb:file-saved（外部写原地重读）')
+  ok(/onWsExternalChange\(\(\) => scheduleRescan\(\)\)/.test(notesPane)
+    && /addEventListener\('kb:file-saved', onSaved\)/.test(notesPane),
+    'E5 笔记页签的既有外部变更订阅未被改坏')
+  ok(/function isGeneratingFileTab\(tab: ViewerTab\)/.test(vtabs)
+    && /!isGeneratingFileTab\(t\)/.test(vtabs),
+    'E6 生成中占位不落持久化（重启不残留禁关页签）')
+  ok(!shell.includes('ArtifactsPane') && !shell.includes('artTabs'),
+    'E7 负向：查看器壳不再挂工件栏页签数组')
+  const chrome = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/right-viewer/ViewerChrome.tsx'), 'utf8')
+  ok(/const canClose = !\(tab\.type === 'file' && tab\.generating\)/.test(chrome)
+    && /canClose && \(/.test(chrome),
+    'E8 生成中占位禁关（✕ 不渲染）')
+  ok(/tab\.type === 'file' && tab\.generating\) \|\| closeTimersRef\.current\.has\(id\)/.test(shell),
+    'E9 壳的 closeTab 也拒绝关闭生成中占位（中键 / 菜单路径）')
+}
 
 console.log('\n========================================')
 if (fails.length === 0) {

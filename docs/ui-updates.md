@@ -3107,3 +3107,28 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **契约**：`verify-teach-toolbar-ui.mjs` 125 → 150 条（容器查询 / 断点 / 三处图标化 / 抽屉无模型入口 / 图标 aria 与 tooltip / 不引入 `transition-all`）；总闸 `verify-all-p0` 39/39。
 
 **未覆盖**：本机无模型配置时思考控件整体 `disabled`（既有行为），窄态气泡的点击选档无法真机点验，只做了结构断言。
+
+## 2026-11-23 · AI 教学 · 工件栏并入右侧查看器（右侧只留一个栏）
+
+**现状 / 用户反馈**：AI 教学右侧有两套并存的栏 —— 顶栏 `PanelRightOpen` 打开的「查看器」，和点左栏文件 / AI 产物自动打开的「工件栏」。两者还会互斥（开查看器先收起工件栏），点文件到底进哪个取决于入口，认知负担高。用户口径：**右侧只留一个查看器，点文件统一在查看器新建页签；工件栏整体退役**。
+
+**改动点**：
+- **工件栏退役**：删除 `ArtifactsPane.tsx` / `artifacts.ts`、中栏右侧 `ResizablePanel`、贴边「展开工件分栏」按钮、`artZoom` 全宽态、`aiTeach.artOpen` / `aiTeachArtWidth` 与互斥 Toast。
+- **新增「文件」页签**：图片 / 导图 / PPT / 本地 HTML 共用一种页签，内部按扩展名分派；复用 `ImmersiveImageView` / `MindMapView` / `ArtHtmlView` / PPT 逐页阅读。PPT 保留「讲解此页」。
+- **统一入口** `openViewerFile`：md / txt / 非导图 json → 笔记页签（预览优先）；html / 图片 / 导图 / pptx → 文件页签；pdf / epub / fb2 → 电子书页签；其它仍交系统程序。跨 `notes/file` 按路径去重。
+- **AI 产物**：`visual.html` / `mindmap` / `image` 生成开始自动打开查看器并开「生成中」占位（`begin`），完成原地转正（`commit`），失败 / 停止清占位（`drop`）；生成中页签禁关（页签条与壳的关闭入口双保险）。
+- **md 预览优先**：从文件树 / 素材点开的 md 默认渲染预览，可切编辑；预览态把 `useQuizRecordStore` + `QuizSheetBar` + `QuizRecordContext` 接回来，题单可作答。普通笔记 / 文件页签不再要求「先进入 AI 教学对话」，只要仓库。
+- **查看器全屏 ⤢**：页签条右端新增全屏按钮，覆盖整个 AI 教学模块区域；`Esc` 退出，退出后焦点回到按钮，全屏时不渲染拖动条。
+- **左栏高亮回归**：查看器通过 `onActivePathChange` 把活动页签路径回传宿主，文件树继续回显「正在看哪个文件」。
+- **记忆**：查看器宽度 360–960 与页签跨重启恢复；AI 产物页签也进入全局页签集合（不再按会话恢复）。「本次改动」清单删除。
+
+**真机验证**（Linux，devbridge，临时仓库）：
+- 无会话工作区里点 md → 笔记页签，预览 + 题单条「已答 0/1」正常;
+- 点图片 → 文件页签，`<img>` + 缩放；点 html → 文件页签 iframe；点导图 json → 文件页签，MindMapView 正常；
+- 全屏：查看器 `left 0 / width 100% / z-40`，拖动条消失；`Esc` 后回到 480px；
+- 重启后 4 个页签（网页 / 图片 / 讲义 / 示意图）与宽度恢复；
+- 文件树活动文件高亮回来；DOM 中无 `data-ai-teach-art-pane`、无「展开工件分栏」、无「本次改动」；控制台 0 error。
+
+**契约**：`verify-all-p0` 39/39（`verify-teach-toolbar-ui` 150、`verify-ai-teaching-tools` 98、`verify-right-viewer-shell` 94、`verify-right-viewer-tabs` 196、`verify-artifact-inplace` 36 等）；`tsc` web/node 双配置 0 错；`npm run build` 通过。
+
+**未覆盖 / 已知边界**：本机无 LLM 配置，AI 产物的 `begin → commit → drop` 只做了结构与契约断言，未真机触发；pptx 因无样例文件只做了组件接线与契约断言；PDF 改走电子书页签属于行为变更，建议真机再点一次确认。

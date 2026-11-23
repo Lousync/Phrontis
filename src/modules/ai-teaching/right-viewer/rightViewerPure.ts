@@ -46,6 +46,7 @@ const TAB_LABELS: Readonly<Record<ViewerTabKey, string>> = {
   notes: '笔记',
   books: '书架',
   ask: '旁问',
+  file: '文件',
 }
 
 /* ============================== 页签 ============================== */
@@ -58,7 +59,7 @@ const TAB_LABELS: Readonly<Record<ViewerTabKey, string>> = {
  * 所以纯函数层自带一份 —— 两份的取值必须一致，脚本会交叉断言。
  */
 export function isViewerTabKey(v: unknown): v is ViewerTabKey {
-  return v === 'web' || v === 'notes' || v === 'books' || v === 'ask'
+  return v === 'web' || v === 'notes' || v === 'books' || v === 'ask' || v === 'file'
 }
 
 /**
@@ -66,6 +67,7 @@ export function isViewerTabKey(v: unknown): v is ViewerTabKey {
  *
  * `lanes`（支线）由「旁问」接管；`progress` / `sources` 不再进查看器，
  * 一律落回网页 —— 这是 §7.2 的迁移口径，坏值同样落回网页而不是报错。
+ * `file` **刻意不接受**：旧右栏没有文件页签，文件只从左栏 / 素材 / 产物进入。
  */
 export function migrateRailTab(raw: string | null | undefined): ViewerTabKey {
   if (typeof raw !== 'string') return 'web'

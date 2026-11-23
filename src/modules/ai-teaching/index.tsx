@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, llmReasoningCapable, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
-  workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault, workspaceOpenInSystem,
-  agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachEnsureConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged, onWsExternalChange,
+  workspaceGetCurrent, workspaceReadFile, workspaceRefreshVault, workspaceOpenInSystem,
+  agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachEnsureConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachCourseGetState, aiTeachCourseGetSources, aiTeachCourseWriteOutlineDraft, onAiTeachCourseRefresh,
   aiTeachCourseOpenSegment, aiTeachCourseSetActiveUnit, aiTeachCourseEndSegment, aiTeachCourseFinalizeSegment,
@@ -24,13 +24,11 @@ import { CourseSources } from './CourseSources'
 import { buildCourseRail, activeChapterId as pickRailChapter, type RailChapterInput } from './courseRailPure'
 import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
-import { ArtifactsPane } from './ArtifactsPane'
 import { RightViewer } from './right-viewer/RightViewer'
 import { viewerReserveWidth } from './right-viewer/rightViewerPure'
-import type { ViewerTabKey } from './right-viewer/paneContracts'
+import type { ViewerOpenRequest, ViewerTabKey } from './right-viewer/paneContracts'
 import { SideLanePanel } from './SideLanePanel'
 import { pickLearningQuote } from './learningQuotes'
-import type { ArtTab } from './artifacts'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { Collapsible } from '../../components/shared/Collapsible'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
@@ -74,7 +72,7 @@ import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
  * `agent:listSideLanes` 带回的每条支线都带 `branchFromMessageId`，据此在回答下方显示
  * 「支线追问 · 已开」（点击进右栏支线中心重开）；不再落 localStorage（修掉清缓存/换机即失联）。
  */
-import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AgentImageRef, AiTeachInjectionStats, LlmUsageInfo, LlmModelEntry, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
+import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChatResult, AgentImageRef, AiTeachInjectionStats, LlmUsageInfo, LlmModelEntry, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -310,14 +308,15 @@ const CONTEXT_USAGE_FREE_COLOR = 'color-mix(in srgb, var(--text-muted) 22%, tran
  *  保活架构下切 Tab 不卸载组件，但模块实例重建会整树重置——
  *  以 localStorage 兜底，回到该会话即恢复到离开时的视图（文档阅读 > 逐页阅读 > 对话）。 */
 type AiTeachNav = {
+  /** 旧存档字段（2026-11-23 起只读兼容、不再写入 / 读取）：中栏文档 / 逐页阅读指针 */
   docRel?: string | null; readerRel?: string | null; readerPage?: number
   /**
-   * 2026-11-07 分屏留存轮：工件页签**整组指针**（只存 rel/kind/name，内容靠 openArtFile 重读；
-   * 生成中占位与空 rel 不入档）。切会话清空 artTabs 后，回到该会话即整组恢复 ——
-   * 旧字段 docRel/readerRel 保留写盘作向后兼容（老会话存档只有单工件指针）。
+   * 旧存档兼容（2026-11-23 工件栏退役）：历史上这里存过工件页签组与激活项。
+   * 右侧查看器的页签已改为**全局持久化**，这些字段不再写入、不再读取；
+   * 保留声明只为让老会话的 localStorage 存档照常 JSON.parse（不报错）。
    */
-  arts?: Array<{ rel: string; kind: ArtTab['kind']; name?: string }>
-  /** 恢复页签组后的激活页签 rel */
+  arts?: Array<{ rel: string; kind: 'md' | 'html' | 'image' | 'mindmap' | 'pptx'; name?: string }>
+  /** 旧存档：恢复页签组后的激活页签 rel（只读兼容，不再使用） */
   artActiveRel?: string | null
   /**
    * v3.1.2 条目7（会话准备态）：创建对话 → 首条消息之间的中间态快照。
@@ -436,7 +435,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const runBucket = getRunBucket(activeId)
   const streamDraft = runBucket?.draft ?? null
   const liveSteps = runBucket?.liveSteps ?? []
-  const [lastChanges, setLastChanges] = useState<AgentChange[] | null>(null)
   /**
    * 每条消息的「可渲染正文 + 跳转 chip」缓存（2026-11-19 卡顿优化）。
    *
@@ -530,14 +528,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    *  rightOpen=用户意图态（持久），srcVisible=渲染态；openRail() 两态同步置 true */
   const [srcVisible, setSrcVisible] = useState(() => localStorage.getItem('aiTeach.rightOpen') !== '0')
   /**
-   * P4 右侧查看器（网页 / 笔记 / 书架 / 旁问）取代右栏：
+   * P4 右侧查看器（网页 / 笔记 / 书架 / 旁问 / 文件）取代右栏：
    *   srcVisible 继续当「查看器开合」用（含持久化与 Ctrl+Alt+B）；
-   *   viewerReq 是一次性「切页签 + 打开内容」请求（外链、本次改动、素材点击、样式 chip 都走它）；
+   *   viewerReq 是一次性「切页签 + 打开内容」请求（外链、素材点击、AI 产物、样式 chip 都走它）；
+   *   请求形状由 `right-viewer/paneContracts.ts` 冻结（`ViewerOpenRequest`），宿主只补 seq。
    *   viewerW 是面板实际宽度（壳上报），中栏靠它让位。
    */
-  const [viewerReq, setViewerReq] = useState<{ tab: ViewerTabKey; seq: number; url?: string; relPath?: string; name?: string; ask?: unknown } | null>(null)
+  const [viewerReq, setViewerReq] = useState<ViewerOpenRequest | null>(null)
   const viewerSeqRef = useRef(0)
-  const requestViewer = useCallback((req: { tab: ViewerTabKey; url?: string; relPath?: string; name?: string; ask?: unknown }) => {
+  const requestViewer = useCallback((req: Omit<ViewerOpenRequest, 'seq'>) => {
     viewerSeqRef.current += 1
     setViewerReq({ ...req, seq: viewerSeqRef.current })
     setRightOpen(true); setSrcVisible(true)
@@ -545,6 +544,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
   const [viewerTab, setViewerTab] = useState<ViewerTabKey>('web')
   const [viewerW, setViewerW] = useState(0)
+  /** 查看器活动页签对应的仓库相对路径（左栏文件树回显高亮；null = 没有活动文件） */
+  const [viewerActiveRel, setViewerActiveRel] = useState<string | null>(null)
   /**
    * 中栏 reserve = `中栏左缘 + VIEWER_MIN_MIDDLE_WIDTH`（查看器宽度上限的唯一依据）。
    *
@@ -609,135 +610,54 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, leftOpen, rightOpen, srcVisible])
   const [aiTeachRoot, setAiTeachRoot] = useState('AI教学')
-  // ---------- 工件栏（docs/ai-teaching-artifacts-pane-design.md §1.2/§2）----------
-  // 对话固定左主区永不替换；md 阅读 / pptx 逐页 / visual.html 示意图全部收进右侧页签。
-  // 页签列表=会话内存态（切会话清空）；栏宽持久化；开合无手动开关——有页签即出现、关完即消失
-  //（2026-09-09 用户拍板：不设主动展开把手，避免与素材库右缘拉出条打架）；HTML 正文永不进对话流（工件卡唯一形态）。
-  const [artTabs, setArtTabs] = useState<ArtTab[]>([])
-  const [artActive, setArtActive] = useState<string | null>(null)
-  /** v3.8.0 §二改：工件 = **中栏右侧的独立分栏**（与对话并排同屏）—— 面板实际宽度（ResizablePanel 上报），
-   *  供工件内部按宽自适应（原先是右栏单面板的宽度上报） */
-  const [artPaneW, setArtPaneW] = useState(0)
-  /** v3.8.0：工件分栏开关（用户意图态，持久）。列可见 = `artTabs` 非空 && `artOpen` ——
-   *  拖到最窄（ResizablePanel snap-close）或点工件分栏右缘的贴边条即隐藏 / 展开分栏（页签不丢）。 */
-  const [artOpen, setArtOpen] = useState(() => localStorage.getItem('aiTeach.artOpen') !== '0')
-  /** 贴边入口跟随查看器位移时的动效降级（右栏查看器同口径） */
-  const [artReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  /** 收起态贴边入口（2026-11-23 可达性修复）：必须挂在**折叠容器之外**，
-   *  否则收起后 `keepMounted` 的子树整棵 `display:none`，「展开」按钮跟着一起消失。 */
-  const artEdgeBtnRef = useRef<HTMLButtonElement>(null)
-  /** 收起动作是否发生在工件子树内（折叠后子树 display:none，焦点已掉到 body，事后判不出来） */
-  const artFocusToEdgeRef = useRef(false)
-  const applyArtOpen = useCallback((v: boolean) => {
-    if (!v) {
-      const ae = document.activeElement as HTMLElement | null
-      if (ae && ae.closest('[data-ai-teach-art-pane]')) artFocusToEdgeRef.current = true
-    }
-    setArtOpen(v)
-    try { localStorage.setItem('aiTeach.artOpen', v ? '1' : '0') } catch { /* ignore */ }
-  }, [])
-  /**
-   * 查看器打开时自动收起工件栏（方案 D3 已拍板 A）：1440 下左栏 248 + 工件 420 + 查看器 480
-   * = 中栏只剩 292，不可读。只收不关（页签保留），关查看器不自动重开（避免「关一个开一个」抖动）。
-   */
-  const artAutoCollapsedRef = useRef(false)
-  useEffect(() => {
-    if (!srcVisible) { artAutoCollapsedRef.current = false; return }
-    if (!artOpen || artTabs.length === 0) return
-    applyArtOpen(false)
-    artAutoCollapsedRef.current = true
-    showToast({ type: 'info', message: '工件栏已收起，查看器占用右侧', detail: '页签保留，点中栏右缘的「展开工件分栏」按钮即可再打开（会先收起查看器）' })
-    // 仅在查看器开合时判定一次：拖动宽度、切页签都不该反复收起
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [srcVisible])
-  /** 收起后焦点回落：焦点原在被隐藏的页签条上 → 挪到折叠容器之外那枚贴边入口（同 toggleTray 口径） */
-  useEffect(() => {
-    if (artOpen || !artFocusToEdgeRef.current) return
-    artFocusToEdgeRef.current = false
-    artEdgeBtnRef.current?.focus()
-  }, [artOpen])
-  /** 产物页签重读计数（html / mindmap / image 共用：值一变对应查看器重读磁盘；md 页签走 openArtFile 重读全文） */
-  const [htmlSeq, setHtmlSeq] = useState<Record<string, number>>({})
-  /** ⤢ 原位放大：工件栏占满内容区（absolute 盖过对话/左右栏，组件不卸载 → 对话滚动与 iframe 全存活），⤡/Esc 退出 */
-  const [artZoom, setArtZoom] = useState(false)
-  useEffect(() => { if (artTabs.length === 0) setArtZoom(false) }, [artTabs.length])
-  const artTabsRef = useRef<ArtTab[]>([])
-  useEffect(() => { artTabsRef.current = artTabs }, [artTabs])
-  /** 开/复用页签（同 id 原地合并更新）并激活 */
-  const openArtTab = useCallback((tab: ArtTab) => {
-    setArtTabs(prev => {
-      const i = prev.findIndex(t => t.id === tab.id)
-      if (i < 0) return [...prev, tab]
-      const n = [...prev]
-      n[i] = { ...n[i], ...tab }
-      return n
-    })
-    setArtActive(tab.id)
-    // v3.8.0：打开工件即展开工件分栏（不依赖 artExpanded 的 0→1 边沿）
-    applyArtOpen(true)
-  }, [applyArtOpen])
-  const closeArtTab = useCallback((id: string) => {
-    const prev = artTabsRef.current
-    const i = prev.findIndex(t => t.id === id)
-    if (i < 0 || prev[i].generating) return
-    const next = prev[i + 1] ?? prev[i - 1] ?? null
-    // 同步回填 ref（v3.16.1 F-3 P1）：批量关闭（关闭其他 / 关闭右侧 / 全部关闭）会在
-    // 同一 tick 连续调用本函数；只靠 effect 回填时后一次仍读到旧数组，setState 互相覆盖，
-    // 表象是「点了全部关闭只关掉一个」。effect 随后会写回同一数组，无副作用。
-    const nextTabs = prev.filter(t => t.id !== id)
-    artTabsRef.current = nextTabs
-    setArtTabs(nextTabs)
-    setArtActive(cur => (cur === id ? next?.id ?? null : cur))
-  }, [])
-  /** 统一打开入口：pptx→逐页页签；html→沙箱预览页签；其余按 md 阅读页签。
-   *  silent = 会话恢复路径专用：文件已被删/读失败静默跳过，不弹错误 Toast（批量恢复时不可接受） */
-  const openArtFile = useCallback(async (rel: string, opts?: { name?: string; title?: string; lines?: number; cur?: number; silent?: boolean }) => {
+  /* ---------- 统一文件入口（规划 docs/ai-teaching-right-viewer-unify-plan.md §4.2 / §7.1）----------
+     右侧只有一个查看器：左栏文件树 / 素材 / 对话产物 / 导图节点 ref 全部经 openViewerFile 进查看器页签。
+     分派口径：md / txt → 笔记页签（默认预览）；json 读一次内容判思维导图；html / 图片 / pptx → 文件页签；
+     pdf / epub / fb2 → 书架页签；其它维持现状，交给系统程序打开。
+     silent = 会话恢复 / 批量路径专用：文件已被删 / 读失败静默跳过，不弹错误 Toast。 */
+  /** 是否有 AI 产物「生成中」占位挂在查看器里（壳侧状态不在宿主；收尾兜底清占位时用来避免无谓地打开查看器） */
+  const generatingArtifactRef = useRef(false)
+  const openViewerFile = useCallback(async (rel: string, opts?: { name?: string; title?: string; page?: number; silent?: boolean }) => {
+    const fileName = opts?.name || opts?.title || rel.split('/').pop() || rel
     if (/\.pptx$/i.test(rel)) {
-      const pr = await docsPptxPages(rel).catch(() => null)
-      if (pr?.ok && pr.pages?.length) {
-        openArtTab({ id: rel, kind: 'pptx', rel, name: opts?.name ?? rel.split('/').pop() ?? rel, pages: pr.pages, cur: Math.min(Math.max(0, opts?.cur ?? 0), pr.pages.length - 1) })
-      } else if (!opts?.silent) {
-        showToast({ type: 'error', message: (pr as { error?: string } | null)?.error || '读取失败（暂仅支持 .pptx）' })
-      }
+      requestViewer({ tab: 'file', fileKind: 'pptx', relPath: rel, name: fileName, page: opts?.page })
       return
     }
     if (/\.html?$/i.test(rel)) {
-      openArtTab({ id: rel, kind: 'html', rel, name: opts?.title || opts?.name || rel.split('/').pop() || rel, title: opts?.title, lines: opts?.lines })
+      requestViewer({ tab: 'file', fileKind: 'html', relPath: rel, name: fileName })
       return
     }
-    // 生图产物（v3.6.0 阶段二）：png/jpg… → 图片页签（批 3 查看器）。
-    // ★ 必须排在下面那条"读文本 → md 页签"的兜底**之前**：图片按文本读只会得到一段乱码，
-    //   而且不报错 —— 表象是「点开产物页签里是一堆黑菱形」
+    // 生图产物（v3.6.0 阶段二）：png/jpg… → 图片页签。
+    // ★ 必须排在「读文本 → 笔记页签」的兜底**之前**：图片按文本读只会得到一段乱码，而且不报错。
     if (isRenderableImagePath(rel)) {
-      openArtTab({ id: rel, kind: 'image', rel, name: opts?.name ?? opts?.title ?? rel.split('/').pop() ?? rel, title: opts?.title })
+      requestViewer({ tab: 'file', fileKind: 'image', relPath: rel, name: fileName })
       return
     }
-    const cur = await workspaceGetCurrent().catch(() => null)
-    const rootId = (cur as { rootId?: string } | null)?.rootId
-    if (!rootId) { if (!opts?.silent) showToast({ type: 'error', message: '尚未打开仓库' }); return }
-    const r = await workspaceReadFile(rootId, rel).catch(() => null)
-    if (!r || typeof r.content !== 'string') { if (!opts?.silent) showToast({ type: 'error', message: '读取文档失败' }); return }
-    // 思维导图 JSON：按内容识别（kind:"mindmap"）→ 导图页签；其余按 md 阅读页签
-    if (looksLikeMindMap(r.content)) {
-      openArtTab({ id: rel, kind: 'mindmap', rel, name: opts?.title || opts?.name || rel.split('/').pop() || rel, title: opts?.title })
+    if (/\.(?:pdf|epub|fb2)$/i.test(rel)) {
+      requestViewer({ tab: 'books', relPath: rel, name: fileName })
       return
     }
-    openArtTab({ id: rel, kind: 'md', rel, name: opts?.name ?? rel.split('/').pop() ?? rel, content: r.content })
-  }, [openArtTab])
-  const reloadArtTab = useCallback((tab: ArtTab) => {
-    // html / mindmap / image 都是「按 rel 读一次」的查看器，bump 计数即重读；md 需要重新取全文
-    if (tab.kind === 'html' || tab.kind === 'mindmap' || tab.kind === 'image') {
-      setHtmlSeq(prev => ({ ...prev, [tab.rel]: (prev[tab.rel] ?? 0) + 1 }))
+    if (/\.(?:md|markdown|txt)$/i.test(rel)) {
+      requestViewer({ tab: 'notes', relPath: rel, name: fileName, previewDefault: true })
       return
     }
-    void openArtFile(tab.rel, { name: tab.name, title: tab.title })
-  }, [openArtFile])
-  /** 「本次改动」条目点哪里：示意图 / 导图 / 图片进工件栏，md 讲义进编辑器 */
-  const changeOpensInArtifactPane = useCallback((c: { tool?: string; file?: string }) => {
-    const tool = String(c.tool ?? '')
-    if (tool === 'visual.html' || tool === 'image') return true
-    return tool === 'artifact.edit' && /\.(?:html?|json)$/i.test(String(c.file ?? ''))
-  }, [])
+    if (/\.json$/i.test(rel)) {
+      const cur = await workspaceGetCurrent().catch(() => null)
+      const rootId = (cur as { rootId?: string } | null)?.rootId
+      if (!rootId) { if (!opts?.silent) showToast({ type: 'error', message: '尚未打开仓库' }); return }
+      const r = await workspaceReadFile(rootId, rel).catch(() => null)
+      if (!r || typeof r.content !== 'string') { if (!opts?.silent) showToast({ type: 'error', message: '读取文档失败' }); return }
+      // 思维导图 JSON：按内容识别（kind:"mindmap"）→ 文件页签（导图）；其余当笔记预览
+      if (looksLikeMindMap(r.content)) {
+        requestViewer({ tab: 'file', fileKind: 'mindmap', relPath: rel, name: fileName })
+        return
+      }
+      requestViewer({ tab: 'notes', relPath: rel, name: fileName, previewDefault: true })
+      return
+    }
+    // 其它（zip / docx…）：维持现状，交给编辑器 / 系统程序
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))
+  }, [requestViewer])
   useEffect(() => { void getSettingRaw('aiTeachRootDir').then(v => { const s = String(v ?? '').trim(); if (s) setAiTeachRoot(s) }).catch(() => {}) }, [])
   // / 弹层 Skill 组候选（v3.1.1 条目10）：模块挂载时拉一次（安装/停用在设置页，低频变化）
   useEffect(() => { aiToolsListSkills().then(r => setSlashSkills(r.skills)).catch(() => setSlashSkills([])) }, [])
@@ -895,19 +815,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   })()
   const treeBase = wsTreeSeg ? `${aiTeachRoot}/${wsTreeSeg}` : aiTeachRoot
   /**
-   * 性能（v3.1.2）：左栏文件树 / 工件栏的打开回调**提到 useCallback**——它们原来是调用点的内联箭头，
-   * 每次渲染都是新引用，会让下面两个子组件的 `React.memo` 恒失效（输入框击键时整棵树/工件栏白重渲染）。
-   * 依赖仅为 `treeBase`（字符串，按值稳定）与 `openArtFile`（useCallback）。
+   * 性能（v3.1.2）：左栏文件树 / 素材的打开回调**提到 useCallback**——它们原来是调用点的内联箭头，
+   * 每次渲染都是新引用，会让下面两个子组件的 `React.memo` 恒失效（输入框击键时整棵树白重渲染）。
+   * 依赖仅为 `treeBase`（字符串，按值稳定）与 `openViewerFile`（useCallback）。
    */
-  const treeOpenArt = useCallback((rel: string) => { void openArtFile(`${treeBase}/${rel}`) }, [openArtFile, treeBase])
+  const treeOpenArt = useCallback((rel: string) => { void openViewerFile(`${treeBase}/${rel}`) }, [openViewerFile, treeBase])
   const treeOpenExternal = useCallback((rel: string) => {
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: `${treeBase}/${rel}`, from: 'aiTeaching' } }))
   }, [treeBase])
-  const artOpenInEditor = useCallback((rel: string) => {
-    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))
-  }, [])
-  /** 导图节点 ref 点击 → 在工件栏开该笔记页签（左聊右看，不跳模块） */
-  const artOpenRef = useCallback((rel: string) => { void openArtFile(rel) }, [openArtFile])
   /**
    * v3.1.2 条目11 P4：**已升格支线**（lane==='main' 且带 parentSessionId）跟随父行缩进。
    * 支线本身不分配工作区，故从**全量** sessions 里按父行归属；父行不在当前工作区视图时不出现（旧行为）。
@@ -994,8 +909,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * P4（2026-11-19 拍板）：右栏退役 —— 进度 / 素材 / 本次改动 按方案 §7.2 A 分流：
    *   进度 → 左栏课程树（2026-11-22 起顶栏「进度」浮层一并退役）；
    *   素材 → 左栏资源管理器表头「文件 / 素材」分段；
-   *   本次改动 → 工件栏底部细栏（见 ArtifactsPane 的 changes props）。
-   * 查看器（网页/笔记/书架/旁问）占用原来的右栏位置。
+   *   本次改动 → 2026-11-23 起直接下线（回看聊天记录即可）。
+   * 查看器（网页/笔记/书架/旁问/文件）占用原来的右栏位置。
    */
   const [explorerSeg, setExplorerSeg] = useState<'files' | 'sources'>(() => (localStorage.getItem('aiTeach.explorerSeg') === 'sources' ? 'sources' : 'files'))
   useEffect(() => { try { localStorage.setItem('aiTeach.explorerSeg', explorerSeg) } catch { /* ignore */ } }, [explorerSeg])
@@ -1033,21 +948,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const openCenter = useCallback((req: { kind: 'open'; laneId: string } | { kind: 'create'; anchorMessageId: string }) => {
     requestViewer({ tab: 'ask', ask: req })
   }, [requestViewer])
-  // PPT 逐页阅读已并入工件栏 pptx 页签（工件栏方案 §1.4，原 reader 中栏互斥态退役）
-  // UI 优化条目6B：中栏导航状态（视图 / 工件栏激活页签）随变化落到本会话持久化键
-  useEffect(() => {
-    if (!activeId) return
-    const t = artTabs.find(x => x.id === artActive)
-    writeNav(activeId, {
-      // docRel = 「可原地重开的阅读类页签」：md / html / image
-      docRel: t && !t.generating && (t.kind === 'md' || t.kind === 'html' || t.kind === 'image') ? t.rel : null,
-      readerRel: t && !t.generating && t.kind === 'pptx' ? t.rel : null,
-      readerPage: t && t.kind === 'pptx' ? t.cur ?? 0 : 0,
-      // 分屏留存轮：页签整组指针（只存 rel/kind/name）+ 激活 rel；gen: 占位不入档
-      arts: artTabs.filter(x => !x.generating && x.rel).map(x => ({ rel: x.rel, kind: x.kind, name: x.name })),
-      artActiveRel: artActive && !artActive.startsWith('gen:') ? artActive : null,
-    })
-  }, [activeId, artTabs, artActive])
+  /* 2026-11-23：中栏导航 / 工件页签的会话级恢复已退役 —— 查看器页签由壳自己全局持久化，
+     宿主不再往 `aiTeach.nav.*` 写 docRel / readerRel / readerPage / arts / artActiveRel（旧键只读兼容）。 */
   const activeIdRef = useRef<string | null>(null)
   /** 当前 messages 归属的会话 id（refreshMessages 里更新）——把「随会话」的 UI（```ask 提问卡等）
    *  严格绑到 activeId：切会话是「先换 activeId、再异步拉 messages」，空窗里旧会话的卡片会串到新会话。 */
@@ -1223,89 +1125,64 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // 流式过程（思考链 / 工具时间线 / 正文增量）由 assistantRunStore 按会话分桶，
   // 本模块只消费 activeId 对应的桶（v3.15.3，替换原先单槽草稿）。
 
-  // 实时步骤（agent:step，按 sessionId 过滤）：store 已维护 draft/liveSteps，这里只做工件栏副作用。
-  // 工件栏方案 §3.4 生成时序：
-  // ① visual.html 带 args 的「生成中」事件 → 工件栏同步开占位页签（禁止关闭，即时反馈）；
-  // ② 带 artifact 的成功事件 → 占位原地换正式页签 + toast（对话流工件卡随消息落库自动出现）。
+  // 实时步骤（agent:step，按 sessionId 过滤）：store 已维护 draft/liveSteps，这里只做**查看器文件页签**副作用。
+  // 规划 §7.2 生成时序（壳按 `mode` 解释请求）：
+  // ① begin：visual.html / mindmap / image 带 args 的「生成中」事件 → 文件页签占位（禁关），并自动展开查看器；
+  // ② commit：带 artifact 的成功事件 → 占位原地转正式；同路径已开则由壳就地刷新（对话流工件卡随消息落库自动出现）；
+  // ③ drop：工具失败 / 停止 → 清掉生成中占位（禁关页签不能因失败卡死）。
   useEffect(() => {
     return onAgentStep(({ sessionId, step }) => {
-      // 只处理当前会话的工件事件；旧会话在后台跑时不得把页签 / 占位图开进新会话（v3.15.3）
+      // 只处理当前会话的产物事件；旧会话在后台跑时不得把页签开进新会话（v3.15.3）
       if (sessionId !== activeIdRef.current) return
       const isProduct = step.name === 'visual.html' || step.name === 'mindmap' || step.name === 'image'
+      const isMind = step.name === 'mindmap'
       if (isProduct && step.args && !step.artifact) {
+        // slug 是**可选**参数（生图方案 §12 D3）：begin 与 commit 必须用**同一条**回落规则，
+        // 否则空 slug 时占位页签永远匹配不上，屏幕上就留一个卡死的「生成中…」（禁关页签）。
         const slug = String(step.args.slug ?? '')
         if (step.name === 'image') {
-          // 生图（v3.6.0 阶段二）：slug 是**可选**参数（方案 §12 D3），占位键回落 'image' ——
-          // 必须与下面完成事件用**同一条**回落规则，否则空 slug 时占位页签永远匹配不上，
-          // 屏幕上就留一个卡死的「生成中…」（禁关页签）
-          const key = slug || 'image'
-          setArtTabs(prev => [...prev.filter(t => !(t.generating && t.slug === key)),
-            { id: `gen:${key}`, kind: 'image', rel: '', name: '生成中…', generating: true, slug: key, title: String(step.args?.prompt ?? '').slice(0, 80) || '生成的图片' }])
-          setArtActive(`gen:${key}`)
+          const prompt = String(step.args.prompt ?? '').slice(0, 80)
+          generatingArtifactRef.current = true
+          requestViewer({ tab: 'file', mode: 'begin', fileKind: 'image', slug: slug || 'image', name: prompt || '生成的图片' })
         } else {
-          const isMind = step.name === 'mindmap'
           const title = String(step.args.title ?? '') || (isMind ? '思维导图' : '示意图')
-          setArtTabs(prev => [...prev.filter(t => !(t.generating && t.slug === slug)),
-            { id: `gen:${slug || title}`, kind: isMind ? 'mindmap' : 'html', rel: '', name: '生成中…', generating: true, slug, title }])
-          setArtActive(`gen:${slug || title}`)
+          generatingArtifactRef.current = true
+          requestViewer({ tab: 'file', mode: 'begin', fileKind: isMind ? 'mindmap' : 'html', slug: slug || title, name: title })
         }
       }
       if (step.artifact && step.ok) {
         const a = step.artifact
         if (!a.rel) return
-        /** 同路径页签已开：**原地刷新**，不再新开一个（2026-11-17 原地改产物） */
-        const exists = artTabsRef.current.some(t => !t.generating && t.id === a.rel)
         const fileName = a.rel.split('/').pop() || a.rel
-        // 生图产物（v3.6.0 阶段二，方案 §6.2）：占位原地转正式页签，键与上面同一条回落规则。
-        // 页签名取文件名（页签条只有 170px，prompt 会被截成一串省略号），prompt 留作 title 悬浮提示。
+        // 生图产物：页签名取文件名（页签条很窄，prompt 会被截成一串省略号），prompt 留作 title 悬浮提示。
         if (a.kind === 'image') {
-          const key = a.slug || 'image'
-          setArtTabs(prev => {
-            const rest = prev.filter(t => !(t.generating && t.slug === key))
-            return rest.some(t => t.id === a.rel)
-              ? rest.map(t => t.id === a.rel ? { ...t, title: a.title ?? t.title, w: a.w, h: a.h, bytes: a.bytes } : t)
-              : [...rest, { id: a.rel, kind: 'image', rel: a.rel, name: fileName || '图片', title: a.title, w: a.w, h: a.h, bytes: a.bytes }]
-          })
-          setArtActive(cur => cur === `gen:${key}` ? a.rel : cur)
-          if (a.updated) setHtmlSeq(prev => ({ ...prev, [a.rel]: (prev[a.rel] ?? 0) + 1 }))
+          requestViewer({ tab: 'file', mode: 'commit', fileKind: 'image', slug: a.slug || 'image', relPath: a.rel, name: fileName || '图片' })
           showToast({ type: 'info', message: a.updated
             ? `✓ 图片已更新：${fileName}（复用原文件）`
             : `✓ 图片已生成：${fileName}（会话 outputs/ 目录）` })
           return
         }
-        // md 产物（artifact.edit 改讲义）：重读全文交给 md 页签（已有页签原地换内容）
+        // md 产物（artifact.edit 改讲义）：交给笔记页签（已有页签原地换内容 / 默认预览）
         if (a.kind === 'md') {
-          void openArtFile(a.rel, { name: a.title, title: a.title, lines: a.lines, silent: true })
-          setArtActive(cur => cur?.startsWith('gen:') ? a.rel : cur)
+          requestViewer({ tab: 'notes', mode: 'open', relPath: a.rel, name: a.title || fileName, previewDefault: true })
           showToast({ type: 'info', message: `✓ 已更新：${fileName}` })
           return
         }
-        const kind = a.kind ?? 'html'
-        setArtTabs(prev => {
-          const rest = prev.filter(t => !(t.generating && a.slug && t.slug === a.slug))
-          return rest.some(t => t.id === a.rel)
-            ? rest.map(t => t.id === a.rel
-              ? { ...t, kind, name: a.title || t.name, title: a.title ?? t.title, lines: a.lines ?? t.lines }
-              : t)
-            : [...rest, { id: a.rel, kind, rel: a.rel, name: a.title || fileName || a.rel, title: a.title, lines: a.lines }]
-        })
-        // 同路径已开 / 明确是原地更新 → 递增加载序号，重读磁盘
-        if (exists || a.updated) setHtmlSeq(prev => ({ ...prev, [a.rel]: (prev[a.rel] ?? 0) + 1 }))
-        setArtActive(cur => cur === `gen:${a.slug}` ? a.rel : cur)
+        const kind = a.kind === 'mindmap' ? 'mindmap' : 'html'
+        requestViewer({ tab: 'file', mode: 'commit', fileKind: kind, slug: a.slug || a.title || fileName, relPath: a.rel, name: a.title || fileName })
         showToast({ type: 'info', message: a.updated
           ? `✓ ${kind === 'mindmap' ? '思维导图' : '示意图'}已更新：${fileName}（复用原文件）`
           : kind === 'mindmap'
             ? `✓ 思维导图已生成：${fileName}（${a.nodes ?? 0} 节点）`
             : `✓ 示意图已生成：${fileName}（${a.lines} 行）` })
       }
-      // 工具失败：清掉「生成中」占位页签（禁关页签不能因失败卡死）；停止生成同理（endRun 处兜底）
+      // 工具失败：清掉「生成中」占位页签（禁关页签不能因失败卡死）；停止生成同理走 finishRun 兜底
       if (isProduct && !step.ok && !step.artifact) {
-        setArtTabs(prev => prev.filter(t => !t.generating))
-        setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
+        generatingArtifactRef.current = false
+        requestViewer({ tab: 'file', mode: 'drop' })
       }
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [requestViewer])
 
   // 切换会话（段 / 复习 / 助手 / 旧会话）
   const openSession = useCallback(async (sid: string, title: string) => {
@@ -1314,26 +1191,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (activeIdRef.current !== sid) {
       messagesSidRef.current = null
       setMessages([])
+      // 旧会话若正在生成产物：占位页签是**全局**的（不随会话重建），切走前必须 drop，
+      // 否则完成事件被会话守卫丢掉，屏幕上会留一个禁关的「生成中」页签。
+      if (generatingArtifactRef.current) {
+        generatingArtifactRef.current = false
+        requestViewer({ tab: 'file', mode: 'drop' })
+      }
     }
     activeIdRef.current = sid
-    setActiveId(sid); setActiveTitle(title); setLastChanges(null)
+    setActiveId(sid); setActiveTitle(title)
     quotesRef.current = []; setQuotes([]); setQuotesOpen(false) // 引用片段属于发起时那个对话，切会话即失效
-    setArtTabs([]); setArtActive(null) // 工件栏页签=会话内存态：切会话清空（阅读位置记忆保留在页签组件内）
     setPreflight(null)
     await refreshMessages(sid)
-    const nav = readNav(sid)
-    // UI 优化条目6B + 分屏留存轮：恢复该会话「上次离开时的工件」（页签在则栏在——内容驱动，无手动开合）。
-    // 优先整组 arts 指针逐个重放（silent：文件已删静默跳过）；老会话存档没有 arts 时回落旧单工件字段。
-    // 恢复期间切走了会话就不再回落激活页 —— setArtActive 的结果属于发起恢复的那个会话。
-    if (nav.arts?.length) {
-      void Promise.all(nav.arts.map(a => openArtFile(a.rel, { silent: true, name: a.name, cur: a.rel === nav.readerRel ? nav.readerPage ?? 0 : 0 })))
-        .then(() => {
-          if (activeIdRef.current !== sid) return
-          setArtActive(cur => cur ?? (nav.artActiveRel && nav.arts!.some(a => a.rel === nav.artActiveRel) ? nav.artActiveRel : null))
-        })
-    } else if (nav.docRel) void openArtFile(nav.docRel)
-    else if (nav.readerRel && /\.pptx$/i.test(nav.readerRel)) void openArtFile(nav.readerRel, { cur: nav.readerPage ?? 0 })
-  }, [refreshMessages, openArtFile])
+    // 查看器页签已全局持久化（用户已定），切会话不再恢复「上次的工件」——
+    // 旧存档里的 arts / docRel / readerRel / readerPage 一律忽略（见 AiTeachNav 的兼容注释）。
+  }, [refreshMessages, requestViewer])
 
   /**
    * 一次 Agent 运行的共同收尾（发送 / 续跑共用）：
@@ -1341,7 +1213,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * 收尾必须放 finally —— 否则刷新消息抛错会把输入区永久锁在「生成中」。
    */
   const finishRun = useCallback(async (r: AgentChatResult | null, sid: string): Promise<AgentChatResult | null> => {
-    // 本次 run 是否仍对应正在看的会话：切走后的收尾不得改当前会话的 messages / changes / 工件页签
+    // 本次 run 是否仍对应正在看的会话：切走后的收尾不得改当前会话的 messages / 查看器占位
     const isActive = () => activeIdRef.current === sid
     // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
     if (isActive() && r?.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要（/compress 可手动触发）` })
@@ -1350,30 +1222,31 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // 条目9②：本轮 system 注入分段按会话留存（hover 构成摘要）；条目9③：月度用量随每轮刷新
     if (r?.injection) setInjectionMap(prev => ({ ...prev, [sid]: r.injection as AiTeachInjectionStats }))
     void llmGetUsage().then(setUsage).catch(() => null)
-    if (isActive()) setLastChanges(r?.changes && r.changes.length ? r.changes : null)
     try {
       await refreshMessages(sid)
-      // 复习课：若 AI 刚用 course.review.write 生成 / 更新了讲义，自动刷新课程态并打开工件
+      // 复习课：若 AI 刚用 course.review.write 生成 / 更新了讲义，自动刷新课程态并在查看器打开
       if (isActive()) {
         const reviewCid = Object.entries(courseStateRef.current?.reviews ?? {}).find(([, rv]) => rv.sessionId === sid)?.[0] ?? null
         if (reviewCid) {
           const before = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
           await reloadCourse()
           const after = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
-          if (after && after !== before) void openArtFile(after)
+          if (after && after !== before) void openViewerFile(after)
         }
       }
     } finally {
       endRun(sid)
-      if (isActive()) {
-        setArtTabs(prev => prev.some(t => t.generating) ? prev.filter(t => !t.generating) : prev) // 中止/失败收尾：禁关占位不留场
-        setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
+      // 中止 / 失败收尾：禁关的「生成中」占位不留场（壳按 drop 清掉）。
+      // 只在确实开过占位时发请求，避免每轮正常结束都白开一次查看器。
+      if (isActive() && generatingArtifactRef.current) {
+        generatingArtifactRef.current = false
+        requestViewer({ tab: 'file', mode: 'drop' })
       }
       // 现场写回会话行（成功即已清空）→ 重拉列表才能让「继续」正确消失/出现
       void refreshSessions()
     }
     return r
-  }, [refreshMessages, reloadCourse, openArtFile, refreshSessions])
+  }, [refreshMessages, reloadCourse, openViewerFile, requestViewer, refreshSessions])
 
   const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string, images: ComposerImage[] = []): Promise<AgentChatResult | null> => {
     const sid = activeIdRef.current
@@ -1555,7 +1428,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         if (sid) { setAssistantSid(sid); void openSession(sid, '课程助手') }
         else {
           activeIdRef.current = null
-          setActiveId(null); setActiveTitle(''); setMessages([]); setLastChanges(null); setArtTabs([]); setArtActive(null)
+          setActiveId(null); setActiveTitle(''); setMessages([])
         }
         void refreshSessions()
         return
@@ -1578,7 +1451,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         void openSession(s.assistantSessionId, '课程助手')
       } else {
         activeIdRef.current = null
-        setActiveId(null); setActiveTitle(''); setMessages([]); setLastChanges(null); setArtTabs([]); setArtActive(null)
+        setActiveId(null); setActiveTitle(''); setMessages([])
       }
       void refreshSessions()
     })()
@@ -1808,7 +1681,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       const last = latestEndedSegmentOfUnit(cs.lessons, unitId)
       if (last) { await openSegmentBySid(last.sessionId); setActiveUnitId(unitId); return }
       const rel = cs.progress[unitId]?.summaryRel
-      if (rel) { void openArtFile(rel); return }
+      if (rel) { void openViewerFile(rel); return }
       showToast({ type: 'info', message: '这个知识点标为已学，但没有可回看的段' })
       return
     }
@@ -1837,7 +1710,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       }
     }
     setPreflight({ chapterId: ch.id, unitId, prevHandoff: prev })
-  }, [activeSegmentSid, openArtFile, openSegmentBySid, reloadSources, sourcePayload])
+  }, [activeSegmentSid, openViewerFile, openSegmentBySid, reloadSources, sourcePayload])
 
   /** 预检确认：开段（`unitIds` 已由 Preflight 按章内先修拓扑序排好 → 段内讲解顺序就是它，`unitIds[0]` = 当前聚焦） */
   const startSegment = useCallback(async (unitIds: string[], sources: AiTeachSegmentSource[]) => {
@@ -1884,7 +1757,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const st = reviewState(chapterId, ch.units.map((u) => u.id), cs.progress, cs.lessons, cs.reviews)
     if (st.state === 'locked') { showToast({ type: 'warning', message: `本章还有 ${st.remaining} 个知识点没学完，学完自动解锁` }); return }
     const reviewRel = cs.reviews[chapterId]?.rel
-    if (cs.endedAt && reviewRel) { void openArtFile(reviewRel); return }
+    if (cs.endedAt && reviewRel) { void openViewerFile(reviewRel); return }
     const r = await aiTeachCourseOpenChapterReview(ws, chapterId).catch(() => null)
     if (!r?.ok || !r.sessionId) { showToast({ type: 'warning', message: r?.error ?? '打开复习课失败' }); return }
     setActiveSegmentSid(null); setActiveUnitId(null); setSegmentStatus('open')
@@ -1894,7 +1767,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setActiveSegmentSid(null); setActiveUnitId(null)
     await reloadCourse()
     void refreshSessions()
-  }, [openSession, reloadCourse, refreshSessions, openArtFile])
+  }, [openSession, reloadCourse, refreshSessions, openViewerFile])
 
   /** 收尾当前段：冻结 + 置学完 + 异步生成交接 */
   const courseEndSegment = useCallback(async () => {
@@ -1923,8 +1796,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const hit = courseJumpByName.get(normName(name))
     if (!hit) { showToast({ type: 'info', message: `没有找到「${name}」对应的段或总结` }); return }
     if (hit.sid) { void openSegmentBySid(hit.sid); return }
-    if (hit.rel) void openArtFile(hit.rel)
-  }, [courseJumpByName, openArtFile, openSegmentBySid])
+    if (hit.rel) void openViewerFile(hit.rel)
+  }, [courseJumpByName, openViewerFile, openSegmentBySid])
 
   const courseReviewChapterName = useMemo(() => courseState?.outline?.chapters.find(c => c.id === courseReviewChapter)?.name ?? '', [courseState, courseReviewChapter])
 
@@ -1952,56 +1825,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
   const isPinned = useCallback((rel: string) => favoritesRef.current.some((f) => f.rel === rel), [])
 
-  /** 打开中的工件页签回读（3.14 不再回读 SOURCE.md；PROFILE / CONSTRAINTS 由右栏笔记页签自己读盘） */
-  const syncSessionFiles = useCallback((opts: { doc?: string | null }) => {
-    // 打开中的工件页签回读磁盘（编辑器保存/程序重写后即时反映）
-    const rel = opts.doc ?? null
-    const openTabs = artTabsRef.current.filter(t => !t.generating && t.rel && t.kind !== 'image' && (rel ? t.rel === rel : t.kind === 'md'))
-    for (const t of openTabs) {
-      void workspaceGetCurrent().then(cur => {
-        const rootId = (cur as { rootId?: string } | null)?.rootId
-        return rootId ? workspaceReadFile(rootId, t.rel) : null
-      }).then(r => {
-        if (!r || typeof r.content !== 'string') return
-        if (t.kind === 'md') setArtTabs(prev => prev.map(x => x.id === t.id && x.content !== r.content ? { ...x, content: r.content } : x))
-        else if (t.kind === 'html') setHtmlSeq(prev => ({ ...prev, [t.rel]: (prev[t.rel] ?? 0) + 1 }))
-      }).catch(() => null)
-    }
-  }, [])
+  /**
+   * 外部变更 → 树刷新 / 课程重载。
+   * 打开中的 md / 文件页签由 NotesPane / FilePane 自己订阅 `kb:file-saved` / `ws:external-change`
+   * 并 bump 自己的重读令牌 —— 页签状态归查看器，宿主不再代管（2026-11-23 工件栏退役）。
+   */
   useEffect(() => {
-    const onSaved = (e: Event) => {
-      const rel = String((e as CustomEvent).detail?.relPath ?? '')
-      const artHit = !!rel && artTabsRef.current.some(t => !t.generating && t.rel === rel)
-      if (!artHit) return
-      syncSessionFiles({ doc: rel })
-    }
-    const onTree = () => { syncSessionFiles({}); void reloadCourse() }
-    const onFocus = () => syncSessionFiles({})
-    window.addEventListener('kb:file-saved', onSaved)
-    window.addEventListener('focus', onFocus)
+    const onTree = () => { void reloadCourse() }
     const off = onAiTeachTreeRefresh(onTree)
     const offFs = onWsFsChanged(({ watcherError }) => {
       if (watcherError) return
       onTree()
       setTreeRefreshSeq(n => n + 1)
     })
-    return () => { window.removeEventListener('kb:file-saved', onSaved); window.removeEventListener('focus', onFocus); off(); offFs() }
-  }, [syncSessionFiles, reloadCourse])
-  // AI 写工具（vault.edit / artifact.edit）落盘后的外部变更：打开中的工件页签原地刷新。
-  // 与 fsWatcher 那条互补——vault.edit 只广播 ws:external-change，不触发树刷新。
-  useEffect(() => {
-    const off = onWsExternalChange(({ relPath }) => {
-      const rel = String(relPath ?? '')
-      if (!rel) return
-      const hit = artTabsRef.current.find(t => !t.generating && t.rel === rel)
-      if (!hit) return
-      if (hit.kind === 'md') { void openArtFile(rel, { name: hit.name, title: hit.title, silent: true }); return }
-      setHtmlSeq(prev => ({ ...prev, [rel]: (prev[rel] ?? 0) + 1 }))
-    })
-    return off
-  }, [openArtFile])
-  // 切回本模块 Tab：回读一次（保活组件不卸载，isActive 是唯一「重新可见」信号）
-  useEffect(() => { if (isActive) syncSessionFiles({}) }, [isActive, syncSessionFiles])
+    return () => { off(); offFs() }
+  }, [reloadCourse])
   // 文件操作撤销 / 重做（v3.16.1 F-5）：等 fsWatcher 有约 1 秒延迟，这里立即重扫已加载目录
   useEffect(() => {
     const onFileOp = () => setTreeRefreshSeq(n => n + 1)
@@ -2473,22 +2311,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     sendAskAnswer(`【整卷回答】\n${lines.join('\n')}`)
   }, [askPending, askPicks, pending, sendAskAnswer])
 
-  // ---- PPT 逐页阅读（已并入工件栏 pptx 页签；条目5.1 「原件」按钮 → openArtFile 分派）----
-  const setArtPptxPage = useCallback((id: string, delta: number) => {
-    setArtTabs(prev => prev.map(t => {
-      if (t.id !== id || !t.pages?.length) return t
-      const next = Math.min(Math.max((t.cur ?? 0) + delta, 0), t.pages.length - 1)
-      return next === t.cur ? t : { ...t, cur: next }
-    }))
-  }, [])
-
-  /** 让 AI 讲解当前页（对话常驻左主区：页签保留，仅切回对话视图并发送） */
-  const talkArtPage = useCallback((tab: ArtTab) => {
-    if (pending || !tab.pages?.length) return
-    const page = tab.pages[Math.min(tab.cur ?? 0, tab.pages.length - 1)]
-    if (!page) return
+  /**
+   * PPT 逐页阅读已并入查看器的文件页签（页签里的「讲解此页」经 `onTalkPage` 回到这里）。
+   * 只做「把当前页发给对话」这一件事：发送逻辑留在宿主（壳不碰 sendText）。
+   */
+  const talkViewerPage = useCallback((p: { name: string; page: number; n: number; text: string }) => {
+    if (pending) return
     const cid = crypto.randomUUID()
-    const text = `我在逐页阅读 PPT《${tab.name}》第 ${(tab.cur ?? 0) + 1} 页（原文编号 ${page.n}）。请基于这一页讲清楚要点，讲完停一下等我的问题：\n\n${page.text.slice(0, 2200)}`
+    const text = `我在逐页阅读 PPT《${p.name}》第 ${p.page + 1} 页（原文编号 ${p.n}）。请基于这一页讲清楚要点，讲完停一下等我的问题：\n\n${p.text.slice(0, 2200)}`
     void sendText(text, cid)
   }, [pending, sendText])
 
@@ -2573,24 +2403,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     }
     return null
   })()
-  // ---------- 行容器观测（v3.8.0 §二：工件并入右栏单面板，行宽供「全宽阅读」与工件内部自适应） ----------
-  const rowRef = useRef<HTMLDivElement>(null)
-  const [rowW, setRowW] = useState(0)
-  useEffect(() => {
-    const el = rowRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setRowW(el.clientWidth))
-    ro.observe(el)
-    setRowW(el.clientWidth)
-    return () => ro.disconnect()
-  }, [activeWs])
-  /** 工件分栏是否有页签（内容驱动：一个工件都没有时不占地方） */
-  const artExpanded = artTabs.length > 0
-  // v3.8.0：首个工件页签出现时自动展开工件分栏（用户不必再点一次顶栏 chip）
-  useEffect(() => {
-    if (!artExpanded) return
-    applyArtOpen(true)
-  }, [artExpanded, applyArtOpen])
   // ---------- 右缘轮次导航（2026-11-21 重做，方案 tmp/ai-teach-anchor-rail/PLAN.md） ----------
   /**
    * 刻度单位改成**用户提问（轮次）**（方案 §三-1）：用户记的是「我问了什么」，不是「AI 答了什么」；
@@ -2860,7 +2672,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!sid) return
     const key = mid ?? `idx${idx}`
     const existing = organized[key]
-    if (existing) { void openArtFile(existing); return } // 工件栏入口②：已生成 → 页签阅读
+    if (existing) { void openViewerFile(existing); return } // 已生成 → 查看器笔记页签
     const title = msgAnchorTitle(content, idx)
     const r = await aiTeachOrganizeDoc(sid, title, content).catch(() => null)
     if (r?.ok && r.relPath) {
@@ -3260,7 +3072,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               lucide PanelRight 的分隔线在 66.7%、rx 2、16px 下描边约 1.27，三处都对不上。
               右栏打开时这枚**不渲染**（不是置灰）——右栏头部自己有收起。 */}
           {!srcVisible && (
-            <button type="button" onClick={() => requestViewer({ tab: viewerTab })}
+            <button type="button" onClick={() => requestViewer({ tab: viewerTab === 'file' ? 'notes' : viewerTab })}
               data-tip="打开右侧栏（Ctrl+Alt+B）" aria-label="打开右侧栏（Ctrl+Alt+B）"
               className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
@@ -3272,7 +3084,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         </div>
       </div>
 
-      <div ref={rowRef} className="relative flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
         {/* 左栏（P4 §3.7 + UI 优化条目2/3）：ResizablePanel 可调宽持久化 + 折叠贴边条（悬停高亮，点/拖展开）；
             分区体 grid-rows 动画常挂载（滚动/展开状态自然保留），折叠态 visibility 兜底 */}
         {/* keepMounted（2026-11-19 卡顿优化）：左栏子树一挂载就扫目录 + 拉课程状态，
@@ -3333,7 +3145,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   {favorites.map((f) => (
                     <div key={f.rel} className="group flex items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-[var(--bg-hover)]">
                       <FileText size={11} className="shrink-0 text-[var(--text-muted)]" />
-                      <button onClick={() => { void openArtFile(f.rel, { name: f.name }) }} data-tip={f.rel} aria-label={f.rel}
+                      <button onClick={() => { void openViewerFile(f.rel, { name: f.name }) }} data-tip={f.rel} aria-label={f.rel}
                         className="min-w-0 flex-1 truncate text-left text-[12px] text-[var(--text-primary)]">{f.name.replace(/\.md$/i, '')}</button>
                       <button onClick={() => { void togglePin(f.rel, f.name) }} data-tip="取消钉选" aria-label="取消钉选"
                         className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"><X size={11} /></button>
@@ -3394,13 +3206,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <Paperclip size={12} />
               </button>
               {/* v3.2.0 条目 ④：与编辑器侧同语义的手动刷新（口径 b 全量：树重扫 + 知识索引/图谱失效
-                 + 归档清单 prune）。打开中的工件页签由 syncSessionFiles 一并回读 */}
+                 + 归档清单 prune）。打开中的文件页签由查看器自己订阅外部变更并重读 */}
               <button
                 onClick={() => {
                   if (treeRefreshing) return
                   setTreeRefreshing(true)
                   setTreeRefreshSeq(n => n + 1)
-                  syncSessionFiles({})
                   void workspaceRefreshVault()
                     .then(r => { if (r.error) showToast({ type: 'error', message: r.error }) })
                     .catch(() => {})
@@ -3427,7 +3238,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     outline={courseState?.outline ?? null}
                     activeChapterId={railActiveChapter}
                     activeSegment={activeSegment}
-                    onOpenFile={(rel) => void openArtFile(rel)}
+                    onOpenFile={(rel) => void openViewerFile(rel)}
                     onReloadCourse={() => void reloadCourse()}
                     readOnly={courseEnded}
                   />
@@ -3437,10 +3248,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               </div>
             ) : (
             <div className="h-full min-h-0 pb-1">
+              {/* 当前阅读项归查看器（壳内状态）：壳通过 onActivePathChange 回传，左栏据此回显高亮 */}
               <AiTeachFileTree
                 subRel={wsTreeSeg}
                 refreshSeq={treeRefreshSeq}
-                activeRel={(() => { const r = artTabs.find(t => t.id === artActive && !t.generating)?.rel ?? null; return r && r.startsWith(`${treeBase}/`) ? r.slice(treeBase.length + 1) : null })()}
+                activeRel={(() => {
+                  const r = viewerActiveRel
+                  return r && r.startsWith(`${treeBase}/`) ? r.slice(treeBase.length + 1) : null
+                })()}
                 onOpenMd={treeOpenArt}
                 onOpenHtml={treeOpenArt}
                 onOpenImage={treeOpenArt}
@@ -3454,7 +3269,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           </div>
         </ResizablePanel>
 
-        {/* 中栏（工件栏方案 §1.2 定稿）：对话主区固定、永不替换；原 docView/reader 分支整体迁入右缘工件栏页签。
+        {/* 中栏：对话主区固定、永不替换；md / pptx / html / 图片等阅读都在右侧查看器页签里。
             P4：查看器是 overlay（absolute 盖在右缘），中栏用 padding-right 让位 —— 宽度与面板同一条
             200ms 曲线；拖拽时查看器自己会关掉过渡，这里跟随 CSS 变量即可。 */}
         <section
@@ -3491,7 +3306,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]">本章学完已解锁；复习不引入新知识点</span>
                   <div className="shrink-0 flex items-center gap-1">
                     {courseState?.reviews[courseReviewChapter]?.rel ? (
-                      <button onClick={() => { const rel = courseState?.reviews[courseReviewChapter]?.rel; if (rel) void openArtFile(rel) }}
+                      <button onClick={() => { const rel = courseState?.reviews[courseReviewChapter]?.rel; if (rel) void openViewerFile(rel) }}
                         className="rounded-md border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">查看讲义</button>
                     ) : !courseEnded ? (
                       <button onClick={courseWriteReview} disabled={pending}
@@ -3501,8 +3316,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 </div>
               )}
               <div className="relative flex-1 min-h-0">
-              {/* v3.1.2 补强：支线旁问浮层已提到**行容器末尾**（见 rowRef 那一段）——
-                  原先挂在这里只能在中栏里浮，现在要能跨左栏/中栏/工件栏自由拖动。 */}
+              {/* v3.1.2 补强：支线旁问浮层已提到**行容器末尾**——
+                  原先挂在这里只能在中栏里浮，现在要能跨左栏 / 中栏自由拖动。 */}
               {/* 底部留白 48px = 「回到底部」浮标占位（bottom-3 12px + 按钮 36px）——浮标是 absolute 不占流，
                   若不留白就会盖住滚到下方时的最后一行文字。留白常驻（不随浮标显隐变化）→ 不产生二次回流。 */}
               <div ref={scrollRef} onScroll={onConvScroll} onWheel={cancelTrayPin} onPointerDown={cancelTrayPin} className="absolute inset-0 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable] pl-4 pr-8 pt-3 pb-12 space-y-3 min-h-0">
@@ -3550,9 +3365,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             </button>
                           )
                         })}
-                        {/* 工件栏方案 §2：visual.html 工件卡（对话流唯一形态，HTML 正文永不进流）——数据源=trace 里的 artifact step。
+                        {/* 规划 §7.2：visual.html 工件卡（对话流唯一形态，HTML 正文永不进流）——数据源=trace 里的 artifact step。
                             ★ 仍**排除 image**（v3.6.0 阶段二复核过）：图的"卡"就是图本身，下面 `ImageCard` 直接把它画出来了，
-                              再叠一个「在工件栏打开 →」按钮是同一件事说两遍；产物页签由生成时的事件流自动开（转正/关闭都归工件栏管） */}
+                              再叠一个「在查看器打开 →」按钮是同一件事说两遍；产物页签由生成时的事件流自动开（转正/关闭都归查看器管） */}
                         {(m.trace ?? []).some(s => s.artifact && s.artifact.kind !== 'image') && (
                           <div className="mt-1.5 space-y-1">
                             {(m.trace ?? []).filter(s => s.artifact && s.artifact.kind !== 'image').map((s, k) => {
@@ -3561,7 +3376,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               const isDoc = a.kind === 'md'
                               const verb = a.updated ? '已更新' : ''
                               return (
-                                <button key={k} onClick={() => { void openArtFile(a.rel, { title: a.title, lines: a.lines }) }} data-tip={a.rel} aria-label={a.rel}
+                                <button key={k} onClick={() => { void openViewerFile(a.rel, { title: a.title }) }} data-tip={a.rel} aria-label={a.rel}
                                   className="w-full max-w-[440px] flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[var(--accent)]/50 transition-colors text-left">
                                   {isMind ? <GitBranch size={13} className="shrink-0 text-[var(--accent)]" />
                                     : isDoc ? <FileText size={13} className="shrink-0 text-[var(--accent)]" />
@@ -3574,7 +3389,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                                         ? `${verb ? `${verb} · ` : ''}${a.rel}`
                                         : `${verb ? `${verb} · ` : ''}${a.rel} · ${a.lines} 行 · 单文件自包含`}</span>
                                   </span>
-                                  <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">{verb ? `${verb} →` : '在工件栏打开 →'}</span>
+                                  <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">{verb ? `${verb} →` : '在查看器打开 →'}</span>
                                 </button>
                               )
                             })}
@@ -3582,7 +3397,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         )}
                         {/* 生图卡（v3.6.0）：/生图 在 AI 教学面同样可用（阶段一产物落仓库 .attachments/），
                             卡面与助手面共用同一个组件 —— 两处各画一份迟早会长歪。
-                            工件栏页签/文件树接线属阶段二（方案 §6），此处只渲染对话流里的卡。 */}
+                            图本身的页签由生成时的事件流自动开在查看器里，此处只渲染对话流里的卡。 */}
                         {imageGroupsOf(m.trace).map((group, gi) => (
                           <div key={`img-${gi}`} className="mt-1.5">
                             <ImageCard artifact={group[group.length - 1]} versions={group}
@@ -3808,7 +3623,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     <Check size={11} className="shrink-0 text-[var(--success)]" />
                     <span className="shrink-0">本段已收尾 ·</span>
                     {activeSegment.handoffRel ? (
-                      <button type="button" onClick={() => { const rel = activeSegment.handoffRel; if (rel) void openArtFile(rel) }}
+                      <button type="button" onClick={() => { const rel = activeSegment.handoffRel; if (rel) void openViewerFile(rel) }}
                         data-tip={activeSegment.handoffRel} aria-label={`打开 ${activeSegment.handoffRel}`}
                         className="min-w-0 truncate text-[var(--accent)] transition-colors hover:underline">交接.md</button>
                     ) : (
@@ -4428,95 +4243,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           )}
         </section>
 
-        {/* v3.8.0：工件**独立分栏** —— 中栏右侧、与对话并排同屏（VS Code 分屏编辑器的形态）。
-            ResizablePanel(side=right)：手柄在左缘、左拖变宽；拖过 minWidth/2 = snap-close（artOpen=false，页签不丢）；
-            收起后留 12px 贴边条，点/左拖即回。宽度持久化在 aiTeach.artWidth。 */}
-        <ResizablePanel side="right" storageKey="aiTeachArtWidth" defaultWidth={420} minWidth={280} maxWidth={780}
-          visible={artExpanded && artOpen && !artZoom}
-          onSnapClose={() => applyArtOpen(false)}
-          onSnapOpen={artExpanded && !artZoom ? () => applyArtOpen(true) : undefined}
-          collapsedWidth={12}
-          /* 有页签时保活：收起再展开原先是卸载重挂，iframe 里的 HTML / 导图会整份重新加载；
-             没有页签时不挂（避免空面板常驻）。 */
-          keepMounted={artTabs.length > 0}
-          onWidthChange={setArtPaneW}>
-          <ArtifactsPane
-            tabs={artTabs}
-            activeId={artActive}
-            widthPx={artPaneW > 0 ? artPaneW : 420}
-            htmlSeq={htmlSeq}
-            expanded={false}
-            onToggleExpanded={setArtZoom}
-            onActivate={setArtActive}
-            onClose={closeArtTab}
-            onReload={reloadArtTab}
-            onPptxPage={setArtPptxPage}
-            onTalkPage={talkArtPage}
-            pending={pending}
-            onEdit={artOpenInEditor}
-            onOpenRef={artOpenRef}
-            changes={lastChanges ?? undefined}
-            onOpenChange={(c) => { if (!c.file) return; if (changeOpensInArtifactPane(c)) void openArtFile(String(c.file), { title: c.target }); else window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })) }}
-            open={artOpen}
-            onToggleOpen={applyArtOpen}
-          />
-        </ResizablePanel>
-
-        {/* 收起态展开入口（2026-11-23 可达性修复）：分栏收起后整棵子树 `display:none`，
-            页签条右端那枚 `PanelRightOpen` 永远看不见。所以入口必须挂在**折叠容器之外**：
-            贴中栏右缘一枚竖条按钮，`transform` 跟随查看器宽度 → 查看器打开时退到它左缘之外，
-            那一刻也照样可点（Toast 指向的就是它）。顶栏仍不放第二处开关（契约锁住）。 */}
-        {artExpanded && !artOpen && !artZoom && (
-          <button
-            ref={artEdgeBtnRef}
-            type="button"
-            onClick={() => {
-              // 查看器占着右侧（z-30）时先让它让位，否则分栏展开会被整个盖住 —— 点了像没反应
-              if (srcVisible) toggleSide('right')
-              applyArtOpen(true)
-            }}
-            aria-expanded={false}
-            data-tip="展开工件分栏" aria-label="展开工件分栏"
-            style={{
-              // 只动 transform；横移与中栏 padding-right 同一条 --dur-std / --ease-kb 曲线
-              transform: `translate(${srcVisible && viewerW > 0 ? -viewerW : 0}px, -50%)`,
-              transition: artReducedMotion ? 'none' : 'transform var(--dur-std) var(--ease-kb)',
-            }}
-            className="kb-view-fade absolute top-1/2 right-0 z-20 flex h-[72px] w-3.5 items-center justify-center rounded-l-md border border-r-0 border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
-          >
-            <PanelRightOpen size={12} />
-          </button>
-        )}
-
-        {/* ⤢ 全宽阅读：拿满整行（absolute inset-0 z-40；组件不卸载 → 对话滚动与 iframe 全存活）。
-            此态下工件分栏不重复挂载 ArtifactsPane（避免两份实例各跑计时器；iframe 是 kbview:// 独立文档）。 */}
-        {artExpanded && artZoom && (
-          <div className="absolute inset-0 z-40 min-h-0">
-            <ArtifactsPane
-              tabs={artTabs}
-              activeId={artActive}
-              widthPx={rowW}
-              htmlSeq={htmlSeq}
-              expanded={artZoom}
-              onToggleExpanded={setArtZoom}
-              onActivate={setArtActive}
-              onClose={closeArtTab}
-              onReload={reloadArtTab}
-              onPptxPage={setArtPptxPage}
-              onTalkPage={talkArtPage}
-              pending={pending}
-              onEdit={artOpenInEditor}
-              onOpenRef={artOpenRef}
-              changes={lastChanges ?? undefined}
-              onOpenChange={(c) => { if (!c.file) return; if (changeOpensInArtifactPane(c)) void openArtFile(String(c.file), { title: c.target }); else window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })) }}
-            />
-          </div>
-        )}
-
       </div>
 
-      {/* 右侧查看器（P4）：网页 / 笔记 / 书架 / 旁问 —— 取代原右栏（进度 / 素材 / 支线）。
-          素材 → 左栏「文件 / 素材」分段；本次改动 → 工件栏底部。
+      {/* 右侧查看器（P4）：网页 / 笔记 / 书架 / 旁问 / 文件 —— 取代原右栏（进度 / 素材 / 支线）与工件栏。
+          素材 → 左栏「文件 / 素材」分段；文件与 AI 产物统一在查看器开页签。
           ★ 挂在**模块根节点**而不是中栏行容器里：行容器在顶栏下面，面板上沿就会比顶栏低一截，
             看起来像被顶栏压住（2026-11-22 用户反馈）。挂到根节点后 `absolute inset-y-0` 从模块顶端起算，
             刚好盖住那条面包屑顶栏；中栏仍用 `padding-right` 双向让位，左侧面包屑不受影响。 */}
@@ -4534,6 +4264,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         onOpenFullscreen={(rel) => window.dispatchEvent(new CustomEvent('kb-open-book', { detail: { relPath: rel, from: 'aiTeaching' } }))}
         onQuote={quoteFromLane}
         onFloat={floatFromCenter}
+        onTalkPage={talkViewerPage}
+        onActivePathChange={setViewerActiveRel}
         anchorMessageId={lastAssistantId}
         onTabChange={setViewerTab}
       />

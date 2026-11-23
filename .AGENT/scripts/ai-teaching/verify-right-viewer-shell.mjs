@@ -83,6 +83,8 @@ check('missing legacy value -> web (null and undefined and empty)',
 check('web / notes / books are preserved',
   migrateRailTab('web') === 'web' && migrateRailTab('notes') === 'notes' && migrateRailTab('books') === 'books',
   `${migrateRailTab('web')} / ${migrateRailTab('notes')} / ${migrateRailTab('books')}`)
+check('file is NOT migrated from the old rail (the old rail had no file tab)',
+  migrateRailTab('file') === 'web', String(migrateRailTab('file')))
 
 // ---------------------------------------------------------------- 2. clampViewerWidth
 console.log('\n=== 2. clampViewerWidth: bounds and viewport guard ===')
@@ -145,29 +147,61 @@ check('closed on ask -> hide', shouldHideWebViewer(false, 'ask') === true, '')
 
 // ---------------------------------------------------------------- 4. labels / guard
 console.log('\n=== 4. tabLabel / isViewerTabKey parity with the frozen contracts ===')
-check('labels follow VIEWER_TABS order (web / notes / books / ask)',
-  `${tabLabel('web')}|${tabLabel('notes')}|${tabLabel('books')}|${tabLabel('ask')}` === contracts.VIEWER_TABS.map((t) => t.label).join('|'),
+check('labels follow VIEWER_TABS order (web / notes / books / file / ask)',
+  `${tabLabel('web')}|${tabLabel('notes')}|${tabLabel('books')}|${tabLabel('file')}|${tabLabel('ask')}` === contracts.VIEWER_TABS.map((t) => t.label).join('|'),
   'label mismatch')
-check('pure guard accepts exactly the four viewer tabs',
-  ['web', 'notes', 'books', 'ask'].every((k) => isViewerTabKey(k)),
+check('pure guard accepts exactly the five viewer tabs',
+  ['web', 'notes', 'books', 'ask', 'file'].every((k) => isViewerTabKey(k)),
   '')
 check('pure guard rejects legacy / garbage keys',
   !isViewerTabKey('progress') && !isViewerTabKey('lanes') && !isViewerTabKey(null) && !isViewerTabKey(''),
   '')
 check('guard agrees with paneContracts.isViewerTabKey on every probe',
-  ['web', 'notes', 'books', 'ask', 'progress', 'lanes', 'sources', '', null, undefined, 0, {}]
+  ['web', 'notes', 'books', 'ask', 'file', 'progress', 'lanes', 'sources', '', null, undefined, 0, {}]
     .every((v) => isViewerTabKey(v) === contracts.isViewerTabKey(v)),
   '')
 check('migration output is always a viewer tab key',
-  ['lanes', 'ask', 'progress', 'sources', 'web', 'notes', 'books', 'nope', null, undefined]
+  ['lanes', 'ask', 'progress', 'sources', 'web', 'notes', 'books', 'file', 'nope', null, undefined]
     .every((v) => isViewerTabKey(migrateRailTab(v))),
   '')
-// 页签条改由实例数组驱动后，`+` 菜单是唯一还按 kind 枚举的地方 —— 必须与冻结契约同集合
-check('new-tab menu covers exactly the frozen VIEWER_TABS kinds',
-  tabsModel.VIEWER_NEW_TAB_ORDER.length === contracts.VIEWER_TABS.length
-  && contracts.VIEWER_TABS.every((t) => tabsModel.VIEWER_NEW_TAB_ORDER.some((o) => o.type === t.key))
-  && tabsModel.VIEWER_NEW_TAB_ORDER.every((o) => contracts.isViewerTabKey(o.type)),
+// VIEWER_TABS 是冻结契约里唯一的 kind 清单（页签条由实例数组驱动，不再遍历它渲染）
+check('frozen VIEWER_TABS contains file between books and ask, with the shared label',
+  contracts.VIEWER_TABS.length === 5
+  && contracts.VIEWER_TABS.map((t) => t.key).join('|') === 'web|notes|books|file|ask'
+  && contracts.VIEWER_TABS.find((t) => t.key === 'file')?.label === '文件',
+  contracts.VIEWER_TABS.map((t) => t.key).join('|'))
+// `file` 没有通用文件选择器，统一从左栏 / 素材 / 产物进入 —— `+` 菜单刻意不提供空文件页签
+check('new-tab menu covers every openable kind and deliberately omits file',
+  tabsModel.VIEWER_NEW_TAB_ORDER.every((o) => contracts.VIEWER_TABS.some((t) => t.key === o.type))
+  && contracts.VIEWER_TABS.filter((t) => t.key !== 'file')
+    .every((t) => tabsModel.VIEWER_NEW_TAB_ORDER.some((o) => o.type === t.key))
+  && tabsModel.VIEWER_NEW_TAB_ORDER.every((o) => contracts.isViewerTabKey(o.type))
+  && !tabsModel.VIEWER_NEW_TAB_ORDER.some((o) => o.type === 'file'),
   tabsModel.VIEWER_NEW_TAB_ORDER.map((o) => o.type).join('|'))
+
+// ---------------------------------------------------------------- 4b. frozen file contracts
+console.log('\n=== 4b. frozen file tab contracts ===')
+check('viewerTabs exposes the file kind + factory + lookups + live cap',
+  /export type FilePaneKind = 'html' \| 'image' \| 'mindmap' \| 'pptx'/.test(tabsSrc)
+  && tabsSrc.includes('export function makeFileTab(')
+  && tabsSrc.includes('export function isFilePaneKind(')
+  && tabsSrc.includes('export function findFileTab(')
+  && tabsSrc.includes('export function findAnyPathTab(')
+  && tabsSrc.includes('export const VIEWER_FILE_LIVE_CAP = 3'), '')
+check('paneContracts freezes ViewerOpenRequest with the begin/commit/drop protocol',
+  /export interface ViewerOpenRequest \{/.test(contractsSrc)
+  && /mode\?: 'open' \| 'begin' \| 'commit' \| 'drop'/.test(contractsSrc)
+  && /fileKind\?: FilePaneKind/.test(contractsSrc)
+  && /previewDefault\?: boolean/.test(contractsSrc)
+  && /slug\?: string/.test(contractsSrc)
+  && /page\?: number/.test(contractsSrc), '')
+check('paneContracts freezes FilePaneProps (no existing field retyped)',
+  /export interface FilePaneProps extends ViewerPaneContext \{/.test(contractsSrc)
+  && /initialRelPath: string/.test(contractsSrc)
+  && /onPageChange\?: \(page: number\) => void/.test(contractsSrc)
+  && /onTalkPage\?: \(page: \{ name: string; page: number; n: number; text: string \}\) => void/.test(contractsSrc), '')
+check('notes tabs can request preview-on-open but new notes stay in edit mode',
+  tabsSrc.includes('previewDefault?: boolean') && tabsSrc.includes('previewDefault: true'), '')
 
 // ---------------------------------------------------------------- 5. static: shell
 console.log('\n=== 5. static: RightViewer.tsx + ViewerChrome.tsx wiring ===')
@@ -179,12 +213,12 @@ check('shell takes pane kinds from paneContracts, ViewerChrome renders the strip
   && chromeSrc.includes('role="tablist"')
   && !shellSrc.includes('VIEWER_TABS') && !chromeSrc.includes('VIEWER_TABS'),
   'fixed tab list still referenced')
-check('one PaneSlot per tab instance, all four kinds dispatched',
-  (shellSrc.match(/<PaneSlot key=\{tab\.id\} tabId=\{tab\.id\} active=\{active\}>/g) || []).length === 4
-  && ['web', 'notes', 'books', 'ask'].every((k) =>
+check('one PaneSlot per tab instance, all five kinds dispatched',
+  (shellSrc.match(/<PaneSlot key=\{tab\.id\} tabId=\{tab\.id\} active=\{active\}>/g) || []).length === 5
+  && ['web', 'notes', 'books', 'file', 'ask'].every((k) =>
     shellSrc.includes(`tab.type === '${k}'`) || (k === 'ask' && shellSrc.includes('<AskPane'))),
   String((shellSrc.match(/<PaneSlot key=\{tab\.id\}/g) || []).length))
-check('panes are lazy loaded', (shellSrc.match(/lazyPane\(\(\) => import\('\.\/\w+'\)/g) || []).length === 4,
+check('panes are lazy loaded', (shellSrc.match(/lazyPane\(\(\) => import\('\.\/\w+'\)/g) || []).length === 5,
   String((shellSrc.match(/lazyPane/g) || []).length))
 check('panes are mounted from the live-window ids (LRU), not from a fixed kind list',
   /tabs\.filter\(\(t\) => liveIds\.includes\(t\.id\)\)\.map\(paneFor\)/.test(shellSrc),
@@ -269,6 +303,83 @@ check('shell forwards reserve into useViewerWidth',
   'reserve not forwarded')
 check('hook re-clamps when reserve changes',
   /\[opts\.reserve, applyWidth, schedulePersist\]/.test(resizeSrc), 'reserve change effect missing')
+
+// ---------------------------------------------------------------- 9. static: file pane + artifacts + fullscreen
+console.log('\n=== 9. static: file pane wiring / artifact protocol / fullscreen ===')
+// 2026-11-23 第三批（查看器壳层）：工件栏并入查看器 → 多一种 `file` 页签 + `⤢` 全屏。
+check('FilePane is lazy loaded through the same normaliser',
+  /const FilePane = lazyPane\(\(\) => import\('\.\/FilePane'\), 'FilePane'\)/.test(shellSrc), '')
+check('file tabs keep their own PaneSlot branch with the frozen FilePaneProps',
+  shellSrc.includes("if (tab.type === 'file')")
+  && shellSrc.includes('<FilePane')
+  && shellSrc.includes('initialRelPath={tab.relPath}')
+  && shellSrc.includes('fileKind={tab.fileKind}')
+  && shellSrc.includes('rev={tab.rev ?? 0}')
+  && shellSrc.includes('page={tab.page}')
+  && shellSrc.includes('onPageChange={cached(')
+  && shellSrc.includes('onOpenFileRef={cached(')
+  && shellSrc.includes('onTalkPage={cached('), 'file pane props missing')
+check('notes tabs get previewDefault so file-tree opens land in preview',
+  shellSrc.includes('initialPreview={tab.previewDefault}'), '')
+check('a file request with an empty relPath never creates an empty file tab',
+  /if \(type === 'file'\) \{\s*\/\/[^\n]*\n\s*if \(!rel\) return/.test(shellSrc), 'relPath guard missing')
+// 统一入口：所有文件打开都走同一个 openFile（跨 notes / file 去重），宿主不再各写一套
+check('every file entry funnels through one openFile() with cross-type dedupe',
+  shellSrc.includes('const openFile = useCallback(')
+  && shellSrc.includes('findAnyPathTab(tabsRef.current, rel)')
+  && shellSrc.includes('openFile(rel)')
+  && shellSrc.includes('makeFileTab(newTabId()'), 'unified openFile missing')
+check('request protocol branches on mode begin / commit / drop',
+  /const mode = request\.mode \?\? 'open'/.test(shellSrc)
+  && shellSrc.includes("mode === 'drop'") && shellSrc.includes("mode === 'begin'")
+  && shellSrc.includes("mode === 'commit'")
+  && shellSrc.includes('dropArtifact(request.slug)')
+  && shellSrc.includes('beginArtifact({') && shellSrc.includes('commitArtifact({'), '')
+check('begin merges by slug and keeps one generating placeholder per artifact',
+  /`gen:\$\{slug \|\| fileKind\}`/.test(shellSrc)
+  && /generating: true/.test(shellSrc)
+  && /findGenerating\(slug\)/.test(shellSrc), 'begin protocol missing')
+check('commit reuses an existing formal tab instead of opening a duplicate',
+  /const formal = findFileTab\(tabsRef\.current, rel\)/.test(shellSrc)
+  && /formal\.id !== ph\.id/.test(shellSrc)
+  && /closeTabById\(tabsRef\.current, activeIdRef\.current, ph\.id\)/.test(shellSrc), '')
+check('commit converts the placeholder in place (drops generating / slug, bumps rev)',
+  shellSrc.includes('type: \'file\',') && shellSrc.includes('generating !== true')
+  && /relPath: rel,\s*\n\s*fileKind,\s*\n\s*rev: \(t\.rev \?\? 0\) \+ 1/.test(shellSrc), '')
+check('drop removes generating placeholders without the close animation',
+  /dropArtifact = useCallback/.test(shellSrc)
+  && /t\.type !== 'file' \|\| t\.generating !== true/.test(shellSrc)
+  && /apply\(next, nextActive\)/.test(shellSrc)
+  && !/dropArtifact[\s\S]{0,600}closeTab\(/.test(shellSrc), '')
+// 全屏：按钮在关闭面板左侧，状态归壳，宽度 / 焦点 / Esc 三条边界
+check('viewer chrome has the fullscreen toggle left of the close button',
+  chromeSrc.includes('Maximize2') && chromeSrc.includes('Minimize2')
+  && chromeSrc.includes('aria-pressed={expanded}')
+  && chromeSrc.includes("data-tip={expanded ? '退出全屏（Esc）' : '全屏'}")
+  && chromeSrc.includes('ref={expandButtonRef}')
+  && chromeSrc.indexOf('{expandButton}') < chromeSrc.indexOf('{closePanelButton}'), '')
+check('shell owns the expanded state and reports width 0 while fullscreen',
+  /const \[expanded, setExpanded\] = useState\(false\)/.test(shellSrc)
+  && /onWidthChangeRef\.current\?\.\(open && !expanded \? width : 0\)/.test(shellSrc), '')
+check('fullscreen covers the module area (left 0 / width 100%) above the panel layer',
+  /\{ left: 0, right: 0, width: '100%', minWidth: '0px' \}/.test(shellSrc)
+  && shellSrc.includes("full ? 'z-40' : 'z-30'"), '')
+check('fullscreen drops the drag handle (nothing to resize while covered)',
+  /\{!full && \(/.test(shellSrc) && /role="separator"/.test(shellSrc)
+  && /onDoubleClick=\{reset\}/.test(shellSrc), '')
+check('Esc exits fullscreen only while expanded; closing the panel resets it',
+  /if \(!full\) return[\s\S]{0,320}addEventListener\('keydown'/.test(shellSrc)
+  && shellSrc.includes("e.key !== 'Escape'") && shellSrc.includes('e.stopPropagation()')
+  && shellSrc.includes('if (!open && expanded) setExpanded(false)'), '')
+check('leaving fullscreen returns focus to the toggle button',
+  /expandBtnRef\.current\?\.focus\(\{ preventScroll: true \}\)/.test(shellSrc), '')
+check('TYPE_ICONS keeps the Record complete and the strip icon follows fileKind',
+  /const TYPE_ICONS: Record<ViewerPaneType, typeof Globe> = \{[\s\S]{0,220}file: FileText/.test(chromeSrc)
+  && chromeSrc.includes("tab.fileKind === 'html' ? FileCode2")
+  && chromeSrc.includes("tab.fileKind === 'mindmap' ? Network")
+  && chromeSrc.includes(': Presentation'), '')
+check('the retired artifacts pane is not referenced by the shell',
+  !shellSrc.includes('ArtifactsPane') && !chromeSrc.includes('ArtifactsPane'), '')
 
 // ---------------------------------------------------------------- report
 const failed = checks.filter((c) => !c.pass)

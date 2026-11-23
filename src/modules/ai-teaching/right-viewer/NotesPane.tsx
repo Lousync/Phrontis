@@ -46,6 +46,9 @@ import {
 import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
+import { QuizRecordContext, useQuizRecordStore } from '../../../components/shared/QuizRecordStore'
+import { QuizSheetBar } from '../../../components/shared/QuizSheetBar'
+import { extractQuizzes } from '../../../components/shared/QuizParser'
 import type { PaneDoc } from '../../../components/shared/NoteSurface'
 import type { NoteEngineId } from '../../../lib/noteEngine'
 
@@ -107,7 +110,7 @@ function normalizeRel(rel: string): string {
 export function NotesPane(props: NotesPaneProps) {
   const {
     rootId, sessionId, width, active, open, request,
-    initialRelPath, fileKind, ownerSessionId, displayName,
+    initialRelPath, fileKind, ownerSessionId, displayName, initialPreview,
     onOpenInEditor, onDirtyChange, onTitleChange, onRelPathChange,
     registerFlush, onRequestOpenNote, onRequestNewNote,
   } = props
@@ -123,7 +126,7 @@ export function NotesPane(props: NotesPaneProps) {
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [conflict, setConflict] = useState(false)
-  const [preview, setPreview] = useState(false)
+  const [preview, setPreview] = useState(() => !!initialPreview && /\.md$/i.test(initialRelPath ?? ''))
   const [mode, setMode] = useState<NoteEngineId>('source')
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -149,8 +152,34 @@ export function NotesPane(props: NotesPaneProps) {
   relCbRef.current = onRelPathChange
   /** 已上报过的身份（避免每次渲染都回调壳、把壳推进重渲染环） */
   const reportedRef = useRef('')
+  /**
+   * 「这份文件进来时默认进预览」的意图（方案 §8.1）。
+   * 只靠 state 初值不够：读盘完成后的 `openFile` 会把 preview 重置成编辑态，
+   * 挂在 effect 之后必然把初值冲掉。这里按「路径 + 是否预览」记意图，
+   * 由 openFile 在真正拿到内容时判定一次；同页签内再换文件就回到编辑。
+   */
+  const previewIntentRef = useRef({
+    preview: !!initialPreview,
+    relPath: normalizeRel(initialRelPath ?? ''),
+  })
+  previewIntentRef.current = {
+    preview: !!initialPreview,
+    relPath: normalizeRel(initialRelPath ?? ''),
+  }
 
   const narrow = width > 0 && width < NARROW_WIDTH
+
+  /* ------------------------------------------------------------ 题单 */
+
+  // 预览态作答：与知识库阅读态 / 旧工件栏共用同一份答题痕迹（只有 relPath，store 反查 pageId）。
+  // 画像 / 要求不是知识页，不挂题单；非 .md 也没有题单围栏。
+  const quizRel = kind === 'note' && /\.md$/i.test(currentRel) ? currentRel : ''
+  const quizStore = useQuizRecordStore({ relPath: quizRel, pageTitle: baseName(quizRel) })
+  // 只在预览态解析题单围栏：编辑时每次击键都会换 doc.content，对长题单反复 parse 会掉帧
+  const quizzes = useMemo(
+    () => (preview && quizRel ? extractQuizzes(doc?.content ?? '') : []),
+    [preview, quizRel, doc?.content],
+  )
 
   const setConflictState = useCallback((v: boolean) => {
     conflictRef.current = v
@@ -319,7 +348,12 @@ export function NotesPane(props: NotesPaneProps) {
       setConflictState(false)
       setSaveState('clean')
       setSavedAt(null)
-      setPreview(false)
+      // 文件树 / 素材点开的这一份默认进预览（仅 .md）；同页签内换文件回到编辑
+      setPreview(
+        previewIntentRef.current.preview
+        && previewIntentRef.current.relPath === target
+        && /\.md$/i.test(target),
+      )
       // 身份上报：空 relPath 起家的页签靠这里补上文件身份（壳据此去重 / 持久化）
       if (reportedRef.current !== target) {
         reportedRef.current = target
@@ -585,7 +619,18 @@ export function NotesPane(props: NotesPaneProps) {
 
   /* ------------------------------------------------------------ 空态 */
 
-  if (!rootId || !sessionId) {
+  if (!rootId) {
+    return (
+      <div className="flex h-full items-center justify-center p-4">
+        <div className="kb-view-fade w-full max-w-[320px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-5 text-center text-[13px] text-[var(--text-primary)]">
+          先打开一个仓库
+        </div>
+      </div>
+    )
+  }
+
+  // 会话文件（画像 / 要求）必须挂在会话上；普通笔记 / 文件页签只需要仓库
+  if (isSessionDoc && !sessionId) {
     return (
       <div className="flex h-full items-center justify-center p-4">
         <div className="kb-view-fade w-full max-w-[320px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-5 text-center text-[13px] text-[var(--text-primary)]">
@@ -595,13 +640,14 @@ export function NotesPane(props: NotesPaneProps) {
     )
   }
 
-  const showList = !isSessionDoc && (!narrow || listOpen)
+  const hasSession = !!sessionId
+  const showList = !isSessionDoc && hasSession && (!narrow || listOpen)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* 动作行：32px，只放动作与当前文件，不另加标题 */}
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-1.5">
-        {!isSessionDoc && narrow && (
+        {!isSessionDoc && hasSession && narrow && (
           <button
             onClick={() => setListOpen((v) => !v)}
             data-tip={listOpen ? '收起笔记列表' : '展开笔记列表'}
@@ -612,7 +658,7 @@ export function NotesPane(props: NotesPaneProps) {
             <ChevronDown size={13} className={`kb-chevron ${listOpen ? 'rotate-180' : ''}`} />
           </button>
         )}
-        {!isSessionDoc && (
+        {!isSessionDoc && hasSession && (
           <button
             onClick={() => void createNote()}
             data-tip="在会话文件夹的 产物/ 下新建一篇笔记"
@@ -633,6 +679,15 @@ export function NotesPane(props: NotesPaneProps) {
           >
             <span className="shrink-0 text-[var(--text-muted)]">{fileIcon}</span>
             <span className="min-w-0 max-w-[46%] truncate">{currentRel ? baseName(currentRel) : noteTabTitle('', kind)}</span>
+          </span>
+        ) : !hasSession ? (
+          <span
+            className="flex min-w-0 items-center gap-1 text-[11.5px] text-[var(--text-primary)]"
+            data-tip={currentRel}
+            aria-label={currentRel}
+          >
+            <span className="shrink-0 text-[var(--text-muted)]"><FileText size={12} /></span>
+            <span className="min-w-0 truncate">{currentRel ? baseName(currentRel) : '笔记'}</span>
           </span>
         ) : narrow && !searchOpen ? (
           <button
@@ -812,7 +867,11 @@ export function NotesPane(props: NotesPaneProps) {
           preview && canPreview ? (
             <div key="preview" className="kb-view-fade h-full overflow-y-auto">
               <div className="mx-auto max-w-[820px] px-4 py-3">
-                <MarkdownPreview content={doc.content} />
+                <QuizRecordContext.Provider value={quizStore}>
+                  {/* 题单条与知识库阅读态同一条组件；本页签没有题单内「错题重做」视图，故不传 onReview */}
+                  {quizzes.length > 0 && <QuizSheetBar quizzes={quizzes} store={quizStore} />}
+                  <MarkdownPreview content={doc.content} />
+                </QuizRecordContext.Provider>
               </div>
             </div>
           ) : (

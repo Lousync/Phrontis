@@ -14,7 +14,13 @@
 /* ============================== 类型 ============================== */
 
 /** 能力标识：pane 实现认这个，**不是实例 id**（一个 kind 可开多个实例） */
-export type ViewerPaneType = 'web' | 'notes' | 'books' | 'ask'
+export type ViewerPaneType = 'web' | 'notes' | 'books' | 'ask' | 'file'
+
+/**
+ * 文件页签内部按扩展名 / 内容识别的种类（**不是页签类型**）。
+ * 图片 / 导图 / PPT / 本地 HTML 共用一种 `file` 页签，内部按它分派渲染器。
+ */
+export type FilePaneKind = 'html' | 'image' | 'mindmap' | 'pptx'
 
 /**
  * 笔记类页签的文件种类。
@@ -60,6 +66,27 @@ export interface NotesViewerTab extends ViewerTabBase {
   fileKind: NotesFileKind
   /** 画像 / 要求所属会话；普通笔记为 null。页签活过会话切换后，写盘仍按它走 */
   ownerSessionId: string | null
+  /** 文件树 / 素材点开：默认渲染预览（空笔记页签仍从编辑开始） */
+  previewDefault?: boolean
+}
+
+/**
+ * 文件页签：非文本文件（html / 图片 / 导图 / pptx）的唯一页签类型，
+ * 内部按 `fileKind` 分派渲染器；AI 生成中先用空 relPath 占位，完成后原地替换。
+ */
+export interface FileViewerTab extends ViewerTabBase {
+  type: 'file'
+  /** 仓库相对路径；AI 生成中的占位为空串 */
+  relPath: string
+  fileKind: FilePaneKind
+  /** 生成中占位：禁关、不持久化；完成后原地替换 */
+  generating?: boolean
+  /** visual.html 的 slug / image 的 slug（空串回落 'image'） */
+  slug?: string
+  /** pptx 当前页（持久化；1 页 = 0） */
+  page?: number
+  /** 外部改动重读令牌（运行时，不持久化） */
+  rev?: number
 }
 
 export interface BooksViewerTab extends ViewerTabBase {
@@ -81,9 +108,9 @@ export interface AskViewerTab extends ViewerTabBase {
   parentTitle: string
 }
 
-export type ViewerTab = WebViewerTab | NotesViewerTab | BooksViewerTab | AskViewerTab
+export type ViewerTab = WebViewerTab | NotesViewerTab | BooksViewerTab | AskViewerTab | FileViewerTab
 
-/** 持久化结构（草稿不进来；`lastActiveAt` 不进来） */
+/** 持久化结构（旁问草稿 / 生成中的文件占位不进来；`lastActiveAt` 不进来） */
 export interface ViewerStateV2 {
   v: 2
   tabs: ViewerTab[]
@@ -98,6 +125,8 @@ export const VIEWER_LIVE_WINDOW = 6
 export const VIEWER_WEB_LIVE_CAP = 2
 /** 电子书：同时保活的阅读器上限（PDF canvas / EPUB iframe 重） */
 export const VIEWER_BOOKS_LIVE_CAP = 2
+/** 文件：同时保活的实例上限（html / 导图 / 图片都重，超窗按 LRU 卸载，切回重建） */
+export const VIEWER_FILE_LIVE_CAP = 3
 
 /** `+` 菜单顺序（笔记 / 电子书 / 网页 / 旁问）—— 与 `paneContracts.VIEWER_TABS` 的图标一致 */
 export const VIEWER_NEW_TAB_ORDER: ReadonlyArray<{ type: ViewerPaneType; label: string }> = [
@@ -107,14 +136,18 @@ export const VIEWER_NEW_TAB_ORDER: ReadonlyArray<{ type: ViewerPaneType; label: 
   { type: 'ask', label: '旁问' },
 ]
 
-const PANE_TYPES: readonly ViewerPaneType[] = ['web', 'notes', 'books', 'ask']
+const PANE_TYPES: readonly ViewerPaneType[] = ['web', 'notes', 'books', 'ask', 'file']
 
 export function isPaneType(v: unknown): v is ViewerPaneType {
-  return v === 'web' || v === 'notes' || v === 'books' || v === 'ask'
+  return v === 'web' || v === 'notes' || v === 'books' || v === 'ask' || v === 'file'
 }
 
 export function isNotesFileKind(v: unknown): v is NotesFileKind {
   return v === 'note' || v === 'profile' || v === 'constraints'
+}
+
+export function isFilePaneKind(v: unknown): v is FilePaneKind {
+  return v === 'html' || v === 'image' || v === 'mindmap' || v === 'pptx'
 }
 
 /* ============================== 小工具 ============================== */
@@ -203,7 +236,13 @@ export function makeWebTab(
 
 export function makeNotesTab(
   id: string,
-  opts: { relPath?: string; fileKind?: NotesFileKind; ownerSessionId?: string | null; title?: string } = {},
+  opts: {
+    relPath?: string
+    fileKind?: NotesFileKind
+    ownerSessionId?: string | null
+    title?: string
+    previewDefault?: boolean
+  } = {},
   now = 0,
 ): NotesViewerTab {
   const relPath = String(opts.relPath ?? '').replace(/\\/g, '/')
@@ -216,6 +255,43 @@ export function makeNotesTab(
     relPath,
     fileKind,
     ownerSessionId: opts.ownerSessionId ? String(opts.ownerSessionId) : null,
+    ...(opts.previewDefault ? { previewDefault: true } : {}),
+  }
+}
+
+/**
+ * 文件页签工厂。
+ * `relPath` 为空 = AI 生成中的占位（配 `generating`），标题兜底为「文件」。
+ */
+export function makeFileTab(
+  id: string,
+  opts: {
+    relPath?: string
+    fileKind: FilePaneKind
+    title?: string
+    generating?: boolean
+    slug?: string
+    page?: number
+  },
+  now = 0,
+): FileViewerTab {
+  const relPath = String(opts.relPath ?? '').replace(/\\/g, '/')
+  const fileKind = isFilePaneKind(opts.fileKind) ? opts.fileKind : 'html'
+  const slug = String(opts.slug ?? '').trim()
+  const page =
+    typeof opts.page === 'number' && Number.isFinite(opts.page) && opts.page >= 0
+      ? Math.trunc(opts.page)
+      : undefined
+  return {
+    id,
+    type: 'file',
+    title: String(opts.title ?? '').trim() || fileTabTitle(relPath),
+    lastActiveAt: now,
+    relPath,
+    fileKind,
+    ...(opts.generating ? { generating: true } : {}),
+    ...(slug ? { slug } : {}),
+    ...(page !== undefined ? { page } : {}),
   }
 }
 
@@ -264,6 +340,11 @@ export function noteTabTitle(relPath: unknown, fileKind: NotesFileKind = 'note')
   return stemOf(relPath) || '笔记'
 }
 
+/** 文件页签标题：文件名去扩展名；生成中还没有路径时给「文件」 */
+function fileTabTitle(relPath: unknown): string {
+  return stemOf(relPath) || '文件'
+}
+
 /** 草稿页签标题：`新旁问 · 整段` / `新旁问 · 第 N 条` / `新旁问 · 锚定` */
 export function draftTitle(draft: AskDraft | null | undefined): string {
   if (!draft) return '新旁问'
@@ -285,6 +366,7 @@ export function tabTitleOf(tab: ViewerTab | null | undefined): string {
   const t = String(tab.title ?? '').trim()
   if (t) return t
   if (tab.type === 'notes') return noteTabTitle(tab.relPath, tab.fileKind)
+  if (tab.type === 'file') return fileTabTitle(tab.relPath)
   if (tab.type === 'books') return tab.relPath ? stemOf(tab.relPath) || '电子书' : '书架'
   if (tab.type === 'ask') return tab.laneId ? '旁问' : draftTitle(tab.draft)
   return '新网页'
@@ -314,6 +396,35 @@ export function findNotesTab(
   const key = pathKey(relPath, opts)
   if (!key) return null
   for (const t of tabs) if (t.type === 'notes' && pathKey(t.relPath, opts) === key) return t
+  return null
+}
+
+/** 同文件页签去重（html / 图片 / 导图 / pptx 一律按 relPath）；`opts` 同 `findNotesTab` */
+export function findFileTab(
+  tabs: readonly ViewerTab[],
+  relPath: unknown,
+  opts?: { caseInsensitive?: boolean },
+): FileViewerTab | null {
+  const key = pathKey(relPath, opts)
+  if (!key) return null
+  for (const t of tabs) if (t.type === 'file' && pathKey(t.relPath, opts) === key) return t
+  return null
+}
+
+/**
+ * 跨类型路径去重：md 走笔记页签、其它走文件页签，但两者都可能占用同一路径。
+ * 打开前先查这一条，避免同一文件开出两个实例（两个 mtime 基线互相踩）。
+ */
+export function findAnyPathTab(
+  tabs: readonly ViewerTab[],
+  relPath: unknown,
+  opts?: { caseInsensitive?: boolean },
+): NotesViewerTab | FileViewerTab | null {
+  const key = pathKey(relPath, opts)
+  if (!key) return null
+  for (const t of tabs) {
+    if ((t.type === 'notes' || t.type === 'file') && pathKey(t.relPath, opts) === key) return t
+  }
   return null
 }
 
@@ -459,7 +570,13 @@ export function selectLiveIds(input: LiveWindowInput): string[] {
   const keep: string[] = []
   const counts: Record<string, number> = {}
   const capOf = (t: ViewerTab): number =>
-    t.type === 'web' ? VIEWER_WEB_LIVE_CAP : t.type === 'books' ? VIEWER_BOOKS_LIVE_CAP : limit
+    t.type === 'web'
+      ? VIEWER_WEB_LIVE_CAP
+      : t.type === 'books'
+        ? VIEWER_BOOKS_LIVE_CAP
+        : t.type === 'file'
+          ? VIEWER_FILE_LIVE_CAP
+          : limit
 
   const add = (t: ViewerTab | null | undefined) => {
     if (!t || keep.length >= limit || keep.includes(t.id)) return false
@@ -529,6 +646,19 @@ function toPersisted(tab: ViewerTab): ViewerTab {
       relPath: String(tab.relPath ?? ''),
       fileKind: tab.fileKind,
       ownerSessionId: tab.ownerSessionId ?? null,
+      ...(tab.previewDefault ? { previewDefault: true } : {}),
+    }
+  }
+  if (tab.type === 'file') {
+    // 运行时字段（generating / slug / rev）一律不进持久化；正文在重启后按路径重读
+    return {
+      ...base,
+      type: 'file',
+      relPath: String(tab.relPath ?? ''),
+      fileKind: tab.fileKind,
+      ...(typeof tab.page === 'number' && Number.isFinite(tab.page) && tab.page >= 0
+        ? { page: Math.trunc(tab.page) }
+        : {}),
     }
   }
   if (tab.type === 'books') {
@@ -549,15 +679,21 @@ function toPersisted(tab: ViewerTab): ViewerTab {
   }
 }
 
+/** 生成中的文件占位：禁关、不持久化（与旁问草稿同一口径） */
+function isGeneratingFileTab(tab: ViewerTab): boolean {
+  return tab.type === 'file' && tab.generating === true
+}
+
 /**
- * 序列化：草稿页签被过滤（关掉/刷新即消失），活动页签若指向草稿则落回第一个非草稿页签。
+ * 序列化：草稿页签与生成中的文件占位被过滤（关掉/刷新即消失），
+ * 活动页签若指向被过滤项则落回第一个保留页签。
  * 只存「页签 + 顺序 + 活动页签」，不存任何运行时态。
  */
 export function serializeViewerState(
   tabs: readonly ViewerTab[],
   activeId: string | null,
 ): ViewerStateV2 {
-  const kept = tabs.filter((t) => !isDraftAskTab(t))
+  const kept = tabs.filter((t) => !isDraftAskTab(t) && !isGeneratingFileTab(t))
   const persisted = kept.map(toPersisted)
   const active = activeId && kept.some((t) => t.id === activeId) ? activeId : (kept[0]?.id ?? null)
   return { v: 2, tabs: persisted, activeId: active }
@@ -573,8 +709,9 @@ function str(v: unknown): string {
 
 /**
  * 反序列化（宽容）：坏 JSON / 坏项 / 未知 type / 重复 id / 重复文件一律丢弃，绝不抛。
- * 笔记与电子书额外做**同文件去重**：一个文件只允许一个页签，否则两个实例的
- * mtime 基线会互相踩（PLAN §7.2 / §7.3）。`opts` 只给契约脚本显式指定大小写口径。
+ * 笔记 / 文件 / 电子书额外做**同文件去重**：一个文件只允许一个页签，否则两个实例的
+ * mtime 基线会互相踩（PLAN §7.2 / §7.3）；file 页签按自身路径去重，坏 fileKind 与
+ * 空 relPath 直接丢弃。`opts` 只给契约脚本显式指定大小写口径。
  */
 export function parseViewerState(
   raw: unknown,
@@ -584,6 +721,7 @@ export function parseViewerState(
   if (!obj || obj.v !== 2 || !Array.isArray(obj.tabs)) return null
   const ids = new Set<string>()
   const noteKeys = new Set<string>()
+  const fileKeys = new Set<string>()
   const bookKeys = new Set<string>()
   const out: ViewerTab[] = []
   for (const item of obj.tabs) {
@@ -614,6 +752,26 @@ export function parseViewerState(
       out.push({
         id, type: 'notes', title: title || noteTabTitle(relPath, fileKind), lastActiveAt,
         relPath, fileKind, ownerSessionId: owner || null,
+        ...(r.previewDefault === true ? { previewDefault: true } : {}),
+      })
+      continue
+    }
+    if (r.type === 'file') {
+      const relPath = str(r.relPath).replace(/\\/g, '/')
+      const key = pathKey(relPath, opts)
+      // 生成中的占位不持久化；空 relPath 与非法 fileKind 都是坏项
+      if (!key || !isFilePaneKind(r.fileKind)) continue
+      if (fileKeys.has(key)) continue
+      fileKeys.add(key)
+      const page =
+        typeof r.page === 'number' && Number.isFinite(r.page) && r.page >= 0
+          ? Math.trunc(r.page)
+          : undefined
+      ids.add(id)
+      out.push({
+        id, type: 'file', title: title || fileTabTitle(relPath), lastActiveAt,
+        relPath, fileKind: r.fileKind,
+        ...(page !== undefined ? { page } : {}),
       })
       continue
     }

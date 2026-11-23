@@ -138,10 +138,16 @@ check('/mindmap 入 PASSTHROUGH_COMMANDS 且只在 aiTeaching 面',
   /name: 'mindmap'[\s\S]{0,140}surfaces: \['aiTeaching'\]/.test(srcCC))
 check('/mindmap 在 aiTeaching 面放行（放行判定查表，resolve 为 false）',
   srcCC.includes('passthroughCommandsForSurface(ctx.surface).find') && srcCC.includes('if (pt) return false'))
-const srcAP = read('src/modules/ai-teaching/ArtifactsPane.tsx')
-check('ArtifactsPane 渲染 MindMapView', srcAP.includes('MindMapView'))
+// 2026-11-23：工件栏退役，导图渲染迁到查看器的文件页签（FilePane）。
+const srcAP = read('src/modules/ai-teaching/right-viewer/FilePane.tsx')
+check('FilePane 渲染 MindMapView', srcAP.includes('MindMapView') && srcAP.includes("fileKind === 'mindmap'"))
+check('FilePane 把节点 onRef 接到 MindMapView（点 ref 再开一个文件页签）',
+  /<MindMapView[\s\S]{0,260}?onRef=\{onOpenFileRef\}/.test(srcAP))
+check('壳把 onOpenFileRef 接成 openFile（导图节点不跳模块）',
+  /onOpenFileRef=\{cached\(`\$\{tab\.id\}:fileRef`, \(\) => \(rel: string\) => \{ openFile\(rel\) \}\)\}/.test(
+    read('src/modules/ai-teaching/right-viewer/RightViewer.tsx')))
 const srcAI = read('src/modules/ai-teaching/index.tsx')
-check('AI 教学 openArtFile 按内容识别导图', srcAI.includes('looksLikeMindMap'))
+check('AI 教学 openViewerFile 按内容识别导图', srcAI.includes('looksLikeMindMap') && srcAI.includes("fileKind: 'mindmap'"))
 // 同上：教学面的 /mindmap 弹层候选改由 SlashCommandMenu 读同一张表生成，模块内不再另写一份
 check('AI 教学斜杠候选含 /mindmap（由 PASSTHROUGH_COMMANDS 生成）',
   srcAI.includes("buildSlashItems(slashSkills, [], 'aiTeaching')")
