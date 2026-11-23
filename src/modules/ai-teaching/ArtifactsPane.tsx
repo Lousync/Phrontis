@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network, Layers, Check, ChevronDown } from 'lucide-react'
+import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network, Layers, Check, ChevronDown, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { QuizRecordContext, useQuizRecordStore } from '../../components/shared/QuizRecordStore'
 import { QuizSheetBar } from '../../components/shared/QuizSheetBar'
@@ -16,17 +16,24 @@ import type { ArtTab } from './artifacts'
 /**
  * 工件栏（docs/ai-teaching-artifacts-pane-design.md §2）：页签条 + 工具条 + 内容区。
  * 对话固定左主区永不替换，材料/产物/示意图全部进这里以页签切换；
- * 开合纯内容驱动：有页签即渲染、关完即消失（2026-09-09 拍板，不设手动收起/展开把手——与素材库拉出条打架）；
+ * 开合纯内容驱动：有页签即渲染、关完即消失（2026-09-09 拍板，不做浮层式拉出把手——与素材库拉出条打架）；
+ * 折叠/展开的唯一可见出口是页签条右端那枚 `PanelRightClose/Open`（2026-11-23 补，此前只剩对话区右缘 12px 贴边条，发现性太低）；
  * expanded（宿主管状态）= 原位占满内容区放大阅读（仿编辑器全屏，非弹窗），页签行 ⤢/⤡ 切换、Esc 退出；
  * 页签列表为会话内存态（切会话清空），阅读位置记忆 per-rel 保存在本组件（跨会话不失效）。
  */
-function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit, onOpenRef, changes, onOpenChange }: {
+function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit, onOpenRef, changes, onOpenChange, open, onToggleOpen }: {
   tabs: ArtTab[]
   activeId: string | null
   widthPx: number
   htmlSeq: Record<string, number>
   expanded: boolean
   onToggleExpanded: (v: boolean) => void
+  /**
+   * 分栏开合（可选，2026-11-23）：本组件挂在可折叠分栏里时由宿主传入 `artOpen` / `applyArtOpen`，
+   * 页签条右端即出现折叠/展开开关。全宽阅读那份实例不传 —— 那种形态下没有「收起分栏」语义。
+   */
+  open?: boolean
+  onToggleOpen?: (v: boolean) => void
   onActivate: (id: string) => void
   onClose: (id: string) => void
   onReload: (tab: ArtTab) => void
@@ -225,6 +232,17 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           <button onClick={() => onToggleExpanded(!expanded)} data-tip={expanded ? '退出全屏阅读 (Esc)' : '全屏阅读：工件占满窗口（Esc 退出）'} aria-label={expanded ? '退出全屏阅读 (Esc)' : '全屏阅读：工件占满窗口（Esc 退出）'}
             className={`shrink-0 self-start mb-1 p-1 rounded-md transition-colors ${expanded ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
             {expanded ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+          </button>
+        )}
+        {/* 分栏折叠/展开（2026-11-23）：此前只剩对话区右缘 12px 贴边条能开回来，发现性太低。
+            放在页签条最右端（分栏级动作占外侧边缘），与 ⤢ 同尺寸同 hover 语言；页签不丢，再点即回。 */}
+        {onToggleOpen && (
+          <button type="button" onClick={() => onToggleOpen(!open)}
+            aria-expanded={!!open}
+            data-tip={open ? '收起工件分栏（页签保留，可再点展开）' : '展开工件分栏'}
+            aria-label={open ? '收起工件分栏（页签保留，可再点展开）' : '展开工件分栏'}
+            className={`shrink-0 self-start mb-1 p-1 rounded-md transition-colors ${open ? 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]' : 'text-[var(--accent)] hover:bg-[var(--bg-hover)]'}`}>
+            {open ? <PanelRightClose size={11} /> : <PanelRightOpen size={11} />}
           </button>
         )}
       </div>

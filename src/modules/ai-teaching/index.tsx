@@ -584,7 +584,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!artOpen || artTabs.length === 0) return
     applyArtOpen(false)
     artAutoCollapsedRef.current = true
-    showToast({ type: 'info', message: '工件栏已收起，查看器占用右侧', detail: '页签保留，点对话区右缘的工件贴边条即可再展开' })
+    showToast({ type: 'info', message: '工件栏已收起，查看器占用右侧', detail: '页签保留，点工件栏页签条右端的展开按钮即可再打开' })
     // 仅在查看器开合时判定一次：拖动宽度、切页签都不该反复收起
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcVisible])
@@ -4309,6 +4309,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             onOpenRef={artOpenRef}
             changes={lastChanges ?? undefined}
             onOpenChange={(c) => { if (!c.file) return; if (changeOpensInArtifactPane(c)) void openArtFile(String(c.file), { title: c.target }); else window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })) }}
+            open={artOpen}
+            onToggleOpen={applyArtOpen}
           />
         </ResizablePanel>
 

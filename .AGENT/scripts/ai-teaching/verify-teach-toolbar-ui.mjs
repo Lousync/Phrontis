@@ -8,7 +8,9 @@
  *      `grid-template-rows` 0fr ↔ 1fr 复用 `.kb-collapse`）；抓手在折叠容器**之外**，
  *      带 `aria-expanded` / `aria-controls` 接线，无 `transition-all`；
  *   3. 段上下文条 / 章末复习条「要求」/ 本会话要求行内条 / 560px 模态 / 要求抽屉**零残留**；
- *   4. ```endcourse 围栏全对话**只渲染一张**卡，且结课后不渲染。
+ *   4. ```endcourse 围栏全对话**只渲染一张**卡，且结课后不渲染；
+ *   5. 工件分栏的折叠/展开开关落在**工件栏页签条右端**（`PanelRightClose/Open` + `aria-expanded`），
+ *      顶栏不恢复 chip、贴边条不动（2026-11-23：上一轮收敛顶栏时把唯一可见入口删掉了）。
  *
  * 2026-11-22 随死代码清理更新：`CourseProgress.tsx` / `RequirementsDrawer.tsx` 零 importer，文件已删除；
  * 原先「文件仍在（留作结课报告 / 本模块不再用）」的两条正向断言改为负向断言。
@@ -53,7 +55,7 @@ check('右栏打开时不渲染（!srcVisible 包裹）', /\{!srcVisible && \([\
 for (const gone of ['收尾本段', '课程进度', '工件分栏', '本会话约束', '本会话要求', '结课报告', '重新开课']) {
   check(`顶栏不再有「${gone}」按钮`, !bar.includes(`>${gone}`))
 }
-check('不再用 lucide PanelRightOpen', !mod.includes('PanelRightOpen'))
+check('不再用 lucide PanelRightOpen（顶栏）', !mod.includes('PanelRightOpen'))
 
 /* ───────────────────────── 2. 工具条：整条抽屉（.kb-collapse）+ 抓手 ───────────────────────── */
 console.log('\n[工具条] 画像 / 要求与思考 / 引用 / 模型同处一条抽屉；抓手在折叠容器之外')
@@ -133,7 +135,8 @@ check('Esc 链含取消收尾确认', /if \(endConfirm\) \{ setEndConfirm\(null\
 /* ───────────────────────── 4. endcourse：全对话一张卡 ───────────────────────── */
 console.log('\n[结课] ```endcourse 围栏 → 唯一行内卡')
 const ec = slice(mod, '/**\n   * AI 结课建议（2026-11-22）', '/** 落盘态', 'endcourse')
-check('正文剥离正则含 endcourse', mod.includes('```(profile|plan|ask|outline|endcourse)'))
+// 2026-11-23：正则后续追加了 `|teach`（教学指令围栏），断言改成「含 endcourse 起手」而非死等整串
+check('正文剥离正则含 endcourse', /body\.replace\(\/```\((?:[^)]*\|)?endcourse[^)]*\)/.test(mod))
 check('endCourseFence memo 存在', mod.includes('const endCourseFence = useMemo'))
 check('memo 倒序扫全部 assistant，取最后一条', /for \(let i = messages\.length - 1; i >= 0; i--\)[\s\S]{0,400}if \(mt\) return \{ idx: i/.test(ec))
 check('渲染点全局唯一（idx === idx 只出现一次）', count(mod, /endCourseFence\?\.idx === idx/g) === 1, `实际 ${count(mod, /endCourseFence\?\.idx === idx/g)}`)
@@ -142,6 +145,36 @@ check('按钮文案「开始结课流程」', mod.includes('开始结课流程')
 check('点击进现有结课流程 startEndFlow(activeWs, 1)', mod.includes('startEndFlow(activeWs, 1)'))
 check('卡片进对话流（不 sticky、跟随消息滚动）', !/endCourseFence\?\.idx === idx[\s\S]{0,300}sticky/.test(mod))
 check('不新增 AI 工具（builtinTools 未动）', !read('electron/lib/builtinTools.ts').includes('endcourse'))
+
+/* ───────────────────── 5. 工件分栏折叠开关（2026-11-23 补回可见出口） ───────────────────── */
+console.log('\n[工件栏] 页签条右端一枚折叠/展开开关（顶栏不恢复 chip）')
+const pane = read('src/modules/ai-teaching/ArtifactsPane.tsx')
+const strip = slice(pane, '{/* 页签条：icon+名称+✕', '{/* 工具条：落盘路径', 'art-strip')
+check('页签条片段可定位', strip.length > 400, `len=${strip.length}`)
+check('导入 lucide 两态图标 PanelRightClose / PanelRightOpen',
+  /import \{[^}]*PanelRightClose[^}]*\} from 'lucide-react'/.test(pane) && /import \{[^}]*PanelRightOpen[^}]*\} from 'lucide-react'/.test(pane))
+const toggle = slice(pane, '{/* 分栏折叠/展开（2026-11-23）', '{/* 全部页签下拉（F-3 P1）', 'art-toggle')
+check('开关片段可定位', toggle.length > 200, `len=${toggle.length}`)
+check('开关在页签条内（✕ 页签之后、工具条之前）', strip.includes('onToggleOpen(!open)'))
+check('点击 = onToggleOpen(!open)（沿用宿主 applyArtOpen）', strip.includes('onClick={() => onToggleOpen(!open)}'))
+check('aria-expanded 接 open', strip.includes('aria-expanded={!!open}'))
+check('两态图标：展开时 PanelRightClose、收起时 PanelRightOpen',
+  /\{open \? <PanelRightClose size=\{11\} \/> : <PanelRightOpen size=\{11\} \/>\}/.test(strip))
+check('图标 11px（< 16px）+ p-1 命中区 + 与 ⤢ 同语言（rounded-md / transition-colors）',
+  /p-1 rounded-md transition-colors/.test(toggle) && !toggle.includes('transition-all'))
+check('两态 data-tip 各一句（收起 / 展开）',
+  strip.includes("data-tip={open ? '收起工件分栏（页签保留，可再点展开）' : '展开工件分栏'}")
+  && strip.includes("aria-label={open ? '收起工件分栏（页签保留，可再点展开）' : '展开工件分栏'}"))
+check('props 只追加可选（open? / onToggleOpen?）',
+  pane.includes('open?: boolean') && pane.includes('onToggleOpen?: (v: boolean) => void'))
+check('无 onToggleOpen 时不渲染（全宽阅读实例不需要收起分栏）', /\{onToggleOpen && \(/.test(toggle))
+check('index 分栏实例接线 open={artOpen} / onToggleOpen={applyArtOpen}',
+  mod.includes('open={artOpen}') && count(mod, /onToggleOpen=\{applyArtOpen\}/g) === 1,
+  `实际 ${count(mod, /onToggleOpen=\{applyArtOpen\}/g)}`)
+check('applyArtOpen 仍持久化 aiTeach.artOpen', mod.includes("localStorage.setItem('aiTeach.artOpen'"))
+check('负向：顶栏没有恢复「工件分栏」chip', !bar.includes('工件分栏') && !bar.includes('onToggleOpen') && !bar.includes('<PanelRight'))
+check('负向：页签条之外没有第二处开关（onToggleOpen 只出现在该 button + 签名）',
+  count(pane, /onToggleOpen/g) === 4, `实际 ${count(pane, /onToggleOpen/g)}`)
 
 console.log(`\n[OK] ${pass} PASS / [FAIL] ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)
