@@ -13,6 +13,9 @@
  * 2026-11-22 随内层页签条删除更新：第 8 节补了五条静态断言 —— 内层「新建 / 关闭」入口消失、
  * 地址栏仍在、pane 不再自己写 localStorage、空态是点阵而不是起始块、五种状态名必须都出现。
  *
+ * 2026-11-23 补会话恢复 / 跨会话保活契约：首挂必须等 sessionId 非空、sessionId 变化不卸载视图、
+ * URL 相同不重建（`shouldRebuildWebView` 纯函数 + WebPane 接线静态断言）。
+ *
  * 运行（项目根目录）：node .AGENT/scripts/ai-teaching/verify-web-pane-renderer.mjs [仓库路径]
  * 输出纯 ASCII（禁 emoji，AGENTS.md）；期望全部 PASS 且 exit=0。
  */
@@ -48,6 +51,7 @@ const {
   closeTabAt,
   boundsPayload,
   shouldShowView,
+  shouldRebuildWebView,
   restoreTabs,
 } = await import(pathToFileURL(pureMjs).href)
 
@@ -166,8 +170,39 @@ check('broken json -> empty', restoreTabs('{not json').length === 0)
   check('restores at most 3 tabs', many.length === 3 && many[2].id === 'w3')
 }
 
-/* ---------------------------------------------------------------- 8. WebPane.tsx 静态约束 */
-console.log('\n=== 8. WebPane.tsx static checks ===')
+/* ---------------------------------------------------------------- 8. shouldRebuildWebView */
+console.log('\n=== 8. shouldRebuildWebView (cross-session keep-alive) ===')
+check(
+  'first mount never rebuilds (initialUrl effect owns the first load)',
+  shouldRebuildWebView({ mounted: false, sessionId: 's1', initialUrl: 'https://a.com/', currentUrl: '' }) === false,
+)
+check(
+  'session change with the same url keeps the live view',
+  shouldRebuildWebView({ mounted: true, sessionId: 's2', initialUrl: 'https://a.com/x', currentUrl: 'https://a.com/x' }) === false,
+)
+check(
+  'un-normalized but equal urls are not rebuilt',
+  shouldRebuildWebView({ mounted: true, sessionId: 's2', initialUrl: 'https://a.com', currentUrl: 'https://a.com/' }) === false,
+)
+check(
+  'a different url on session change navigates to it',
+  shouldRebuildWebView({ mounted: true, sessionId: 's2', initialUrl: 'https://b.com/', currentUrl: 'https://a.com/' }) === true,
+)
+check(
+  'empty session id never rebuilds (session not restored yet)',
+  shouldRebuildWebView({ mounted: true, sessionId: '', initialUrl: 'https://b.com/', currentUrl: 'https://a.com/' }) === false,
+)
+check(
+  'empty initialUrl keeps the current page',
+  shouldRebuildWebView({ mounted: true, sessionId: 's2', initialUrl: '', currentUrl: 'https://a.com/' }) === false,
+)
+check(
+  'restored url with no current page triggers the load',
+  shouldRebuildWebView({ mounted: true, sessionId: 's1', initialUrl: 'https://a.com/x', currentUrl: '' }) === true,
+)
+
+/* ---------------------------------------------------------------- 9. WebPane.tsx 静态约束 */
+console.log('\n=== 9. WebPane.tsx static checks ===')
 check('reads the slot rect via getBoundingClientRect', paneSrc.includes('getBoundingClientRect'))
 check('coalesces bounds updates with requestAnimationFrame', paneSrc.includes('requestAnimationFrame'))
 check('toggles native visibility with webPaneSetVisible', paneSrc.includes('setVisible'))
@@ -188,6 +223,31 @@ check('empty state is a dot-grid layer, not a start block',
   /radial-gradient/.test(paneSrc) && !paneSrc.includes('快捷入口'))
 check('the five placeholder states stay distinguishable',
   ['start', 'dormant', 'loading', 'error', 'ready'].every((s) => new RegExp(`'${s}'`).test(paneSrc)))
+
+/* 2026-11-23 会话恢复 / 跨会话保活（缺陷 1 / 2）。
+   只截会话 effect 本身，避免拿整份文件的 `webPaneClose`（卸载清理里合法存在）误判。 */
+const sessionEffect = (() => {
+  const start = paneSrc.indexOf('const sid = String(props.sessionId')
+  if (start < 0) return ''
+  const end = paneSrc.indexOf('}, [props.sessionId', start)
+  return end < 0 ? '' : paneSrc.slice(start, end)
+})()
+
+check('first mount waits for a non-empty sessionId',
+  /if \(firstMountRef\.current\)[\s\S]{0,320}?if \(!sid\) return/.test(paneSrc))
+check('initial navigation also waits for a non-empty sessionId',
+  /if \(!initialUrl\) return\s*if \(!sessionId\) return/.test(paneSrc))
+check('session id change never unloads the live view (cross-session keep-alive)',
+  sessionEffect.length > 0
+    && !sessionEffect.includes('webPaneClose')
+    && !sessionEffect.includes('webPaneSetVisible')
+    && !/setTabs\(\[\]\)/.test(sessionEffect)
+    && !/visibleRef\.current\s*=\s*null/.test(sessionEffect),
+  `effect chars: ${sessionEffect.length}`)
+check('session effect only navigates when the url actually differs',
+  /shouldRebuildWebView\(\{\s*mounted:\s*true/.test(sessionEffect))
+check('one-shot request key is not per-session (no stale replay on session switch)',
+  /const key = String\(req\.seq\)/.test(paneSrc) && !/const key = `\$\{props\.sessionId\}/.test(paneSrc))
 
 /* ---------------------------------------------------------------- 报告 */
 const failed = checks.filter((c) => !c.pass)

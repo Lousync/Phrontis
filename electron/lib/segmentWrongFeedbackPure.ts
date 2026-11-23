@@ -116,11 +116,24 @@ function parseSnapshot(raw: unknown): SnapshotLoose | null {
   }
 }
 
-/** 解析首句（不带句末标点堆叠）：中文 / 英文句号、问号、叹号、分号、换行都算断句 */
+/**
+ * 解析首句（不带句末标点堆叠）：中文句号 / 问号 / 叹号 / 分号 / 换行都算断句。
+ *
+ * ASCII `.` 只在**句末**才算：后跟空白或行尾，且不是常见缩写（Dr. / e.g. / etc. …）。
+ * 不能直接按 `.` 切 —— 否则 `1.5` 变 `1`、`https://a.b/c` 变 `https://a`、`Dr. Smith` 变 `Dr`。
+ */
+const DOT_ABBREVIATION = /(?:^|[\s(])(?:Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e)\.$/i
+
 function firstSentence(raw: unknown): string {
   const s = String(raw ?? '').replace(/\s+/g, ' ').trim()
   if (!s) return ''
-  return (s.split(/[。．.!！?？；;\n]/)[0] ?? '').trim()
+  const re = /[。．!！?？；;\n]|\.(?=\s|$)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s)) !== null) {
+    if (m[0] === '.' && DOT_ABBREVIATION.test(s.slice(0, m.index + 1))) continue
+    return s.slice(0, m.index).trim()
+  }
+  return s.trim()
 }
 
 function pageLabel(page: SegmentQuizPage | undefined, record: SegmentQuizRecord | undefined): string {
@@ -141,9 +154,13 @@ function answerTextOf(snap: SnapshotLoose | null): string {
   if (key) {
     const options = Array.isArray(snap.options) ? snap.options : []
     const hit = options.find((o) => String(o?.key ?? '').trim().toUpperCase() === key.toUpperCase())
-    const optText = clipText(hit?.text, 18)
-    return `正确答案：${key}${optText ? `. ${optText}` : ''}`
+    // 快照里的 answer 不在选项 key 里（旧数据 / 模型写错）：不要硬写「正确答案：Z」，退回参考答案 / 解析
+    if (hit) {
+      const optText = clipText(hit.text, 18)
+      return `正确答案：${key}${optText ? `. ${optText}` : ''}`
+    }
   }
+  if (reference) return `参考答案：${clipText(firstSentence(reference), SEGMENT_WRONG_ANSWER_MAX)}`
   const exp = firstSentence(snap.explanation)
   return exp ? `解析：${clipText(exp, SEGMENT_WRONG_ANSWER_MAX)}` : ''
 }
@@ -209,7 +226,8 @@ export function renderSegmentWrongRequestBlock(input?: SegmentWrongInput): strin
   const rawMax = Number(input?.maxChars ?? SEGMENT_WRONG_MAX_CHARS)
   const maxChars = Math.max(charLen(SEGMENT_WRONG_HEADER) + 1, Math.floor(Number.isFinite(rawMax) && rawMax > 0 ? rawMax : SEGMENT_WRONG_MAX_CHARS))
 
-  const lines = items.map((it) => `- ${it.label} · 第${it.quizNo}题：${it.question}${it.answer ? ` → ${it.answer}` : ''}`)
+  // 题号缺失（旧记录 quizNo 为 0）时不显示「第0题」，直接省略题号
+  const lines = items.map((it) => `- ${it.label}${it.quizNo > 0 ? ` · 第${it.quizNo}题` : ''}：${it.question}${it.answer ? ` → ${it.answer}` : ''}`)
   const blockOf = (ls: string[]): string => [SEGMENT_WRONG_HEADER, ...ls].join('\n')
   while (lines.length > 1 && charLen(blockOf(lines)) > maxChars) lines.pop()
   const block = blockOf(lines)

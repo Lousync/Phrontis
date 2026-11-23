@@ -138,6 +138,49 @@ check('简答题给参考答案（首句）', fieldItems[2].answer === '参考�
 check('无快照题干 → 占位而不是崩', collectSegmentWrongItems({
   ownerRel: OWNER, pages: allPages, records: [rec('id-a', 1, 0, '2026-11-22 10:00:00', 'not-json')],
 })[0].question === '（题干未留存）', '')
+
+// 2026-11-23：ASCII `.` 不能无脑当句末 —— 小数 / 缩写 / URL 会被切坏
+const dotCases = [
+  ['1.5', '1.5'],
+  ['0.75 米', '0.75 米'],
+  ['Dr. Smith', 'Dr. Smith'],
+  ['https://a.b/c', 'https://a.b/c'],
+]
+const dotAnswers = dotCases.map(([text], i) => collectSegmentWrongItems({
+  ownerRel: OWNER,
+  pages: allPages,
+  records: [rec('id-a', 30 + i, 0, `2026-11-22 09:0${i}:00`, snap(30 + i, '题', '', '', { type: 'short', options: [], answer: '', referenceAnswer: text }))],
+})[0]?.answer)
+check('★ 小数点不被当句末（1.5 / 0.75 米）', dotAnswers[0] === '参考答案：1.5' && dotAnswers[1] === '参考答案：0.75 米', JSON.stringify(dotAnswers.slice(0, 2)))
+check('★ 英文缩写不被当句末（Dr. Smith）', dotAnswers[2] === '参考答案：Dr. Smith', JSON.stringify(dotAnswers[2]))
+check('★ URL 不被当句末（https://a.b/c）', dotAnswers[3] === '参考答案：https://a.b/c', JSON.stringify(dotAnswers[3]))
+check('真正的句末仍然断开（。 / 英文句号+空格）', (() => {
+  const a = collectSegmentWrongItems({ ownerRel: OWNER, pages: allPages, records: [rec('id-a', 40, 0, '2026-11-22 08:00:00', snap(40, '题', '', '', { type: 'short', options: [], answer: '', referenceAnswer: '第一句。第二句' }))] })[0].answer
+  const b = collectSegmentWrongItems({ ownerRel: OWNER, pages: allPages, records: [rec('id-a', 41, 0, '2026-11-22 08:01:00', snap(41, '题', '', 'First sentence. Second sentence.'))] })[0].answer
+  return a === '参考答案：第一句' && b === '解析：First sentence'
+})(), '')
+
+// 2026-11-23：快照 answer 不在选项 key 里 → 不写「正确答案：Z」，退回解析
+const badKeyItems = collectSegmentWrongItems({
+  ownerRel: OWNER,
+  pages: allPages,
+  records: [rec('id-a', 20, 0, '2026-11-22 09:30:00', snap(20, '答案 key 写错', 'Z', '真实解析句。第二句。'))],
+})
+check('★ answer 不在选项 key 里 → 退回解析首句（不写「正确答案：Z」）',
+  badKeyItems[0].answer === '解析：真实解析句' && !badKeyItems[0].answer.includes('Z'), badKeyItems[0].answer)
+const badKeyWithRef = collectSegmentWrongItems({
+  ownerRel: OWNER,
+  pages: allPages,
+  records: [rec('id-a', 21, 0, '2026-11-22 09:31:00', snap(21, '答案 key 写错但有参考答案', 'Z', '', { referenceAnswer: '参考要点。补充。' }))],
+})
+check('answer 不在 key 但另有参考答案 → 用参考答案', badKeyWithRef[0].answer === '参考答案：参考要点', badKeyWithRef[0].answer)
+
+// 2026-11-23：旧 record quizNo 缺省（0）不显示「第0题」
+const noNoBlock = renderSegmentWrongRequestBlock({
+  ownerRel: OWNER, pages: allPages, records: [rec('id-a', 0, 0, '2026-11-22 07:00:00', snap(1, '没有题号的旧记录', 'A'))],
+})
+check('★ quizNo 缺省时不显示「第0题」', !noNoBlock.includes('第0题') && /^- 最短路径：没有题号的旧记录 → /m.test(noNoBlock), JSON.stringify(noNoBlock))
+
 const rendered = renderSegmentWrongRequestBlock({ ownerRel: OWNER, pages: allPages, records: fieldCases })
 check('渲染形状：`- 标签 · 第N题：题干 → 答案`', /^- 最短路径 · 第11题：.+ → 正确答案：B\. /m.test(rendered), rendered.split('\n')[1] ?? '')
 check('标题逐字等于约定文案', rendered.startsWith(SEGMENT_WRONG_HEADER + '\n'), SEGMENT_WRONG_HEADER)
@@ -190,10 +233,11 @@ check('★ systemFull 拼接不含错题标题 / wrongBlock（负向，防打散
   systemFullBlock.slice(-120))
 
 console.log('\n=== 9. 已收尾段不注入 ===')
-const gate = /if \(curLesson\.status !== 'ended'\) \{([\s\S]*?)\n  const handoff = readPrevHandoff/.exec(courseSrc)
-check('★ 台账与错题块同在 open 段守卫内（ended 段零注入）',
+const gate = /if \(curLesson\.status !== 'ended' && !isCourseEnded\(wsId\)\) \{([\s\S]*?)\n  const handoff = readPrevHandoff/.exec(courseSrc)
+check('★ 台账与错题块同在 open 段 + 课程未结课守卫内（ended / 已结课零注入）',
   !!gate && gate[1].includes('requestOut.block = requestBlock') && gate[1].includes('renderSegmentWrongRequestBlock'),
   gate ? '' : 'guard not found')
+check('★ 已结课课程不再注入（!isCourseEnded(wsId)）', /curLesson\.status !== 'ended' && !isCourseEnded\(wsId\)/.test(courseSrc), '')
 check('ended 分支确实存在（守卫不是空壳）', /if \(curLesson\.status === 'ended'\) \{/.test(courseSrc), '')
 
 console.log('\n========================================')

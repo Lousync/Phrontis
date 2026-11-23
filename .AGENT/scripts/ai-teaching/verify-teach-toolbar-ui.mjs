@@ -9,8 +9,11 @@
  *      带 `aria-expanded` / `aria-controls` 接线，无 `transition-all`；
  *   3. 段上下文条 / 章末复习条「要求」/ 本会话要求行内条 / 560px 模态 / 要求抽屉**零残留**；
  *   4. ```endcourse 围栏全对话**只渲染一张**卡，且结课后不渲染；
- *   5. 工件分栏的折叠/展开开关落在**工件栏页签条右端**（`PanelRightClose/Open` + `aria-expanded`），
- *      顶栏不恢复 chip、贴边条不动（2026-11-23：上一轮收敛顶栏时把唯一可见入口删掉了）。
+ *   5. 工件分栏：展开时页签条右端一枚 `PanelRightClose` 负责收起；**收起态**的展开入口
+ *      必须挂在折叠容器（ResizablePanel / 其 display:none 子树）**之外**——中栏右缘贴边按钮，
+ *      `PanelRightOpen` + `aria-expanded={false}` + `aria-label="展开工件分栏"`（2026-11-23 可达性修复：
+ *      收起后页签条整棵 display:none，原来那枚展开图标永远看不见）；顶栏仍不恢复 chip；
+ *      查看器打开时该按钮跟随查看器左缘（transform 让位），Toast 文案指向的就是它。
  *
  * 2026-11-22 随死代码清理更新：`CourseProgress.tsx` / `RequirementsDrawer.tsx` 零 importer，文件已删除；
  * 原先「文件仍在（留作结课报告 / 本模块不再用）」的两条正向断言改为负向断言。
@@ -55,7 +58,7 @@ check('右栏打开时不渲染（!srcVisible 包裹）', /\{!srcVisible && \([\
 for (const gone of ['收尾本段', '课程进度', '工件分栏', '本会话约束', '本会话要求', '结课报告', '重新开课']) {
   check(`顶栏不再有「${gone}」按钮`, !bar.includes(`>${gone}`))
 }
-check('不再用 lucide PanelRightOpen（顶栏）', !mod.includes('PanelRightOpen'))
+check('顶栏不再用 lucide PanelRightOpen（展开入口不在顶栏）', !bar.includes('PanelRightOpen'))
 
 /* ───────────────────────── 2. 工具条：整条抽屉（.kb-collapse）+ 抓手 ───────────────────────── */
 console.log('\n[工具条] 画像 / 要求与思考 / 引用 / 模型同处一条抽屉；抓手在折叠容器之外')
@@ -204,6 +207,36 @@ check('applyArtOpen 仍持久化 aiTeach.artOpen', mod.includes("localStorage.se
 check('负向：顶栏没有恢复「工件分栏」chip', !bar.includes('工件分栏') && !bar.includes('onToggleOpen') && !bar.includes('<PanelRight'))
 check('负向：页签条之外没有第二处开关（onToggleOpen 只出现在该 button + 签名）',
   count(pane, /onToggleOpen/g) === 4, `实际 ${count(pane, /onToggleOpen/g)}`)
+
+/* ─────────── 5b. 收起态入口：折叠容器之外（2026-11-23 可达性修复） ─────────── */
+console.log('\n[工件栏·收起态] 折叠容器之外的贴边展开入口 + 焦点 + Toast')
+const panelEnd = mod.indexOf('</ResizablePanel>', mod.indexOf('storageKey="aiTeachArtWidth"'))
+const edge = slice(mod, '{/* 收起态展开入口（2026-11-23 可达性修复）', '{/* ⤢ 全宽阅读', 'art-edge')
+check('收起态入口片段可定位', edge.length > 300, `len=${edge.length}`)
+check('入口在折叠容器之外（ResizablePanel 闭合标签之后）',
+  panelEnd > 0 && mod.indexOf('{/* 收起态展开入口') > panelEnd)
+check('渲染条件包含 !artOpen（收起态才出现）', /\{artExpanded && !artOpen && !artZoom && \(/.test(edge))
+check('入口不在 visible={...} 的子树里', !edge.includes('visible={') && !edge.includes('<ResizablePanel'))
+check('图标 = PanelRightOpen（与页签条那枚同语言）', edge.includes('<PanelRightOpen size={12} />'))
+check('aria-expanded={false} + aria-label="展开工件分栏"',
+  edge.includes('aria-expanded={false}') && edge.includes('aria-label="展开工件分栏"'))
+check('点击展开 = applyArtOpen(true)，且查看器占右侧时先让它让位',
+  /onClick=\{\(\) => \{[\s\S]{0,260}if \(srcVisible\) toggleSide\('right'\)[\s\S]{0,120}applyArtOpen\(true\)/.test(edge))
+check('窄贴边：w-3.5 + 右缘定位 + 竖向居中', edge.includes('w-3.5') && edge.includes('right-0') && edge.includes('top-1/2'))
+check('查看器让位用 transform + viewerW（不新增 CSS 令牌 / 不写 transition-all）',
+  edge.includes('viewerW') && edge.includes('transform:') && !edge.includes('transition-all'))
+check('动效有 prefers-reduced-motion 降级', edge.includes('artReducedMotion'))
+check('收起时焦点从被隐藏的页签条挪到贴边入口（同 toggleTray 口径）',
+  /artFocusToEdgeRef/.test(mod) && /artEdgeBtnRef\.current\?\.focus\(\)/.test(mod))
+check('焦点判据锚在工件子树根节点（data-ai-teach-art-pane）',
+  mod.includes("closest('[data-ai-teach-art-pane]')") && pane.includes('data-ai-teach-art-pane'))
+check('Toast 指向真实入口（中栏右缘「展开工件分栏」按钮）',
+  mod.includes('点中栏右缘的「展开工件分栏」按钮即可再打开（会先收起查看器）'))
+check('负向：Toast 不再指向不存在的「页签条右端展开按钮」',
+  !mod.includes('页签条右端的展开按钮'))
+check('负向：顶栏没有第二处开关（入口文案不出现在顶栏）',
+  !bar.includes('展开工件分栏') && !bar.includes('PanelRightOpen') && !bar.includes('artOpen'))
+
 
 console.log(`\n[OK] ${pass} PASS / [FAIL] ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)

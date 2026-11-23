@@ -138,6 +138,29 @@ check('截断后引用纪律仍在（规则在条目之前）', many.includes('�
 const numbered = many.split('\n').filter((l) => /^- \[\d+\] /.test(l)).map((l) => Number(/^- \[(\d+)\] /.exec(l)[1]))
 check('截断后留下的编号仍是前缀连续 1..k', numbered.every((n, i) => n === i + 1) && numbered.length > 0, JSON.stringify(numbered))
 
+// 2026-11-23：截断按 code point 切，不能把 emoji 的代理对劈成半个字符
+const hasLoneSurrogate = (s) => {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const d = s.charCodeAt(i + 1)
+      if (!(d >= 0xdc00 && d <= 0xdfff)) return true
+      i++
+    } else if (c >= 0xdc00 && c <= 0xdfff) return true
+  }
+  return false
+}
+let emojiSplit = 0
+for (let pad = 0; pad < 24; pad++) {
+  const out = renderSourcesHint({
+    role: 'segment',
+    items: [{ ...ITEM_MISSING, title: '前缀'.repeat(pad) + '😀'.repeat(240) }],
+    maxChars: 400,
+  })
+  if (hasLoneSurrogate(out)) emojiSplit++
+}
+check('★ emoji 边界：清单截断不产生半个代理对（24 组前缀位置）', emojiSplit === 0, `split=${emojiSplit}`)
+
 console.log('\n=== 6. 接线：三处调用点仍然齐（静态）===')
 const course = read(COURSE_REL)
 check('assistant 角色仍走摘要', /renderSourcesHint\(\{ role: 'assistant'/.test(course), '')

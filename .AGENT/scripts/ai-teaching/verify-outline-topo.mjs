@@ -221,6 +221,14 @@ check('无 requires：勾选顺序不影响输出（基准是大纲行序，不�
 check('空选中 -> 空段', orderSelectedUnits([u('A')], []).length === 0)
 check('跨章 / 不存在的 id 被忽略（不增条目）',
   seg([u('A'), u('B')], ['A', 'ZZ', 'B']) === 'A,B', seg([u('A'), u('B')], ['A', 'ZZ', 'B']))
+// 2026-11-23：大纲异常带重复 id 时不能「增条」
+const dupSeg = orderSelectedUnits([u('A'), u('A'), u('B')], ['A', 'B'])
+check('★ 重复 id 先按 id 去重再排序（输出 id 唯一）',
+  dupSeg.length === 2 && dupSeg.map((x) => x.id).join(',') === 'A,B', dupSeg.map((x) => x.id).join(','))
+const dupSegSelected = orderSelectedUnits([u('c', { requires: ['b'] }), u('b', { requires: ['a'] }), u('a'), u('a')], ['a', 'a', 'b', 'c'])
+check('★ 重复 id + 依赖链：去重后拓扑序 a,b,c 且不复制条目',
+  dupSegSelected.map((x) => x.id).join(',') === 'a,b,c' && new Set(dupSegSelected.map((x) => x.id)).size === dupSegSelected.length,
+  dupSegSelected.map((x) => x.id).join(','))
 
 const segChain = [u('u3', { requires: ['u2'] }), u('u2', { requires: ['u1'] }), u('u1')]
 check('正常链：全选 -> 讲序 u1,u2,u3（大纲行序是 u3,u2,u1）',

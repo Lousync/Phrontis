@@ -28,12 +28,14 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
 const stager = makeStager(ROOT)
 const gate = await stager.load('electron/lib/quizGatePure.ts')
+const docMod = await stager.load('electron/lib/quizDocPure.ts')
 const {
   applyQuizQualityGate,
   extractQuizFences,
   normalizeQuizQualityMode,
   QUIZ_GATE_MAX_REWRITE,
 } = gate
+const { hasQuizFence, QUIZ_FENCE_RE } = docMod
 
 /* ---------------------------------------------------------------- 夹具 */
 
@@ -83,6 +85,23 @@ check('off：坏 JSON 也不拦（旧路径行为）', offBroken.ok === true && 
 const lecture = '# 讲义\n\n没有 quiz 围栏。\n'
 const noFence = applyQuizQualityGate({ content: lecture, mode: 'strict' })
 check('无题单围栏：strict 也不碰（讲义不受影响）', noFence.ok === true && noFence.content === lecture && noFence.warnings.length === 0 && noFence.changed === false, '')
+
+/* ---------------------------------------------------------------- 2b. 围栏口径一致 */
+
+console.log('\n=== 2b. hasQuizFence 与 extractQuizFences 口径一致 ===')
+const missingNewline = '```quiz\n' + choice(1, 'A') + '```'
+check('★ 闭合前缺换行的围栏也能被 extractQuizFences 拆出', hasQuizFence(missingNewline) === true && extractQuizFences(missingNewline).length === 1, JSON.stringify(extractQuizFences(missingNewline).map((f) => f.question?.no)))
+check('★ 同一份正文走 strict 质量门能逐题校验（不再静默放行）', (() => {
+  const r = applyQuizQualityGate({ content: missingNewline, mode: 'strict', allowRetry: true })
+  return r.summary.fences === 1 && r.summary.total === 1
+})(), JSON.stringify(applyQuizQualityGate({ content: missingNewline, mode: 'strict', allowRetry: true }).summary))
+const unclosed = '```quiz\n' + choice(1, 'A') + '\n没有结尾围栏'
+check('有开头无闭合：extract 为空但 hasQuizFence 为 true', hasQuizFence(unclosed) === true && extractQuizFences(unclosed).length === 0, '')
+const unclosedStrict = applyQuizQualityGate({ content: unclosed, mode: 'strict', allowRetry: true })
+check('★ 未闭合围栏在 strict 下是结构错误（不静默放行）', unclosedStrict.ok === false && /未闭合/.test(unclosedStrict.retryPrompt), String(unclosedStrict.retryPrompt))
+const unclosedWarn = applyQuizQualityGate({ content: unclosed, mode: 'warn' })
+check('未闭合围栏在 warn 下只告警', unclosedWarn.ok === true && unclosedWarn.warnings.some((w) => w.code === 'structure' && /未闭合/.test(w.message)), JSON.stringify(unclosedWarn.warnings))
+check('统一正则导出且两处共用（quizDocPure → quizGatePure）', QUIZ_FENCE_RE instanceof RegExp && /from '\.\/quizDocPure'/.test(read('electron/lib/quizGatePure.ts')) && read('electron/lib/quizDocPure.ts').includes('export const QUIZ_FENCE_RE'), '')
 
 /* ---------------------------------------------------------------- 3. warn：只检测 */
 
@@ -222,6 +241,28 @@ check('只对题单生效（非 quiz 文档不进质量门）', /if \(isQuiz\) \
 check('工具层原样透传结果（不吞 warnings）', /const r = archiveOrganizedPage\(sid, str\(args\.title\), str\(args\.content\), str\(args\.target\), getSettingReader\(\)\)/.test(tools), '')
 check('设置项存在且默认 strict、ui:false（getSetting 仍可读）', /aiTeachQuizQuality: \{ default: 'strict'[^\n]*ui: false/.test(settings), '')
 check('质量门不在渲染层（渲染层只展示，拦截无效）', !idx.includes('applyQuizQualityGate') && !idx.includes('aiTeachQuizQuality'), '')
+
+console.log('\n=== 10. 其余写入口也过门（复习讲义 / vault.write） ===')
+check('导出统一写盘门 gateQuizContentForWrite', /export function gateQuizContentForWrite\(/.test(course), '')
+const writeGateStart = course.indexOf('export function gateQuizContentForWrite')
+const writeGateEnd = course.indexOf('/** 整理页归档', writeGateStart)
+const helperFn = writeGateStart >= 0 && writeGateEnd > writeGateStart ? course.slice(writeGateStart, writeGateEnd) : ''
+check('off 档逐字直通（gate 对原文一个字符都不改，连 CRLF 都不动）',
+  /if \(mode === 'off'\) return \{ ok: true, content: rawText \}/.test(helperFn), '')
+check('无 quiz 围栏的正文不过门（普通复习讲义 / 笔记不受影响，原样返回）',
+  /if \(!hasQuizFence\(rawText\)\) return \{ ok: true, content: rawText \}/.test(helperFn), '')
+const reviewStart = course.indexOf('export function writeChapterReviewDoc')
+const reviewEnd = course.indexOf('/** 取本段同章上一段的交接内容', reviewStart)
+const reviewFn = reviewStart >= 0 && reviewEnd > reviewStart ? course.slice(reviewStart, reviewEnd) : ''
+check('★ writeChapterReviewDoc 写盘前调用质量门',
+  /writeChapterReviewDoc[\s\S]{0,1600}gateQuizContentForWrite\([\s\S]{0,900}writeFileSync\(/.test(course), '')
+check('复习讲义不合格 → return 错误、不写盘', /if \(!gated\.ok\) return \{ ok: false, error: gated\.error/.test(reviewFn), '')
+check('★ vault.write 在 aiTeaching + 含 quiz 围栏时调用同一道门',
+  /ctx\?\.source === 'aiTeaching' && rel\.toLowerCase\(\)\.endsWith\('\.md'\) && hasQuizFence\(content\)/.test(tools)
+  && /gateQuizContentForWrite\(String\(ctx\.sessionId \?\? ''\)/.test(tools), '')
+check('vault.write 门不合格时抛错（不是拒绝保存，是把重写提示给模型）', /if \(!gated\.ok\) throw new Error\(gated\.error\)/.test(tools), '')
+check('两处入口复用同一个 gate 实现（不各写一套）',
+  (tools.match(/applyQuizQualityGate\(/g) ?? []).length === 0 && (course.match(/export function gateQuizContentForWrite\(/g) ?? []).length === 1, '')
 
 /* ---------------------------------------------------------------- 报告 */
 

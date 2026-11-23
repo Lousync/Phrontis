@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, llmReasoningCapable, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
@@ -571,7 +571,18 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** v3.8.0：工件分栏开关（用户意图态，持久）。列可见 = `artTabs` 非空 && `artOpen` ——
    *  拖到最窄（ResizablePanel snap-close）或点工件分栏右缘的贴边条即隐藏 / 展开分栏（页签不丢）。 */
   const [artOpen, setArtOpen] = useState(() => localStorage.getItem('aiTeach.artOpen') !== '0')
+  /** 贴边入口跟随查看器位移时的动效降级（右栏查看器同口径） */
+  const [artReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  /** 收起态贴边入口（2026-11-23 可达性修复）：必须挂在**折叠容器之外**，
+   *  否则收起后 `keepMounted` 的子树整棵 `display:none`，「展开」按钮跟着一起消失。 */
+  const artEdgeBtnRef = useRef<HTMLButtonElement>(null)
+  /** 收起动作是否发生在工件子树内（折叠后子树 display:none，焦点已掉到 body，事后判不出来） */
+  const artFocusToEdgeRef = useRef(false)
   const applyArtOpen = useCallback((v: boolean) => {
+    if (!v) {
+      const ae = document.activeElement as HTMLElement | null
+      if (ae && ae.closest('[data-ai-teach-art-pane]')) artFocusToEdgeRef.current = true
+    }
     setArtOpen(v)
     try { localStorage.setItem('aiTeach.artOpen', v ? '1' : '0') } catch { /* ignore */ }
   }, [])
@@ -585,10 +596,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!artOpen || artTabs.length === 0) return
     applyArtOpen(false)
     artAutoCollapsedRef.current = true
-    showToast({ type: 'info', message: '工件栏已收起，查看器占用右侧', detail: '页签保留，点工件栏页签条右端的展开按钮即可再打开' })
+    showToast({ type: 'info', message: '工件栏已收起，查看器占用右侧', detail: '页签保留，点中栏右缘的「展开工件分栏」按钮即可再打开（会先收起查看器）' })
     // 仅在查看器开合时判定一次：拖动宽度、切页签都不该反复收起
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcVisible])
+  /** 收起后焦点回落：焦点原在被隐藏的页签条上 → 挪到折叠容器之外那枚贴边入口（同 toggleTray 口径） */
+  useEffect(() => {
+    if (artOpen || !artFocusToEdgeRef.current) return
+    artFocusToEdgeRef.current = false
+    artEdgeBtnRef.current?.focus()
+  }, [artOpen])
   /** 产物页签重读计数（html / mindmap / image 共用：值一变对应查看器重读磁盘；md 页签走 openArtFile 重读全文） */
   const [htmlSeq, setHtmlSeq] = useState<Record<string, number>>({})
   /** ⤢ 原位放大：工件栏占满内容区（absolute 盖过对话/左右栏，组件不卸载 → 对话滚动与 iframe 全存活），⤡/Esc 退出 */
@@ -4339,6 +4356,32 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             onToggleOpen={applyArtOpen}
           />
         </ResizablePanel>
+
+        {/* 收起态展开入口（2026-11-23 可达性修复）：分栏收起后整棵子树 `display:none`，
+            页签条右端那枚 `PanelRightOpen` 永远看不见。所以入口必须挂在**折叠容器之外**：
+            贴中栏右缘一枚竖条按钮，`transform` 跟随查看器宽度 → 查看器打开时退到它左缘之外，
+            那一刻也照样可点（Toast 指向的就是它）。顶栏仍不放第二处开关（契约锁住）。 */}
+        {artExpanded && !artOpen && !artZoom && (
+          <button
+            ref={artEdgeBtnRef}
+            type="button"
+            onClick={() => {
+              // 查看器占着右侧（z-30）时先让它让位，否则分栏展开会被整个盖住 —— 点了像没反应
+              if (srcVisible) toggleSide('right')
+              applyArtOpen(true)
+            }}
+            aria-expanded={false}
+            data-tip="展开工件分栏" aria-label="展开工件分栏"
+            style={{
+              // 只动 transform；横移与中栏 padding-right 同一条 --dur-std / --ease-kb 曲线
+              transform: `translate(${srcVisible && viewerW > 0 ? -viewerW : 0}px, -50%)`,
+              transition: artReducedMotion ? 'none' : 'transform var(--dur-std) var(--ease-kb)',
+            }}
+            className="kb-view-fade absolute top-1/2 right-0 z-20 flex h-[72px] w-3.5 items-center justify-center rounded-l-md border border-r-0 border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"
+          >
+            <PanelRightOpen size={12} />
+          </button>
+        )}
 
         {/* ⤢ 全宽阅读：拿满整行（absolute inset-0 z-40；组件不卸载 → 对话滚动与 iframe 全存活）。
             此态下工件分栏不重复挂载 ArtifactsPane（避免两份实例各跑计时器；iframe 是 kbview:// 独立文档）。 */}

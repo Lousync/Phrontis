@@ -17,7 +17,9 @@ import type { ArtTab } from './artifacts'
  * 工件栏（docs/ai-teaching-artifacts-pane-design.md §2）：页签条 + 工具条 + 内容区。
  * 对话固定左主区永不替换，材料/产物/示意图全部进这里以页签切换；
  * 开合纯内容驱动：有页签即渲染、关完即消失（2026-09-09 拍板，不做浮层式拉出把手——与素材库拉出条打架）；
- * 折叠/展开的唯一可见出口是页签条右端那枚 `PanelRightClose/Open`（2026-11-23 补，此前只剩对话区右缘 12px 贴边条，发现性太低）；
+ * 折叠/展开：展开时页签条右端那枚 `PanelRightClose` 负责收起（2026-11-23 补）；收起后退到
+ * 宿主的**折叠容器之外**——页签条整棵 `display:none`，所以那一刻的 `PanelRightOpen` 由宿主
+ * 在中栏右缘贴边条上另挂一枚（可达性修复，2026-11-23）；
  * expanded（宿主管状态）= 原位占满内容区放大阅读（仿编辑器全屏，非弹窗），页签行 ⤢/⤡ 切换、Esc 退出；
  * 页签列表为会话内存态（切会话清空），阅读位置记忆 per-rel 保存在本组件（跨会话不失效）。
  */
@@ -181,7 +183,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
         : <ImageIcon size={11} className="shrink-0 text-[var(--accent)]" /> // html 示意图 / image 生图产物
 
   return (
-    <div className="h-full flex flex-col min-h-0 bg-[var(--bg-secondary)] border-l border-[var(--border-color)]">
+    <div data-ai-teach-art-pane="" className="h-full flex flex-col min-h-0 bg-[var(--bg-secondary)] border-l border-[var(--border-color)]">
       {/* 页签条：icon+名称+✕；溢出横向滚动；生成中页签禁关（§2）。
           F-3：滚动区与固定动作（⤢）拆开 —— 否则页签一多，全屏按钮会跟着内容滚出视野。 */}
       <div className="shrink-0 flex items-center gap-0.5 px-2 pt-1.5 pb-0 select-none">

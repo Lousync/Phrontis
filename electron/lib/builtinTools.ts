@@ -13,9 +13,11 @@ import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import { assertCourseEditableBySession } from './aiTeachingCourseEndGuard'
 import {
   inventoryWorkspaceSource, writeOutlineFromAssistant, removeCourseUnit, archiveOrganizedPage, writeChapterReviewDoc,
+  gateQuizContentForWrite,
   readCourseOutline,
   type OutlineDraft,
 } from './aiTeachingCourse'
+import { hasQuizFence } from './quizDocPure'
 import { registerSources, assignSources, extractSource, getSources, type RegisterSourceItem, type AssignSourceItem } from './aiTeachingSourceRegistry'
 import type { SourceAnchor } from '../../src/lib/aiTeachingSourcesPure'
 import type { ToolInvokeCtx } from './aiTools'
@@ -2893,11 +2895,17 @@ export function registerBuiltinTools(): void {
     }
     const rel = normalizeAiTeachingWritePath(rawPath, ctx)
     if (!rel) throw new Error('缺少必填参数: path')
+    let content = str(args.content)
+    // 题单质量门（2026-11-23）：AI 教学场景下含 ```quiz 围栏的 .md 与其他写入口过同一道门。
+    // 不是拒绝：strict 不合格会把重写提示抛给模型；warn 只收集告警；off 档 gate 逐字直通。
+    if (ctx?.source === 'aiTeaching' && rel.toLowerCase().endsWith('.md') && hasQuizFence(content)) {
+      const gated = gateQuizContentForWrite(String(ctx.sessionId ?? ''), baseNameOf(rel).replace(/\.md$/i, ''), content, getSettingReader())
+      if (!gated.ok) throw new Error(gated.error)
+      content = gated.content
+    }
     // ensureId：教材 / 知识库正文落盘时补稳定 frontmatter id（已有 id 原样保留）
     const wantId = args.ensureId === true && rel.toLowerCase().endsWith('.md')
-    const content = wantId
-      ? ensureKnowledgeDocFrontmatter(baseNameOf(rel).replace(/\.md$/i, ''), str(args.content))
-      : str(args.content)
+    if (wantId) content = ensureKnowledgeDocFrontmatter(baseNameOf(rel).replace(/\.md$/i, ''), content)
     if (content.includes('\u0000')) throw new Error('内容含 NUL 字符，拒绝写入')
     assertCanWrite(rel, ctx)
     const root = vaultRootPath()

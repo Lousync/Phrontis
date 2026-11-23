@@ -27,6 +27,17 @@ export function stripFrontmatter(raw: string): string {
   return splitFrontmatter(raw)?.body ?? String(raw ?? '').replace(/\r\n/g, '\n')
 }
 
+/**
+ * ```quiz 围栏的**唯一解析正则**（quizGatePure.extractQuizFences 直接复用）。
+ * 闭合 ``` 前的换行是可选的：` ```quiz\n{"no":1}``` ` 也是合法围栏，
+ * 不能因为「闭合前少个换行」让 hasQuizFence=true 而 extractQuizFences=[]。
+ */
+export const QUIZ_FENCE_RE = /```quiz[^\n]*\n([\s\S]*?)\n?```/g
+
+/**
+ * 是否含 quiz 围栏**开头**（不要求闭合）：写入口据此决定是否过质量门。
+ * 未闭合的围栏交给 quizGatePure 当结构错误处理，绝不能静默放过。
+ */
 export function hasQuizFence(content: string): boolean {
   return /```quiz(?:\s|$)/.test(content)
 }

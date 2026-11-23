@@ -214,7 +214,7 @@ check('大纲 / 段 / 复习写接口有守卫',
   /writeCourseOutline[\s\S]{0,200}assertWorkspaceEditable/.test(courseSrc) &&
   /openSegment[\s\S]{0,300}isCourseEnded/.test(courseSrc) &&
   /endSegment[\s\S]{0,200}assertCourseEditableBySession/.test(courseSrc) &&
-  /writeChapterReviewDoc[\s\S]{0,200}assertCourseEditableBySession/.test(courseSrc))
+  /writeChapterReviewDoc[\s\S]{0,400}assertCourseEditableBySession/.test(courseSrc))
 check('复习课结课后只放行已有会话',
   /isCourseEnded\(id\)[\s\S]{0,160}sessionExists\(existing\.sessionId\)/.test(courseSrc))
 check('课程注入带结课只读提示', courseSrc.includes('endedNote') && courseSrc.includes('本课程已结课'))

@@ -44,6 +44,7 @@ const {
   lastTeachPatchOf,
   foldTeachFences,
   ledgerToPatch,
+  ledgerUnknownUnitId,
   renderSegmentLedger,
   renderSegmentProgressLine,
   renderSegmentLedgerRequestBlock,
@@ -263,6 +264,59 @@ const switchFwd = foldTeachFences([
 ], { unitOrder: ORDER })
 check('★ 换知识点（前进）时 step 从 1 重计', switchFwd?.current?.unitId === 'u2' && switchFwd?.current?.step === 1, JSON.stringify(switchFwd?.current))
 
+// 2026-11-23：模型大小写写错（U2）必须落到 u2；大小写不同不算换知识点
+const caseFold = foldTeachFences([
+  { role: 'assistant', content: '```teach\n{"unitId":"u2","step":2,"label":"安全序列"}\n```', created_at: '2026-11-22T12:10:00.000Z' },
+  { role: 'assistant', content: '```teach\n{"unitId":"U2","step":3}\n```', created_at: '2026-11-22T12:11:00.000Z' },
+], { unitOrder: ORDER })
+check('★ unitId 大小写不敏感（U2 → u2，step 继续累加而不是换点重计）',
+  caseFold?.current?.unitId === 'u2' && caseFold?.current?.step === 3, JSON.stringify(caseFold?.current))
+check('解析到已知 id 时不记 unknownUnitId', ledgerUnknownUnitId(caseFold) === '', ledgerUnknownUnitId(caseFold))
+const caseBlock = renderSegmentLedger({ patch: ledgerToPatch(caseFold), units: UNITS, focusId: 'u2' })
+check('★ 大写 U2 不再吞掉覆盖信息', caseBlock.text.includes('已讲到：安全序列') && caseBlock.text.includes('已覆盖：资源分配图'), JSON.stringify(caseBlock.text))
+
+// 模型写了清单里根本不存在的 id：不顶掉上一轮 current，覆盖信息保留；原文只进「已讲到」
+const unknownFold = foldTeachFences([
+  { role: 'assistant', content: '```teach\n{"unitId":"u2","step":2,"label":"安全序列"}\n```', created_at: '2026-11-22T12:20:00.000Z' },
+  { role: 'assistant', content: '```teach\n{"unitId":"zzz","step":3,"label":"不存在的点"}\n```', created_at: '2026-11-22T12:21:00.000Z' },
+], { unitOrder: ORDER })
+check('★ 未知 unitId 不顶掉 current（仍停在上一个已知知识点）',
+  unknownFold?.current?.unitId === 'u2' && unknownFold?.current?.step === 2 && unknownFold?.current?.label === '安全序列',
+  JSON.stringify(unknownFold?.current))
+check('未知 unitId 原文被记下（供注入块点名）', ledgerUnknownUnitId(unknownFold) === 'zzz', ledgerUnknownUnitId(unknownFold))
+const unknownBlock = renderSegmentLedger({
+  patch: ledgerToPatch(unknownFold),
+  unknownUnitId: ledgerUnknownUnitId(unknownFold),
+  units: UNITS,
+  focusId: 'u2',
+})
+check('★ 未知 id 时「已讲到」只显示原文 + 冲突提示（不拼上一轮 step / label）',
+  unknownBlock.text.includes('已讲到：zzz') && !unknownBlock.text.includes('第 2 步') && !unknownBlock.text.includes('安全序列')
+  && unknownBlock.text.includes('冲突提示') && unknownBlock.conflict === true, JSON.stringify(unknownBlock))
+check('★ 未知 id 不吞覆盖 / 未覆盖（仍按上一轮 current 推导）',
+  unknownBlock.text.includes('已覆盖：资源分配图') && unknownBlock.text.includes('未覆盖：银行家算法'), JSON.stringify(unknownBlock.text))
+const knownAfterUnknown = foldTeachFences([
+  { role: 'assistant', content: '```teach\n{"unitId":"zzz","step":3}\n```', created_at: '2026-11-22T12:30:00.000Z' },
+  { role: 'assistant', content: '```teach\n{"unitId":"u1","step":1}\n```', created_at: '2026-11-22T12:31:00.000Z' },
+], { unitOrder: ORDER })
+check('后续写回已知 id 后不再残留上一轮 unknown 原文', ledgerUnknownUnitId(knownAfterUnknown) === '' && knownAfterUnknown?.current?.unitId === 'u1', `${ledgerUnknownUnitId(knownAfterUnknown)} / ${JSON.stringify(knownAfterUnknown?.current)}`)
+
+// 截断不能劈开 emoji（代理对）
+const emojiLedger = { current: { unitId: 'u1', step: 1, label: '😀'.repeat(200) }, terms: [], updatedAt: NOW1 }
+const emojiCut = renderLedgerForPrompt(emojiLedger, 920)
+const hasLoneSurrogate = (s) => {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const d = s.charCodeAt(i + 1)
+      if (!(d >= 0xdc00 && d <= 0xdfff)) return true
+      i++
+    } else if (c >= 0xdc00 && c <= 0xdfff) return true
+  }
+  return false
+}
+check('★ 台账截断不劈开 emoji / 代理对', !hasLoneSurrogate(emojiCut), JSON.stringify(emojiCut.slice(-20)))
+
 // 乱序 / 坏围栏：非 assistant、数组围栏、坏 JSON、无围栏全部跳过
 const skipFold = foldTeachFences([
   { role: 'user', content: '```teach\n{"unitId":"u9","step":9,"newTerms":["用户写的"]}\n```', created_at: '2026-11-22T13:00:00.000Z' },
@@ -293,17 +347,19 @@ check('已收尾段不注入台账协议（负向）', /sessionLessonBrief && !s
 check('teachLedgerRuleHint 拼进 systemFull', /\+ teachLedgerRuleHint \+ wrapupRuleHint \+ visualHint/.test(agentSrc), '')
 check('台账协议计入 protocols 分区（与其它协议同区）', /outlineRuleHint \+ endcourseRuleHint \+ teachLedgerRuleHint \+ wrapupRuleHint \+ teachStyleHint/.test(agentSrc), '')
 check('★ 段会话全量合并本会话所有围栏（foldTeachFences + 全量消息 + unitOrder）',
-  /const ledger = foldTeachFences\(getAgentMessagesAll\(sessionId\), \{ unitOrder: ids \}\)/.test(courseSrc), '')
+  /const ledger = foldTeachFences\(getAgentMessagesAll\(sessionId\), \{ unitOrder: unitRows\.map\(\(u\) => u\.id\) \}\)/.test(courseSrc), '')
+check('★ 未知 unitId 原文传给注入块（ledgerUnknownUnitId）',
+  /unknownUnitId: ledgerUnknownUnitId\(ledger\)/.test(courseSrc), '')
 check('★ 不用只给最早 500 条的 getAgentMessages（长段会漏最近围栏，负向）',
   !/foldTeachFences\(getAgentMessages\(sessionId\)/.test(courseSrc), '')
 check('★ 合并结果经 ledgerToPatch 作为 renderSegmentLedgerRequestBlock 的输入',
   courseSrc.includes('patch: ledgerToPatch(ledger)') && courseSrc.includes('renderSegmentLedgerRequestBlock({') && courseSrc.includes('focusId: active?.id'), '')
 check('★ system 层进度句只走纯函数且参数不含台账',
-  /lines\.push\(renderSegmentProgressLine\(\{ activeIdx, total: ids\.length, activeName: active\?\.name \}\)\)/.test(courseSrc), '')
+  /lines\.push\(renderSegmentProgressLine\(\{ activeIdx, total: unitRows\.length, activeName: active\?\.name \}\)\)/.test(courseSrc), '')
 check('★ 台账经 requestOut 出参交给请求级层（不 push 进 system 行）',
   courseSrc.includes('requestOut.block = requestBlock') && !courseSrc.includes('lines.push(ledgerBlock)') && !courseSrc.includes('lines.push(requestBlock)'), '')
 check('★ 不再只读最后一条围栏（负向）', !courseSrc.includes('lastTeachPatchOf('), '')
-check('已收尾段不注入台账块（负向）', /if \(curLesson\.status !== 'ended'\) \{[\s\S]{0,120}foldTeachFences/.test(courseSrc), '')
+check('已收尾段 / 已结课课程不注入台账块（负向）', /if \(curLesson\.status !== 'ended' && !isCourseEnded\(wsId\)\) \{[\s\S]{0,160}foldTeachFences/.test(courseSrc), '')
 check('渲染层剥离 teach 围栏（不进正文）', /\(profile\|plan\|ask\|outline\|endcourse\|teach\|wrapup\)/.test(panelSrc), '')
 
 // ---------------------------------------------------------------- 报告

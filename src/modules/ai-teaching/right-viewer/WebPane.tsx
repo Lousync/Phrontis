@@ -17,6 +17,7 @@ import { showToast } from '../../../lib/toast'
 import {
   boundsPayload,
   normalizeUrl,
+  shouldRebuildWebView,
   shouldShowView,
   tabCaption,
   type WebTabRef,
@@ -300,76 +301,72 @@ export function WebPane(props: WebPaneProps) {
   /**
    * 会话切换 / 首次挂载。
    *
-   * 为什么换会话一定要收 view：`w1` 是主进程侧的全局槽位，另一个会话的网页 pane
-   * 若还活着就会撞到同一块原生视图上。
+   * 2026-11-23 两条修正（缺陷 1 / 2）：
+   *   · **首挂必须等会话 id 非空**。会话 id 是异步恢复的，首帧拿到 `''` 只说明「还不知道是哪个会话」，
+   *     此时既不能建视图、也不能把 `firstMountRef` 消费掉 —— 否则 id 晚到会被误判成「换会话」，
+   *     走恢复分支清空页签，而 `initialUrl` 没有变化不再触发导航，页面就永久空白。
+   *   · **换会话不再卸载视图**。笔记 / 旁问 / 书架本来就跨会话保活；单页化后壳层只有一个网页页签，
+   *     `w1` 始终是同一个 view，不存在「另一个会话的 pane 抢同一槽位」。只有壳给的地址与当前页
+   *     不同（重启恢复 / 壳里改了地址）才导航过去；地址为空则保持现状。
    *
    * 恢复口径（2026-11-22 内层页签条删除后）：**不再读写 `aiTeach.webTabs.<sid>`**
    * —— 那是内层页签结构的旧键，壳层已经把它当「只读迁移」吞进 v2 页签（`viewerTabs.ts`
    * 的 `parseLegacyWebTabs` + `migrateLegacyViewerState`），pane 再写一份就是第二个真相源。
    * 现在唯一的地址来源是壳传下来的 `initialUrl`（壳的 web 页签只存一个 URL）。
-   *
-   * 首次挂载 vs 换会话：
-   *   · 首次挂载 = 用户刚点开一个东西（外链 / `+` 菜单新建带地址）→ 留给下面的
-   *     `initialUrl` effect 直接加载，不要在这里变成「要再点一次加载」；
-   *   · 换会话 = 用户没有要求加载 → 按 C6 恢复一个 dormant 页签（有地址、没有 view）。
    */
   useEffect(() => {
-    if (sessionRef.current === props.sessionId) return
-    const isFirstMount = firstMountRef.current
-    firstMountRef.current = false
-    sessionRef.current = props.sessionId
+    const sid = String(props.sessionId ?? '').trim()
 
-    const prevVisible = visibleRef.current
-    visibleRef.current = null
-    if (prevVisible) void webPaneSetVisible(prevVisible, false)
-    for (const id of createdRef.current) void webPaneClose(id)
-    createdRef.current.clear()
-    setRuntime({})
-
-    if (isFirstMount) {
-      setTabs([])
-      setActiveIndex(0)
-      setAddress('')
-      scheduleSync()
+    if (firstMountRef.current) {
+      // 会话 id 还没恢复：保持首挂态，等它到齐（不清空、不建视图、不消费 firstMountRef）
+      if (!sid) return
+      firstMountRef.current = false
+      sessionRef.current = sid
+      // 首挂的加载交给下面的 initialUrl effect（rAF 里避开首帧几何为零）
       return
     }
 
-    // 地址取「页面此刻真正在看的」，拿不到才退回壳的 initialUrl
-    const url = String(latestRef.current.tabs[0]?.url || props.initialUrl || '').trim()
-    if (!props.sessionId || !url) {
-      setTabs([])
-      setActiveIndex(0)
-      setAddress('')
-      scheduleSync()
-      return
-    }
-    setTabs([{ id: 'w1', url, dormant: true }])
-    setActiveIndex(0)
-    setAddress(url)
-    scheduleSync()
-  }, [props.sessionId, props.initialUrl, scheduleSync])
+    if (sessionRef.current === sid) return
+    sessionRef.current = sid
+
+    // 会话变了 / 或壳给了新地址：只有「目标地址确实与当前页不同」才动视图
+    const tabs = latestRef.current.tabs
+    const currentUrl = String(tabs[latestRef.current.activeIndex]?.url ?? tabs[0]?.url ?? '')
+    const target = String(props.initialUrl ?? '')
+    if (!shouldRebuildWebView({ mounted: true, sessionId: sid, initialUrl: target, currentUrl })) return
+    void navigate(target)
+  }, [props.sessionId, props.initialUrl, navigate])
 
   /* ------------------------------------------------------------ 外壳请求 / 事件 */
 
   // C2：外链默认右侧打开，面板已开时复用当前页签（不新开）
+  // `seq` 是模块级单调递增的一次性请求号，**不掺会话 id**：跨会话保活后切会话不该重放
+  // 上一段生命里已经处理过的旧地址（那会把正在读的页面顶掉，正是缺陷 2 的另一半）。
   useEffect(() => {
     const req = props.request
     if (!req || !req.url) return
-    const key = `${props.sessionId}:${req.seq}`
+    const key = String(req.seq)
     if (lastReqRef.current === key) return
     lastReqRef.current = key
     void navigate(req.url)
-  }, [props.request, props.sessionId, navigate])
+  }, [props.request, navigate])
 
-  /** 壳的页签模型带着地址（重启恢复 / 新建网页页签时直接带 URL）：空态才导航一次 */
+  /**
+   * 壳的页签模型带着地址（重启恢复 / 新建网页页签时直接带 URL）：空态才导航一次。
+   *
+   * 必须等会话 id 非空再抢跑：会话恢复期首帧 `sessionId=''`、`initialUrl` 已经是恢复出来的地址，
+   * 此时建了视图，id 晚到就会走「换会话」把页面清掉且不再自动恢复（缺陷 1）。
+   */
   const initialUrl = String(props.initialUrl ?? '').trim()
+  const sessionId = String(props.sessionId ?? '').trim()
   useEffect(() => {
     if (!initialUrl) return
+    if (!sessionId) return
     const raf = requestAnimationFrame(() => {
       if (latestRef.current.tabs.length === 0) void navigate(initialUrl)
     })
     return () => cancelAnimationFrame(raf)
-  }, [initialUrl, navigate])
+  }, [initialUrl, sessionId, navigate])
 
   // 地址上报：壳把 url 写回页签对象（持久化 / 重启后还是这一页）
   const reportUrl = props.onUrlChange

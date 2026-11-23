@@ -128,6 +128,11 @@ check('agentService 用 buildAiTeachSourcesHint', agent.includes('buildAiTeachSo
 check('agentService 不再 import resolveSourcesForInjection', !agent.includes('resolveSourcesForInjection'))
 check('课程注入要求全量大纲', course.includes('生成**全量**大纲') && agent.includes('一次给全量章'))
 check('无段会话不再注入教学推进（buildCourseInjection 有 curLesson 早退）', /const curLesson = s\.lessons\[sessionId\][\s\S]{0,120}if \(!curLesson\) return ''/.test(course))
+check('★ 删点后「覆盖 N 个」分母用现存知识点数（unitRows.length）', course.includes('覆盖 ${unitRows.length} 个知识点'))
+check('★ 进度句 total / activeIdx 同口径（不按含已删除 id 的 lesson.unitIds）',
+  course.includes('total: unitRows.length') && /const activeIdx = active \? unitRows\.findIndex\(\(u\) => u\.id === active\.id\) \+ 1 : 0/.test(course))
+check('★ 已结课课程不再注入台账 / 错题（!isCourseEnded(wsId)）+ 收尾流程未改',
+  /if \(curLesson\.status !== 'ended' && !isCourseEnded\(wsId\)\) \{/.test(course) && /curLesson\.status === 'ended'/.test(course))
 check('scopePrompt 最细层标题 = 本段要求', scopePrompt.includes('本段要求'))
 check('段素材注入只读快照（renderSourcesHint）', course.includes('resolveSegmentSources(') && registry.includes('renderSourcesHint'))
 

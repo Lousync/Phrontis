@@ -58,5 +58,12 @@ export function stableTopo<T extends TopoUnit>(units: ReadonlyArray<T>): T[] {
 export function orderSelectedUnits<T extends TopoUnit>(units: ReadonlyArray<T>, selectedIds: ReadonlyArray<string>): T[] {
   const pick = new Set((selectedIds ?? []).map((x) => String(x ?? '').trim()).filter(Boolean))
   if (!pick.size) return []
-  return stableTopo(units.filter((u) => pick.has(u.id)))
+  // 大纲数据异常时可能带重复 id：先按 id 去重，否则 filter 会把同一条复制成多份（段内「增条」）
+  const seen = new Set<string>()
+  const unique = units.filter((u) => {
+    if (!pick.has(u.id) || seen.has(u.id)) return false
+    seen.add(u.id)
+    return true
+  })
+  return stableTopo(unique)
 }

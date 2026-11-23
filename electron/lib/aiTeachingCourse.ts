@@ -50,6 +50,7 @@ import { detectLongMaterial } from '../../src/lib/aiTeachingSourcesPure'
 import {
   foldTeachFences,
   ledgerToPatch,
+  ledgerUnknownUnitId,
   renderSegmentLedgerRequestBlock,
   renderSegmentProgressLine,
 } from './teachLedgerPure'
@@ -961,7 +962,7 @@ export function reviewFolderRel(wsId: string, chapterId: string, getSetting: (ke
 }
 
 /** 写「复习讲义」到本章的章末复习目录并记录 rel（会话须是复习课会话）。返回相对/绝对路径。 */
-export function writeChapterReviewDoc(sessionId: string, content: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
+export function writeChapterReviewDoc(sessionId: string, content: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string; needsRewrite?: boolean; warnings?: QuizGateWarning[] } {
   try { assertCourseEditableBySession(sessionId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
@@ -970,11 +971,16 @@ export function writeChapterReviewDoc(sessionId: string, content: unknown, getSe
   const dirRel = reviewFolderRel(hit.wsId, hit.chapterId, getSetting)
   if (!dirRel) return { ok: false, error: '无法确定章目录' }
   try {
+    // 题单质量门：复习讲义里也可能带 ```quiz 围栏，写盘前与 archiveOrganizedPage 同一套门。
+    // 不合格 → 不写盘，把重写提示回给模型；off 档 gate 逐字直通（内容一个字符都不改）。
+    const gated = gateQuizContentForWrite(String(sessionId), '复习讲义', content, getSetting)
+    if (!gated.ok) return { ok: false, error: gated.error, needsRewrite: gated.needsRewrite, warnings: gated.warnings }
     const dirAbs = join(vault.rootPath, dirRel)
     mkdirSync(dirAbs, { recursive: true })
     const fname = '复习讲义.md'
     const target = join(dirAbs, fname)
-    let body = String(content ?? '').replace(/\r\n/g, '\n')
+    // off 档 gate 返回原文，这里沿用旧行为把 CRLF 归一成 LF；strict/warn 已是 LF（幂等）
+    let body = gated.content.replace(/\r\n/g, '\n')
     // 同名覆盖：沿用旧文档 id（知识页身份不换）
     if (existsSync(target)) {
       try {
@@ -1457,6 +1463,8 @@ export function buildCourseInjection(
   const curLesson = s.lessons[sessionId]
   if (!curLesson) return ''
   const ids = lessonUnitIds(curLesson)
+  // 大纲改写 / 删点后 `lesson.unitIds` 里可能残留已不存在的 id：清单与分母统一按 unitRows
+  // （= 现存知识点数），否则会出现「覆盖 5 个知识点」但只列 3 条、聚焦序号错位。
   const unitRows = ids
     .map((uid) => units.find((u) => u.id === uid))
     .filter((u): u is (typeof units)[number] => !!u)
@@ -1464,7 +1472,7 @@ export function buildCourseInjection(
   lines.push('【课程上下文（AI教学·段）】')
   lines.push(`课程：${outline!.title || '未命名'} · 目标：${outline!.goal || '未设定'}`)
   if (outline!.anchor) lines.push(`大纲依据：${outline!.anchor}（你是这门课的老师，请围绕大纲推进，不要脱离本段知识点自由发散）`)
-  lines.push(`本段：第${curLesson.order}段（${curLesson.status === 'ended' ? '已收尾·只读' : '进行中'}）· 覆盖 ${ids.length} 个知识点`)
+  lines.push(`本段：第${curLesson.order}段（${curLesson.status === 'ended' ? '已收尾·只读' : '进行中'}）· 覆盖 ${unitRows.length} 个知识点`)
   for (const u of unitRows) {
     const mark = u.id === active?.id ? '【当前聚焦】' : ''
     lines.push(`- ${mark}[${u.id}] ${u.name}（出自「${u.chapter}」，来源：${u.source || '未标注'}）${u.goal ? ` · 目标：${u.goal}` : ''}`)
@@ -1472,22 +1480,23 @@ export function buildCourseInjection(
   // B-47 ①本段进度：当前聚焦第几个（界面真状态）。
   // ★ 这句**只依赖段的静态状态**，与台账无关 —— 它进 system，同一段内必须逐字稳定，
   //   逐轮变化的台账改走请求级（下面的 requestOut），不再打散 prompt cache 前缀。
-  const activeIdx = active ? ids.indexOf(active.id) + 1 : 0
-  lines.push(renderSegmentProgressLine({ activeIdx, total: ids.length, activeName: active?.name }))
+  const activeIdx = active ? unitRows.findIndex((u) => u.id === active.id) + 1 : 0
+  lines.push(renderSegmentProgressLine({ activeIdx, total: unitRows.length, activeName: active?.name }))
   // 段内教学台账（2026-11-22）：**全量合并**本会话所有有效 ` ```teach ` 围栏（单趟正序扫描，
   // O(消息数)），得到程序级单调台账 —— step 只增、术语去重、已覆盖只增（模型写回旧 unitId 不生效）。
   // 取全量消息（getAgentMessagesAll）：getAgentMessages 只给最早 500 条，长段会漏掉最近的围栏。
   // ★ 台账逐轮变化：**不进 system**，经 requestOut 交给 agentService 拼进首条 user 消息层。
-  //   已收尾段不注入（只读）；无围栏 → 不产出任何块，system 与原句逐字一致。
-  if (curLesson.status !== 'ended') {
+  //   已收尾段 / 已结课课程不注入（只读）；无围栏 → 不产出任何块，system 与原句逐字一致。
+  if (curLesson.status !== 'ended' && !isCourseEnded(wsId)) {
     try {
-      const ledger = foldTeachFences(getAgentMessagesAll(sessionId), { unitOrder: ids })
+      const ledger = foldTeachFences(getAgentMessagesAll(sessionId), { unitOrder: unitRows.map((u) => u.id) })
       const requestBlock = renderSegmentLedgerRequestBlock({
         patch: ledgerToPatch(ledger),
+        unknownUnitId: ledgerUnknownUnitId(ledger),
         units: unitRows.map((u) => ({ id: u.id, name: u.name })),
         focusId: active?.id,
         activeIdx,
-        total: ids.length,
+        total: unitRows.length,
         activeName: active?.name,
       })
       if (requestBlock && requestOut) requestOut.block = requestBlock
@@ -1808,6 +1817,42 @@ function quizAnsweredKeys(title: unknown, docId: string | null): Record<string, 
     }
   } catch { /* 记录读不到 = 视为无作答 */ }
   return out
+}
+
+/**
+ * 题单写盘统一过门（2026-11-23）：除 archiveOrganizedPage 之外，复习讲义与
+ * `builtin.vault.write` 也属于「含 quiz 围栏的 AI 教学 .md」写入口，必须同一套质量门。
+ *
+ * 只对**含 ```quiz 围栏**的正文生效；off 档逐字直通（返回原 content，绝不改一个字符）。
+ * 返回值里的 content 是放行后应写盘的正文（strict 可能已做答案均衡）。
+ */
+export function gateQuizContentForWrite(
+  sessionId: string,
+  title: unknown,
+  content: unknown,
+  getSetting: (key: string) => unknown,
+): { ok: true; content: string; warnings?: QuizGateWarning[] } | { ok: false; content: string; error: string; needsRewrite: boolean; warnings?: QuizGateWarning[] } {
+  const rawText = String(content ?? '')
+  if (!hasQuizFence(rawText)) return { ok: true, content: rawText }
+  const mode = normalizeQuizQualityMode(getSetting('aiTeachQuizQuality'))
+  // off 档必须逐字直通：连换行都不动（调用方要旧行为自行归一化）
+  if (mode === 'off') return { ok: true, content: rawText }
+  const text = rawText.replace(/\r\n/g, '\n')
+  const gateKey = quizGateKey(String(sessionId ?? ''), title)
+  const now = Date.now()
+  const used = quizGateAttemptsUsed(gateKey, now)
+  const gate = applyQuizQualityGate({
+    content: text,
+    mode,
+    recentKeys: quizAnsweredKeys(title, readFrontmatterId(text)),
+    allowRetry: used < QUIZ_GATE_MAX_REWRITE,
+  })
+  if (!gate.ok) {
+    quizGateAttempts.set(gateKey, { n: used + 1, at: now })
+    return { ok: false, content: text, error: gate.retryPrompt ?? '题单未通过质量门', needsRewrite: gate.needsRewrite, warnings: gate.warnings }
+  }
+  quizGateAttempts.delete(gateKey)
+  return { ok: true, content: gate.content, warnings: gate.warnings.length ? gate.warnings : undefined }
 }
 
 /** 整理页归档：写入 target（仓库相对目录）或默认本会话目录；返回相对路径与**绝对路径**。

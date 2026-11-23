@@ -1179,6 +1179,21 @@ export interface SourcesHintInput {
  */
 const SOURCE_CITATION_RULE = '引用素材内容时行内标注编号与页码/行号，形如 [1] p.15（code 写作 [1] L120，网页写作 [1]）；每条回答末尾附「本次引用素材」清单，只列实际用到的：编号. 名称 · 页码/URL；没有用到素材的段落不要编造出处。'
 
+/** 按 code point 截断，避免把 emoji / 代理对切成半个字符（segmentWrongFeedbackPure.clipRaw 同口径） */
+function clipCodePoints(raw: string, max: number): string {
+  const s = String(raw ?? '')
+  const n = Math.max(0, Math.floor(Number(max) || 0))
+  if (s.length <= n) return s
+  let out = ''
+  let used = 0
+  for (const ch of s) {
+    if (used + ch.length > n) break
+    out += ch
+    used += ch.length
+  }
+  return out
+}
+
 /** 纯格式化（主进程 / 契约脚本共用）。 */
 export function renderSourcesHint(input: SourcesHintInput): string {
   const max = Math.max(400, Number(input.maxChars) || (input.role === 'assistant' ? 2800 : 4000))
@@ -1251,7 +1266,7 @@ export function renderSourcesHint(input: SourcesHintInput): string {
     })
   }
   let s = lines.join('\n')
-  if (s.length > max) s = s.slice(0, max) + '\n…（素材清单过长已截断）'
+  if (s.length > max) s = clipCodePoints(s, max) + '\n…（素材清单过长已截断）'
   return s
 }
 

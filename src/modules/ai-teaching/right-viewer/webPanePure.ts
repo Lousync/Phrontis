@@ -164,6 +164,35 @@ export function shouldShowView(input: {
 }
 
 /**
+ * 换会话 / 壳给了新地址时，要不要动这块原生视图。
+ *
+ * 2026-11-23 跨会话保活：切换会话**不再卸载视图**。笔记 / 旁问 / 书架本来就跨会话保活；
+ * 单页化后壳层只有一个网页页签，`w1` 始终是同一个 view，不存在「两个会话抢一个槽位」。
+ * 唯一该动视图的情况是「壳给了一个和当前页**不同**的地址」（重启恢复 / 壳里改了页签地址）：
+ *   · 首挂之前一律不动 —— 首次加载归 `initialUrl` effect 管；
+ *   · 会话 id / 地址为空串 = 还没恢复 / 壳没要求导航 —— 保持现状，绝不能清成空白；
+ *   · 比较前先归一，避免 `https://a.com` 与 `https://a.com/` 被判成两个地址反复重建。
+ */
+export function shouldRebuildWebView(input: {
+  /** 之前是否真的挂载过（首挂不算「重建」） */
+  mounted: boolean
+  /** 本轮会话 id；空串 = 会话还没恢复，不动 */
+  sessionId: string
+  /** 壳传下来的目标地址；空串 = 壳没要求导航，不动 */
+  initialUrl: string
+  /** 页签此刻真正在看的地址；空串 = 还没有页面 */
+  currentUrl: string
+}): boolean {
+  if (!input.mounted) return false
+  if (!String(input.sessionId ?? '').trim()) return false
+  const target = normalizeUrl(String(input.initialUrl ?? '').trim())
+  if (!target) return false
+  const current = normalizeUrl(String(input.currentUrl ?? '').trim())
+  if (!current) return true
+  return current !== target
+}
+
+/**
  * 从 localStorage 恢复页签。
  *
  * C6：恢复 URL / 标题，但**不预加载** → 全部标 dormant，等用户切过去再 create。

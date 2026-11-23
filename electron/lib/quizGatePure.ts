@@ -29,6 +29,7 @@
 
 import type { QuizQuestion } from './quizQualityPure'
 import { detectLengthBias, detectOptionLetterRefs, rebalanceAnswers, validateQuizDoc } from './quizQualityPure'
+import { QUIZ_FENCE_RE, hasQuizFence } from './quizDocPure'
 
 export type QuizQualityMode = 'strict' | 'warn' | 'off'
 
@@ -91,8 +92,6 @@ export interface QuizGateResult {
 }
 
 /* ---------------------------------------------------------------- 围栏拆分 / 回写 */
-
-const QUIZ_FENCE_RE = /```quiz[^\n]*\n([\s\S]*?)\n```/g
 
 export interface QuizFence {
   /** 围栏正文（JSON 文本） */
@@ -178,7 +177,29 @@ export function applyQuizQualityGate(input: QuizGateInput): QuizGateResult {
   if (mode === 'off') return { ...base, ok: true, summary: { ...EMPTY_SUMMARY } }
 
   const fences = extractQuizFences(content)
-  if (!fences.length) return { ...base, ok: true, summary: { ...EMPTY_SUMMARY } }
+  if (!fences.length) {
+    // 有围栏开头却一个都拆不出来（典型：漏写结尾 ```）：这是结构错误，不能静默放行。
+    if (!hasQuizFence(content)) return { ...base, ok: true, summary: { ...EMPTY_SUMMARY } }
+    const errors = ['题单围栏未闭合（缺少结尾 ```）']
+    const summary = { ...EMPTY_SUMMARY }
+    if (mode === 'warn') {
+      return {
+        ...base,
+        ok: true,
+        errors,
+        warnings: [{ code: 'structure', message: `结构校验：${errors[0]}` }],
+        summary,
+      }
+    }
+    return {
+      ...base,
+      ok: false,
+      needsRewrite: allowRetry,
+      retryPrompt: structureRetryPrompt(errors, !allowRetry),
+      errors,
+      summary,
+    }
+  }
 
   // 1) 围栏解析失败 = 结构问题（模型给的不是合法 JSON 对象）
   const errors: string[] = []

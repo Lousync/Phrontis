@@ -297,15 +297,21 @@ export interface MergeLedgerOptions {
   unitOrder?: string[]
 }
 
+/** 知识点 id / 名字比对口径：大小写不敏感、忽略首尾空白（模型常把 u2 写成 U2） */
+function normUnitKey(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase()
+}
+
 /** 知识点在前沿顺序里的位置；-1 = 未知（清单里没有 / 未提供顺序） */
 function unitRank(order: string[] | undefined, id: string): number {
   if (!order || order.length === 0 || !id) return -1
-  return order.indexOf(id)
+  const key = normUnitKey(id)
+  return order.findIndex((x) => normUnitKey(x) === key)
 }
 
-/** patch 是否声明了「换知识点」（无 unitId 时沿用当前，不算换） */
+/** patch 是否声明了「换知识点」（无 unitId 时沿用当前，不算换；大小写不敏感） */
 function unitChanged(hasUnit: boolean, nextUnit: string, prevUnit: string): boolean {
-  return hasUnit && nextUnit !== prevUnit
+  return hasUnit && normUnitKey(nextUnit) !== normUnitKey(prevUnit)
 }
 
 /**
@@ -347,19 +353,27 @@ export function mergeLedger(
       : undefined
   const prevStep = base.current?.step ?? 0
   const prevUnit = base.current?.unitId ?? ''
-  const nextUnit = hasUnit ? (p.unitId as string).trim() : prevUnit
+  const rawNextUnit = hasUnit ? (p.unitId as string).trim() : prevUnit
   const order = Array.isArray(opts.unitOrder) ? opts.unitOrder : []
+  const rawNextRank = unitRank(order, rawNextUnit)
+  // 解析得到就统一成清单里的真实 id（U2 → u2），后续比较 / 注入都用同一口径
+  const nextUnit = rawNextRank >= 0 ? order[rawNextRank] : rawNextUnit
   const prevRank = unitRank(order, prevUnit)
-  const nextRank = unitRank(order, nextUnit)
+  const nextRank = rawNextRank
   const rankKnown = prevRank >= 0 && nextRank >= 0
+  // 给了 unitOrder 但新 id 不在清单里（删点 / 模型写错）：不推进当前知识点，
+  // 保留上一轮 current 的「已覆盖 / 未覆盖」信息；原文由 foldTeachFences 记下供注入块点名。
+  const unknownUnit = order.length > 0 && hasUnit && nextRank < 0
   // 前进 = 新版清单里更靠后的知识点；无顺序信息时按「给了 step 且不小于当前步」保守推断
   const regression = rankKnown && nextRank < prevRank
-  const forward = rankKnown
-    ? nextRank > prevRank
-    : unitChanged(hasUnit, nextUnit, prevUnit) && (requested === undefined || requested >= prevStep)
+  const forward = unknownUnit
+    ? false
+    : rankKnown
+      ? nextRank > prevRank
+      : unitChanged(hasUnit, nextUnit, prevUnit) && (requested === undefined || requested >= prevStep)
 
-  // 旧消息：unitId 回退，或同一知识点内 step 回退（换知识点后的 step 重计不算回退）
-  const stale = regression || (requested !== undefined && requested < prevStep && !forward)
+  // 旧消息：unitId 回退 / 未知，或同一知识点内 step 回退（换知识点后的 step 重计不算回退）
+  const stale = regression || unknownUnit || (requested !== undefined && requested < prevStep && !forward)
   if (!stale && (hasUnit || hasLabel || requested !== undefined)) {
     const changedUnit = forward && hasUnit && nextUnit !== prevUnit
     const nextStep = requested !== undefined
@@ -428,8 +442,23 @@ function joinLedgerLines(header: string, lines: string[], limit: number): string
     body = keep.length ? `${header}\n${keep.join('\n')}` : header
   }
   if (body.length + 1 + mark.length <= limit) return `${body}\n${mark}`
-  if (limit <= mark.length) return mark.slice(0, limit)
-  return `${body.slice(0, limit - mark.length)}${mark}`
+  if (limit <= mark.length) return clipCodePoints(mark, limit)
+  return `${clipCodePoints(body, limit - mark.length)}${mark}`
+}
+
+/** 按 code point 截断，避免把 emoji / 代理对切成半个字符（与 segmentWrongFeedbackPure.clipRaw 同口径） */
+function clipCodePoints(raw: string, max: number): string {
+  const s = String(raw ?? '')
+  const n = Math.max(0, Math.floor(Number(max) || 0))
+  if (s.length <= n) return s
+  let out = ''
+  let used = 0
+  for (const ch of s) {
+    if (used + ch.length > n) break
+    out += ch
+    used += ch.length
+  }
+  return out
 }
 
 /**
@@ -472,6 +501,11 @@ export interface SegmentLedgerInput {
   units: Array<{ id: string; name: string }>
   /** 界面当前聚焦的知识点 id（「当前聚焦第 X/N」推断口径） */
   focusId?: string
+  /**
+   * 最后一条围栏里**解析不到**的 unitId 原文（`ledgerUnknownUnitId` 给出）。
+   * 只影响「已讲到」显示与冲突提示；已覆盖 / 未覆盖仍按合并台账里的 current 推导。
+   */
+  unknownUnitId?: string
   /** 注入上限（字符），默认与 renderLedgerForPrompt 同值 */
   maxChars?: number
 }
@@ -510,6 +544,11 @@ export interface FoldTeachOptions {
   unitOrder?: string[]
 }
 
+/** 折叠结果：台账 + 最后一条**解析不到**的 unitId 原文（注入块里点名，但不顶掉 current） */
+export interface FoldedTeachLedger extends TeachLedger {
+  unknownUnitId?: string
+}
+
 /**
  * **全量合并**本会话所有有效 ` ```teach ` 围栏 → 程序级单调台账。
  *
@@ -525,11 +564,12 @@ export interface FoldTeachOptions {
 export function foldTeachFences(
   messages: Array<{ role?: string; content?: string; created_at?: string }>,
   opts: FoldTeachOptions = {},
-): TeachLedger | null {
+): FoldedTeachLedger | null {
   const rows = Array.isArray(messages) ? messages : []
   if (rows.length === 0) return null
   const unitOrder = Array.isArray(opts.unitOrder) ? opts.unitOrder : []
-  let ledger: TeachLedger | null = null
+  let ledger: FoldedTeachLedger | null = null
+  let unknownUnitId = ''
   for (let i = 0; i < rows.length; i++) {
     const m = rows[i]
     if (!m || m.role !== 'assistant') continue
@@ -537,8 +577,17 @@ export function foldTeachFences(
     if (!patch) continue
     const ts = typeof m.created_at === 'string' && m.created_at ? m.created_at : (ledger?.updatedAt ?? '')
     ledger = mergeLedger(ledger, patch, ts, { unitOrder })
+    // 只记最后一条围栏的口径：后续写回已知 id 时不再显示旧原文
+    const raw = typeof patch.unitId === 'string' ? patch.unitId.trim() : ''
+    unknownUnitId = raw && unitOrder.length > 0 && unitRank(unitOrder, raw) < 0 ? raw : ''
   }
+  if (ledger && unknownUnitId) ledger.unknownUnitId = unknownUnitId
   return ledger
+}
+
+/** 折叠结果里最后一条未知 unitId 原文（无则空串；调用方传给 renderSegmentLedger 点名） */
+export function ledgerUnknownUnitId(ledger: TeachLedger | null): string {
+  return String((ledger as FoldedTeachLedger | null)?.unknownUnitId ?? '').trim()
 }
 
 /**
@@ -621,20 +670,27 @@ export function renderSegmentLedger(input: SegmentLedgerInput): SegmentLedgerBlo
   const units = Array.isArray(input.units) ? input.units : []
 
   const rawId = typeof patch.unitId === 'string' ? patch.unitId.trim() : ''
-  const idx = rawId ? units.findIndex((u) => u.id === rawId || u.name === rawId) : -1
+  // id / 名字都认，大小写不敏感（模型写 U2 也要落到 u2）
+  const rawKey = normUnitKey(rawId)
+  const idx = rawId ? units.findIndex((u) => normUnitKey(u.id) === rawKey || normUnitKey(u.name) === rawKey) : -1
   const cur = idx >= 0 ? units[idx] : null
-  const curName = cur?.name ?? rawId
+  const unknown = String(input.unknownUnitId ?? '').trim()
+  // 解析不到时：原文只显示在「已讲到」，覆盖信息仍按 current（上一轮）推导
+  const curName = unknown || cur?.name || rawId
   const focusId = String(input.focusId ?? '').trim()
   // 模型写名字也认（cur 已解析出 id）；解析不出 unit 时按原文比对，宁可报冲突也不静默吞掉
-  const conflict = !!curName && !!focusId && (cur ? cur.id !== focusId : curName !== focusId)
+  const conflict = !!unknown || (!!curName && !!focusId && (cur ? cur.id !== focusId : curName !== focusId))
 
   const lines: string[] = []
   const progress: string[] = []
   if (curName) progress.push(curName)
-  if (typeof patch.step === 'number' && Number.isFinite(patch.step) && patch.step > 0) {
-    progress.push(`第 ${Math.floor(patch.step)} 步`)
+  // 未知 unitId：只显示原文 + 冲突提示；不要再拼上一轮的 step / label（会像是新知识点的进度）
+  if (!unknown) {
+    if (typeof patch.step === 'number' && Number.isFinite(patch.step) && patch.step > 0) {
+      progress.push(`第 ${Math.floor(patch.step)} 步`)
+    }
+    if (patch.label && patch.label.trim()) progress.push(patch.label.trim())
   }
-  if (patch.label && patch.label.trim()) progress.push(patch.label.trim())
   if (progress.length) lines.push(`已讲到：${progress.join(' · ')}`)
   if (conflict) lines.push('冲突提示：界面「当前聚焦」与台账不一致，以台账为准（继续按台账推进）。')
   if (idx > 0) lines.push(`已覆盖：${units.slice(0, idx).map((u) => u.name).join('、')}`)

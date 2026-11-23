@@ -45,8 +45,8 @@ function ok(cond, label, detail = '') {
 }
 
 console.log('=== A. 本段进度注入（B-47 ①） ===')
-ok(/lines\.push\(renderSegmentProgressLine\(\{ activeIdx, total: ids\.length, activeName: active\?\.name \}\)\)/.test(src),
-  'A1 注入「当前聚焦第 X/N 个知识点」（纯函数渲染）')
+ok(/lines\.push\(renderSegmentProgressLine\(\{ activeIdx, total: unitRows\.length, activeName: active\?\.name \}\)\)/.test(src),
+  'A1 注入「当前聚焦第 X/N 个知识点」（纯函数渲染；分母 = 现存知识点数）')
 ok(plainLine === '本段进度：当前聚焦第 2/3 个知识点（安全序列）。已讲到哪、还有哪些没讲，结合本段对话自行判断。',
   'A2 已讲口径由模型结合对话史判断（文案逐字不变）', JSON.stringify(plainLine))
 ok(!plainLine.includes('台账'),
