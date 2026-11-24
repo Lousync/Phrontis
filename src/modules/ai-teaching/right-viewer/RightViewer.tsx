@@ -24,7 +24,7 @@ import {
   type ComponentType, type JSX, type LazyExoticComponent, type ReactNode,
 } from 'react'
 import { isSessionRunning, subscribeAssistantRunState } from '../../../lib/assistantRunStore'
-import { webPaneHideAll } from '../../../lib/ipc'
+import { getSettingRaw, setSettingRaw, webPaneHideAll } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import type { AgentSideLaneInfo } from '../../../types'
 import {
@@ -32,14 +32,15 @@ import {
   type FilePaneKind, type PaneOpenRequest, type ViewerOpenRequest, type ViewerPaneType,
 } from './paneContracts'
 import { shouldHideWebViewer, viewerWidthStyle } from './rightViewerPure'
-import { useViewerWidth } from './viewerResize'
+import { VIEWER_WIDTH_SETTING_KEY, useViewerWidth } from './viewerResize'
 import { ViewerChrome, ViewerEmptyCard } from './ViewerChrome'
 import { createSessionNote } from './noteFileOps'
 import {
   VIEWER_LIVE_WINDOW, activateTab, appendTab, closeTabById, findAnyPathTab, findAskTabByLane,
   findBooksTabByBook, findDraftTab, findFileTab, findNotesTab, findWebTab, firstTabOfType,
   inferNotesFileKind, isFilePaneKind, makeAskTab, makeBooksTab, makeFileTab, makeNotesTab,
-  makeWebTab, migrateLegacyViewerState, parseViewerState, selectLiveIds, serializeViewerState,
+  makeWebTab, migrateLegacyViewerState, parseViewerState, sanitizeViewerScope,
+  scopedViewerTabsKey, scopedViewerWidthKey, selectLiveIds, serializeViewerState,
   stemOf, tabById, updateTab,
   type AskDraft, type FileViewerTab, type NotesFileKind, type ViewerStateV2, type ViewerTab,
 } from './viewerTabs'
@@ -146,10 +147,49 @@ function newTabId(): string {
 }
 
 /**
+ * 写页签状态：有作用域写 `aiTeachViewerTabs:<scope>`，没有就写课程会话的旧键
+ * `aiTeach.rightTabs.v2`（唯一的旧键写入点，旧键永不删除）。
+ */
+function writeTabsState(scope: string, state: ViewerStateV2): boolean {
+  const key = scopedViewerTabsKey(scope)
+  const json = JSON.stringify(state)
+  try {
+    if (key) window.localStorage.setItem(key, json)
+    else window.localStorage.setItem(VIEWER_LS_KEYS.tabsV2, json)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 作用域宽度：只存一个数字；坏值 / 没有键 → null */
+function readScopedWidth(key: string | null): number | null {
+  if (!key) return null
+  const n = Number(readLs(key))
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function writeScopedWidth(key: string | null, width: number): void {
+  if (!key || !Number.isFinite(width) || width <= 0) return
+  try {
+    window.localStorage.setItem(key, String(Math.round(width)))
+  } catch {
+    /* 写不进就下次再试：宽度记忆不是关键数据 */
+  }
+}
+
+/**
  * 首帧页签：`aiTeach.rightTabs.v2` 优先；没有就做一次性迁移
  * （`aiTeach.rightTab` + `aiTeach.webTabs.<sid>` + 更旧的 `aiTeach.railTab`，只读不删）。
+ *
+ * 有作用域（对话模式）时**只读该作用域自己的键**：没有记录 = 空页签，
+ * 绝不回落到课程会话的页签，也不做旧键迁移（迁移只属于课程会话）。
  */
-function loadBootState(sessionId: string): ViewerStateV2 {
+function loadBootState(sessionId: string, scope = ''): ViewerStateV2 {
+  const scopedKey = scopedViewerTabsKey(scope)
+  if (scopedKey) {
+    return parseViewerState(readJson(readLs(scopedKey))) ?? { v: 2, tabs: [], activeId: null }
+  }
   const persisted = parseViewerState(readJson(readLs(VIEWER_LS_KEYS.tabsV2)))
   if (persisted) return persisted
   return migrateLegacyViewerState({
@@ -185,6 +225,15 @@ export interface RightViewerProps {
   sessionId: string
   sessionTitle: string
   workspaceId: string
+  /**
+   * 页签 / 宽度的持久化作用域（对话模式传 `tutor:<sessionId>`）。
+   *
+   * 不传 = 课程会话：沿用旧键 `aiTeach.rightTabs.v2` 与 `aiTeachRightViewerWidth` 设置，
+   * 行为与持久化键都不变。传了 = 页签与宽度分别落到
+   * `aiTeachViewerTabs:<scope>` / `aiTeachViewerWidth:<scope>`，切换作用域即重新载入。
+   * scope 会被轻量清洗（只留字母数字 `-_:`，其余换 `_`）。
+   */
+  persistScope?: string
   /** 外部一次性请求：打开并聚焦某类内容；seq 递增（同路径重复点击也要触发） */
   request?: ViewerOpenRequest | null
   onOpenInEditor: (relPath: string) => void
@@ -216,14 +265,18 @@ export interface RightViewerProps {
 
 export function RightViewer(props: RightViewerProps): JSX.Element {
   const {
-    open, onClose, rootId, sessionId, sessionTitle, workspaceId,
+    open, onClose, rootId, sessionId, sessionTitle, workspaceId, persistScope,
     request, onOpenInEditor, onOpenFullscreen, onTalkPage, onQuote, onFloat,
     onActivePathChange, anchorMessageId, onTabChange, onWidthChange, reserve,
   } = props
 
+  /** 清洗后的作用域：空串 = 课程会话（旧键 / 旧行为） */
+  const persistScopeKey = sanitizeViewerScope(persistScope)
+  const scopedWidthKey = scopedViewerWidthKey(persistScopeKey)
+
   /* ------ 首帧页签（迁移只跑一次） ------ */
   const bootRef = useRef<ViewerStateV2 | null>(null)
-  if (bootRef.current === null) bootRef.current = loadBootState(sessionId)
+  if (bootRef.current === null) bootRef.current = loadBootState(sessionId, persistScopeKey)
   const [tabs, setTabs] = useState<ViewerTab[]>(bootRef.current.tabs)
   const [activeId, setActiveId] = useState<string | null>(bootRef.current.activeId)
   /** 面板至少打开过一次才挂 pane：避免冷启动就为网页页签建原生视图 */
@@ -247,7 +300,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   /** 全屏时的实测宽度：pane / 页签条靠它做宽度自适应（此刻记忆宽度不是可见宽度） */
   const [expandedWidth, setExpandedWidth] = useState(0)
 
-  const { width, dragging, beginDrag, reset } = useViewerWidth({ open, reserve })
+  const { width, setWidth, dragging, beginDrag, reset } = useViewerWidth({ open, reserve })
   const reducedMotion = usePrefersReducedMotion()
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -267,6 +320,16 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   /** 一次性请求的 seq（单调递增；只用来让 pane 知道「变了」） */
   const reqSeqRef = useRef(0)
   const lsWarnedRef = useRef(false)
+  /** 当前渲染作用域（写持久化时读「此刻」的 scope，不让旧闭包写错键） */
+  const scopeKeyRef = useRef(persistScopeKey)
+  scopeKeyRef.current = persistScopeKey
+  /** `tabs` / 宽度状态当前属于哪个作用域：切换作用域前不得拿旧状态写新键 */
+  const tabsScopeRef = useRef(persistScopeKey)
+  /** 上一次观察到的「作用域 + 宽度」：只在同一作用域内宽度真的变了才落盘 */
+  const lastScopedWidthRef = useRef<{ scope: string; width: number } | null>(null)
+  /** 课程会话宽度基线：作用域会话复用全局宽度设置，离开时还原，课程侧不受影响 */
+  const courseWidthRef = useRef<number | null>(null)
+  const courseWidthLoadedRef = useRef(false)
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const sessionTitleRef = useRef(sessionTitle)
@@ -290,6 +353,14 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     activeIdRef.current = nextActive
     setTabs(nextTabs)
     setActiveId(nextActive)
+  }, [])
+
+  /** 写页签状态；失败只提示一次（旧行为不变，只是多了一条按作用域分流的路径） */
+  const persistTabsState = useCallback((scope: string, state: ViewerStateV2) => {
+    if (writeTabsState(scope, state)) return
+    if (lsWarnedRef.current) return
+    lsWarnedRef.current = true
+    showToast({ type: 'warning', message: '页签记忆写入失败', detail: '下次打开会回到上次保存成功的页签' })
   }, [])
 
   /** 稳定的每页签回调（同一个页签始终拿到同一个函数身份） */
@@ -868,21 +939,87 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   }, [request, openNote, openBook, openWeb, selectTab, openAskDraft, openWholeDraft, apply, sendPaneReq,
     openFile, beginArtifact, commitArtifact, dropArtifact])
 
+  /* ------------------------------------------------------------ 作用域切换 */
+
+  /**
+   * 作用域切换：页签 / 宽度都按新 scope 重新载入，绝不把上一个会话的页签带过来。
+   * 不传 scope（课程会话）时这是空操作；首帧已由 `loadBootState` 直接读对键。
+   */
+  useEffect(() => {
+    if (tabsScopeRef.current === persistScopeKey) return
+    // 先把旧作用域的页签落盘：父级可能在同一帧里换了会话
+    persistTabsState(tabsScopeRef.current, serializeViewerState(tabsRef.current, activeIdRef.current))
+    // 关闭定时器 / 脏标记 / 回调缓存都绑在旧页签 id 上，换作用域必须一起清
+    closeTimersRef.current.forEach((t) => clearTimeout(t))
+    closeTimersRef.current.clear()
+    flushRef.current.clear()
+    flushRegistrarRef.current.clear()
+    dirtySetterRef.current.clear()
+    cbCacheRef.current.clear()
+    setClosingIds([])
+    setDirtyIds([])
+    setPaneReq(null)
+    const boot = loadBootState(sessionIdRef.current, persistScopeKey)
+    tabsScopeRef.current = persistScopeKey
+    apply(boot.tabs, boot.activeId)
+    // 宽度：本作用域有记录就用记录；回到课程会话则还原课程宽度基线
+    const nextWidthKey = scopedViewerWidthKey(persistScopeKey)
+    const stored = readScopedWidth(nextWidthKey)
+    if (stored !== null) setWidth(stored)
+    else if (!nextWidthKey && courseWidthRef.current !== null) setWidth(courseWidthRef.current)
+  }, [persistScopeKey, apply, persistTabsState, setWidth])
+
+  // 课程宽度基线（只读一次）：作用域会话宽度复用全局设置，离开时用它还原
+  useEffect(() => {
+    if (!persistScopeKey || courseWidthLoadedRef.current) return
+    courseWidthLoadedRef.current = true
+    let cancelled = false
+    void getSettingRaw(VIEWER_WIDTH_SETTING_KEY)
+      .then((v) => {
+        if (!cancelled && typeof v === 'number' && Number.isFinite(v) && v > 0) courseWidthRef.current = v
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [persistScopeKey])
+
+  // 首帧进入作用域：宽度 hook 会异步读回全局设置（课程宽度），作用域记录必须压过这一次读回
+  useEffect(() => {
+    const stored = readScopedWidth(scopedViewerWidthKey(persistScopeKey))
+    if (stored === null) return
+    setWidth(stored)
+    const t = setTimeout(() => setWidth(stored), 150)
+    return () => clearTimeout(t)
+    // 只在挂载时跑一次；切换作用域由上面那条 effect 负责
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 作用域宽度落盘：只写「同一作用域里宽度真的变了」的那一次（首次观察 / 拖拽中不写）
+  useEffect(() => {
+    if (!scopedWidthKey) return
+    if (dragging) return
+    const prev = lastScopedWidthRef.current
+    lastScopedWidthRef.current = { scope: persistScopeKey, width }
+    // 新作用域第一次观察：有记录时等 setWidth 把记录应用上来，别用上一个会话的宽度覆盖它
+    if (!prev || prev.scope !== persistScopeKey) {
+      if (readScopedWidth(scopedWidthKey) === null) writeScopedWidth(scopedWidthKey, width)
+      return
+    }
+    if (prev.width === width) return
+    writeScopedWidth(scopedWidthKey, width)
+  }, [scopedWidthKey, persistScopeKey, width, dragging])
+
+  // 卸载 / 离开作用域时还原课程宽度（作用域会话可能把全局设置写成了自己的宽度）
+  useEffect(() => () => {
+    if (!scopedWidthKey) return
+    const base = courseWidthRef.current
+    if (base !== null) void setSettingRaw(VIEWER_WIDTH_SETTING_KEY, base).catch(() => undefined)
+  }, [scopedWidthKey])
+
   /* ------------------------------------------------------------ 持久化 */
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        VIEWER_LS_KEYS.tabsV2,
-        JSON.stringify(serializeViewerState(tabs, activeId)),
-      )
-    } catch {
-      if (!lsWarnedRef.current) {
-        lsWarnedRef.current = true
-        showToast({ type: 'warning', message: '页签记忆写入失败', detail: '下次打开会回到上次保存成功的页签' })
-      }
-    }
-  }, [tabs, activeId])
+    persistTabsState(scopeKeyRef.current, serializeViewerState(tabs, activeId))
+  }, [tabs, activeId, persistTabsState])
 
   /* ------------------------------------------------------------ 视野 / 保活 */
 

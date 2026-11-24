@@ -819,6 +819,40 @@ export function parseLegacyWebTabs(raw: unknown): Array<{ url: string; title: st
   return out
 }
 
+/* ============================== 作用域持久化键 ============================== */
+
+/**
+ * 带作用域的持久化键前缀（对话模式：每个会话各记一份页签 / 宽度）。
+ *
+ * 与课程会话的旧键**完全分开**：旧键是 `aiTeach.rightTabs.v2`（点分隔）与
+ * `aiTeachRightViewerWidth`（SETTINGS），新键是 `aiTeachViewerTabs:<scope>` /
+ * `aiTeachViewerWidth:<scope>`（冒号分隔）。不传 scope 时一律走旧键，课程侧零变化。
+ */
+export const VIEWER_SCOPED_TABS_PREFIX = 'aiTeachViewerTabs:'
+export const VIEWER_SCOPED_WIDTH_PREFIX = 'aiTeachViewerWidth:'
+
+/**
+ * 作用域清洗：只保留字母 / 数字 / `-` / `_` / `:`，其余字符替换成 `_`。
+ *
+ * 目的只是让 localStorage 键稳定可读（会话 id 里可能出现 `/`、空白、中文），
+ * 不做任何安全承诺；清洗后为空 = 没有作用域 → 调用方走旧键。
+ */
+export function sanitizeViewerScope(scope: unknown): string {
+  return String(scope ?? '').trim().replace(/[^A-Za-z0-9_:-]/g, '_')
+}
+
+/** 作用域 → 页签键；返回 null 表示调用方应使用旧键 `VIEWER_LS_KEYS.tabsV2` */
+export function scopedViewerTabsKey(scope: unknown): string | null {
+  const clean = sanitizeViewerScope(scope)
+  return clean ? `${VIEWER_SCOPED_TABS_PREFIX}${clean}` : null
+}
+
+/** 作用域 → 宽度键；返回 null 表示调用方应使用旧的 SETTINGS 宽度记忆 */
+export function scopedViewerWidthKey(scope: unknown): string | null {
+  const clean = sanitizeViewerScope(scope)
+  return clean ? `${VIEWER_SCOPED_WIDTH_PREFIX}${clean}` : null
+}
+
 /**
  * 旧键迁移（只读不删，一个版本后再清）：
  *   · `aiTeach.rightTabs.v2` 不存在时，读 `aiTeach.rightTab`（单类型）；

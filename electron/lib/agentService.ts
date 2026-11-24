@@ -53,6 +53,8 @@ import { readUnitConstraintsForSession } from './aiTeachingScope'
 import { buildScopePrompt } from './scopePrompt'
 import { CONSTRAINT_AUTHORING_PROMPT } from './constraintAuthoring'
 import { buildTeachStyleHint, normalizeTeachStyleMode } from './teachStylePrompt'
+import { buildTutorProtocolHint, buildTutorReadingInjection, normalizeTutorTurnMode, type TutorReadingContext, type TutorTurnMode } from './aiTeachingTutorPrompt'
+import { isTutorSession } from './aiTeachingTutor'
 import {
   detectUnbackedArtifactClaim, buildArtifactClaimRepairNotice, artifactCorrectionNotice,
   mergeClaimRepairReply, type ArtifactProductKind,
@@ -422,6 +424,10 @@ export interface AgentChatRequest {
   effort?: 'off' | 'low' | 'medium' | 'high'
   /** v3.1.1 条目10：/ 弹层显式选中的 Skill 注册名——本轮确定性注入其提示词（一次性，不落会话） */
   skillName?: string
+  /** AI 教学「对话」模式：本轮辅导方式（chat/read/solve/ask；非法/缺省 → chat；主进程不识别 auto） */
+  teachMode?: TutorTurnMode
+  /** AI 教学「对话」模式：右侧查看器当前资料（当前页文本 ≤3000 字由渲染层先截） */
+  reading?: TutorReadingContext
 }
 
 /** 单次请求对用户数据的写改动（供 UI 列出「本次改了哪些文件/条目」） */
@@ -1015,7 +1021,13 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
     }
   }
 
-  const result = await runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName })
+  // ---- AI 教学「对话」模式：每轮方式（只对 tutor 会话生效；非法/缺省 → chat，主进程不识别 auto）----
+  const tutorSession = req.source === 'aiTeaching' && isTutorSession(sessionId)
+  const tutorMode: TutorTurnMode | undefined = tutorSession ? normalizeTutorTurnMode(req.teachMode) : undefined
+  // 当前资料必须走**用户消息层**（requestInjection）：逐轮翻页会变，进 system 会作废 prompt cache 前缀
+  const tutorReadingHint = tutorSession ? buildTutorReadingInjection(req.reading) : ''
+
+  const result = await runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName }, { tutorMode, tutorReadingHint })
   // 支线旁问：按本轮结果落运行态（成功 done / 其余 cut）；普通会话 no-op
   setSideLaneStatus(sessionId, result.ok ? 'done' : 'cut')
   return result
@@ -1179,7 +1191,7 @@ function persistResume(sessionId: string, messageId: string, facts: InterruptFac
  * 目的：① 用户刷新后仍能看到写到哪里；② 续跑注入从历史里自然带上它，模型不用从头再写。
  * 只落可见正文（思考链不落）；未闭合的 ``` 围栏补一行，避免把后面的中断卡吞进代码块。
  */
-function appendPartialAnswer(sessionId: string, text: string): void {
+function appendPartialAnswer(sessionId: string, text: string, teachMode?: TutorTurnMode): void {
   const raw = String(text ?? '').trim()
   if (!raw) return
   const cap = 20_000
@@ -1187,7 +1199,7 @@ function appendPartialAnswer(sessionId: string, text: string): void {
   const fenceCount = (clipped.match(/```/g) ?? []).length
   const safe = fenceCount % 2 === 1 ? `${clipped}\n\`\`\`` : clipped
   try {
-    appendAgentMessage(sessionId, 'assistant', `${safe}\n\n（以上内容在中断前已生成，可能不完整）`)
+    appendAgentMessage(sessionId, 'assistant', `${safe}\n\n（以上内容在中断前已生成，可能不完整）`, undefined, undefined, teachMode)
   } catch (err) {
     console.error('[agent] 中断前半截正文落库失败', err)
   }
@@ -1207,6 +1219,7 @@ function interruptResult(
   detail?: InterruptionDetail,
   ctx?: InterruptContext,
   partialText?: string,
+  teachMode?: TutorTurnMode,
 ): AgentChatResult {
   const it = interruption ?? classifyFailure(raw)
   const dt = detail ?? interruptionDetailOf(raw)
@@ -1214,7 +1227,7 @@ function interruptResult(
   // 有现场才有「继续」按钮：没有按钮就不能在正文里提它
   const willResume = ctx?.writeResume !== false
   // 中断前已产出的正文先落库：卡片必须保持在最后（它是续跑锚点），正文在它之前
-  if (partialText) appendPartialAnswer(sessionId, partialText)
+  if (partialText) appendPartialAnswer(sessionId, partialText, teachMode)
   // 正文首行必须是人能看懂的原因：reason 就是 friendlyReason 的产出（契约源码级断言锁「文案只在这里产生」）
   const content = buildInterruptContent({
     reason: facts.reason,
@@ -1231,7 +1244,7 @@ function interruptResult(
   })
   let messageId: string | undefined
   try {
-    messageId = appendAgentMessage(sessionId, 'assistant', content, trace)
+    messageId = appendAgentMessage(sessionId, 'assistant', content, trace, undefined, teachMode)
   } catch (err) {
     // 落库失败不能让「中断原因」也一起消失：至少留日志（异常不静默是归因 P0 的硬要求）
     console.error('[agent] 中断记录落库失败', err)
@@ -1267,7 +1280,7 @@ async function runAgentLoop(
   trace: AgentTraceStep[],
   source?: string,
   llmOpts?: { modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string },
-  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId }
+  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId; tutorMode?: TutorTurnMode; tutorReadingHint?: string }
 ): Promise<AgentChatResult> {
   const runId = randomUUID()
   try {
@@ -1298,7 +1311,7 @@ async function runAgentLoopInner(
    * 所以守卫要放行「末条不是 user」；注入文本作为**一条不落库的合成 user 轮**追加在 convo 末尾
    * （不进 requestInjection 槽：续跑指令必须是「最近一条指令」才有牵引力）。
    */
-  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId; runId?: string }
+  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId; runId?: string; tutorMode?: TutorTurnMode; tutorReadingHint?: string }
 ): Promise<AgentChatResult> {
   const runStarted = Date.now() // 归因 P0：中断卡的「耗时」与诊断块用它
   const resumeInjection = String(opts?.resumeInjection ?? '')
@@ -1585,7 +1598,11 @@ async function runAgentLoopInner(
   // 设置 aiTeachLectureStyle 可切回「整段精讲」。文案在零依赖 pure 文件里，契约脚本可直接跑。
   // 仍只覆盖教学面，不改其他助手；事务性回答由口径内部排除，保持基础人设的简洁直接。
   const teachStyleHint = source === 'aiTeaching'
-    ? buildTeachStyleHint(normalizeTeachStyleMode(getSettingReader()('aiTeachLectureStyle')))
+    ? [
+        buildTeachStyleHint(normalizeTeachStyleMode(getSettingReader()('aiTeachLectureStyle'))),
+        // 「对话」模式每轮协议（chat 为空串）：并入讲课口径分区，不改 AiTeachInjectionStats 的 7 段结构
+        isTutorSession(sessionId) ? buildTutorProtocolHint(opts?.tutorMode ?? 'chat') : '',
+      ].filter(Boolean).join('\n\n')
     : ''
   // 收藏（v3.6.0）：让 AI 感知到当前工作区钉在左栏「收藏」的文档（只读注入，无工具；用户自己挑出来常看的）
   const favoritesHint = source === 'aiTeaching' ? (() => {
@@ -1775,7 +1792,7 @@ async function runAgentLoopInner(
   // 追加在 history **之后**（贴近当前提问；前面整段前缀逐字稳定）。Anthropic 走显式
   // cache_control（只挂 system/tools），本改动对它是纯收益侧对齐。
   // 【本段台账】放最前：它是段会话的「讲到哪」权威，其它注入都排在它之后。
-  const requestInjection = [courseRequestHint, scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, recentArtifactsHint, aiManifestHint].filter(Boolean).join('\n\n')
+  const requestInjection = [courseRequestHint, scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, recentArtifactsHint, aiManifestHint, opts?.tutorReadingHint ?? ''].filter(Boolean).join('\n\n')
 
   // 纪要仍以首条 user 消息注入（它在历史之前：旧历史的摘要，位置语义不能动）；
   // requestInjection 走第 4 参 suffix 追加在历史之后 —— 前缀（system + tools + 纪要 + 历史）
@@ -1950,7 +1967,7 @@ async function runAgentLoopInner(
       return interruptResult(sessionId, trace, rawFailure({
         layer: 'agent-loop', raw: '用户停止（本轮开始前）', externalAborted: true,
         round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
-      }), undefined, undefined, interruptCtxOf(i + 1))
+      }), undefined, undefined, interruptCtxOf(i + 1), undefined, opts?.tutorMode)
     }
     // 预算将尽（最后一轮 / token 预算触顶）：注入收场提示，让模型用已有信息总结（第 0 层）
     if (!softLanded && (i === maxRounds - 1 || (runTokenBudget > 0 && runTokens >= runTokenBudget))) {
@@ -2022,6 +2039,7 @@ async function runAgentLoopInner(
         r.detail ?? interruptionDetailOf(baseRaw),
         interruptCtxOf(i + 1),
         r.partialText,
+        opts?.tutorMode,
       )
     }
 
@@ -2039,7 +2057,7 @@ async function runAgentLoopInner(
           finalizeArtifactClaimReply(r.content + changesText, false),
           r.interruption, dt,
         )
-        const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
+        const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace, undefined, opts?.tutorMode)
         // 截断 = 有断点可续（「接着往下写」）：现场与失败出口同款（支线/手册通道不写）
         const ictx = interruptCtxOf(i + 1)
         if (ictx.writeResume !== false) persistResume(sessionId, msgId, interruptFactsOf(r.interruption, dt, trace, ictx), ictx.carry ?? '', ictx.profile)
@@ -2065,7 +2083,7 @@ async function runAgentLoopInner(
         }
       }
       const reply = finalizeArtifactClaimReply(r.content + changesText)
-      appendAgentMessage(sessionId, 'assistant', reply, trace)
+      appendAgentMessage(sessionId, 'assistant', reply, trace, undefined, opts?.tutorMode)
       return {
         ok: true, sessionId, reply, changes, trace, injection,
         ...(compressed ? { compressed } : {}),
@@ -2345,7 +2363,7 @@ async function runAgentLoopInner(
         return interruptResult(sessionId, trace, rawFailure({
           layer: 'agent-loop', raw: '用户停止（工具批次前）', externalAborted: true,
           round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
-        }), undefined, undefined, interruptCtxOf(i + 1))
+        }), undefined, undefined, interruptCtxOf(i + 1), undefined, opts?.tutorMode)
       }
       if (!batch.parallel) {
         const c = batch.items[0]
@@ -2444,7 +2462,7 @@ async function runAgentLoopInner(
         longTaskResume: ictx.longTaskResume === true,
         ...(facts.lastProcessText ? { lastProcessText: facts.lastProcessText } : {}),
       })
-    const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
+    const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace, undefined, opts?.tutorMode)
     // 预算触顶 = 任务没做完（不是失败）：留现场让「继续」能带着已有信息接着跑
     if (ictx.writeResume !== false) persistResume(sessionId, msgId, facts, ictx.carry ?? '', ictx.profile)
     return {
@@ -2458,10 +2476,24 @@ async function runAgentLoopInner(
     layer: 'agent-loop', raw: `已达最大推理轮数（${maxRounds}）且总结失败`, loop: 'summary-failed',
     round: maxRounds, runTokens, elapsedMs: Date.now() - runStarted,
   })
-  return interruptResult(sessionId, trace, sumRaw, classifyFailure(sumRaw), fr.detail ?? interruptionDetailOf(sumRaw), interruptCtxOf(maxRounds))
+  return interruptResult(sessionId, trace, sumRaw, classifyFailure(sumRaw), fr.detail ?? interruptionDetailOf(sumRaw), interruptCtxOf(maxRounds), undefined, opts?.tutorMode)
 }
 
 /** 重新生成最后一条回复：删掉末尾助手消息后按原用户消息重推 */
+/**
+ * tutor 会话的「上一轮方式」：重新生成 / 继续 / 编辑后重跑时沿用，不让辅导协议退回 chat。
+ * 读最后一条带 teach_mode 的 assistant（中断卡也带）；非 tutor → undefined（不改其它来源）。
+ */
+function lastTutorMode(sessionId: string): TutorTurnMode | undefined {
+  if (!isTutorSession(sessionId)) return undefined
+  const msgs = getAgentMessages(sessionId)
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m.role === 'assistant' && m.teach_mode) return m.teach_mode
+  }
+  return 'chat'
+}
+
 async function agentRegenerate(req: AgentChatRequest, signal: AbortSignal): Promise<AgentChatResult> {
   const trace: AgentTraceStep[] = []
   const sessionId = String(req?.sessionId ?? '')
@@ -2469,8 +2501,9 @@ async function agentRegenerate(req: AgentChatRequest, signal: AbortSignal): Prom
   const msgs = getAgentMessages(sessionId)
   const lastUser = [...msgs].reverse().find(m => m.role === 'user')
   if (!lastUser) return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
+  const tutorMode = lastTutorMode(sessionId)
   deleteMessagesAfter(sessionId, lastUser.id)
-  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort })
+  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort }, { tutorMode })
 }
 
 /**
@@ -2502,7 +2535,7 @@ async function agentResume(req: AgentChatRequest, signal: AbortSignal): Promise<
   const result = await runAgentLoop(
     sessionId, req.context, signal, trace, req.source,
     { modelId: req.modelId, effort: req.effort },
-    { resumeInjection: injection, profile },
+    { resumeInjection: injection, profile, tutorMode: lastTutorMode(sessionId) },
   )
   // 支线旁问：按本轮结果落运行态（成功 done / 其余 cut）；普通会话 no-op
   setSideLaneStatus(sessionId, result.ok ? 'done' : 'cut')
@@ -2531,9 +2564,10 @@ async function agentEditAndRegen(req: AgentChatRequest & { messageId: string }, 
   const msg = getMessageById(sessionId, String(req.messageId ?? ''))
   if (!msg || msg.session_id !== sessionId) return { ok: false, sessionId, error: '消息不存在', trace }
   if (msg.role !== 'user') return { ok: false, sessionId, error: '只能编辑用户消息', trace }
+  const tutorMode = lastTutorMode(sessionId)
   updateMessageContent(sessionId, msg.id, content)
   deleteMessagesAfter(sessionId, msg.id)
-  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort })
+  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort }, { tutorMode })
 }
 
 /**
@@ -2671,6 +2705,7 @@ export function registerAgentHandlers(): void {
       laneSeenAt: row.lane_seen_at ?? row.laneSeenAt ?? null,
       sessionId: typeof row.session_id === 'string' ? row.session_id : (row.sessionId ?? ''),
       traceJson: typeof row.trace_json === 'string' ? row.trace_json : (row.traceJson ?? null),
+      teachMode: row.teach_mode ?? row.teachMode,
     } as T
   }
   /**

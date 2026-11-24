@@ -38,6 +38,20 @@ export function setAssistantFolderResolver(fn: (sessionId: string, getSetting: (
   assistantFolderResolver = fn
 }
 
+/** 「对话」模式会话的父目录解析器（由 `aiTeachingTutor` 注册，避免循环 import）：
+ *  返回 `{rootDir}/对话`、或 null（非 tutor 会话）。父目录下的 `MM-DD 标题` 子夹由通用建夹流程创建。 */
+let tutorFolderResolver: ((sessionId: string, getSetting: (key: string) => unknown) => string | null) | null = null
+export function setTutorFolderResolver(fn: (sessionId: string, getSetting: (key: string) => unknown) => string | null): void {
+  tutorFolderResolver = fn
+}
+
+/** tutor 建会话 + 建夹处理器（由 `aiTeachingTutor` 模块加载时注入）。
+ *  反向注入是为了保持依赖单向（tutor → folders），`aiTeach:tutor:create` 的注册仍在本文件。 */
+let tutorCreateHandler: ((title: string | undefined, getSetting: (key: string) => unknown) => unknown) | null = null
+export function setTutorCreateHandler(fn: (title: string | undefined, getSetting: (key: string) => unknown) => unknown): void {
+  tutorCreateHandler = fn
+}
+
 /** 该会话是否为某工作区的「课程助手」（决定夹名无日期 + 产物落 output/） */
 function isCourseAssistant(sessionId: string, getSetting: (key: string) => unknown): boolean {
   return !!assistantFolderResolver?.(sessionId, getSetting)
@@ -59,6 +73,8 @@ export interface SessionFolderAnchor {
   v: 1
   /** P5：归属工作区快照（真相源在 .knowbase 元数据，此处仅供人读/溯源） */
   workspaceId?: string
+  /** 会话类型：'tutor' = AI 教学「对话」模式；缺省 = 课程会话（旧锚点无此字段） */
+  kind?: 'tutor'
 }
 
 export interface FolderResult {
@@ -160,14 +176,23 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
     // 课程助手 → 固定夹名「课程助手」（无日期），一个工作区一个
     const assistantRel = assistantFolderResolver?.(sessionId, getSetting)
     if (assistantRel) return ensureSessionFolderAt(sessionId, assistantRel, getSetting)
+    // 「对话」模式 → 父目录固定 `{rootDir}/对话`，子夹仍走通用 `MM-DD 标题` + 去重 + 锚点
+    const tutorRel = tutorFolderResolver?.(sessionId, getSetting)
     const wsId = getWorkspaceOfSession(sessionId)
-    const baseRel = (wsId && workspaceFolderRel(wsId, getSetting)) || rootDir
+    const baseRel = tutorRel || (wsId && workspaceFolderRel(wsId, getSetting)) || rootDir
     const baseAbs = join(vault.rootPath, baseRel)
     mkdirSync(baseAbs, { recursive: true })
     const name = uniqueFileName(baseAbs, folderBaseName(session.created_at, session.title))
     const folderAbs = join(baseAbs, name)
     mkdirSync(folderAbs)
-    const anchor: SessionFolderAnchor = { sessionId, title: session.title, createdAt: session.created_at, v: 1, ...(wsId ? { workspaceId: wsId } : {}) }
+    const anchor: SessionFolderAnchor = {
+      sessionId,
+      title: session.title,
+      createdAt: session.created_at,
+      v: 1,
+      ...(tutorRel ? { kind: 'tutor' as const } : {}),
+      ...(wsId ? { workspaceId: wsId } : {}),
+    }
     writeFileSync(join(folderAbs, ANCHOR_FILE), JSON.stringify(anchor, null, 2), 'utf-8')
     // 2026-11-03：不再播种会话 / 段级 CONSTRAINTS.md —— 要求文件只在用户/AI 明确创建时存在；
     // 已有文件仍按分层要求注入（见 aiTeachingScope）。
@@ -207,7 +232,14 @@ export function ensureSessionFolderAt(sessionId: string, rel: string, getSetting
     }
     mkdirSync(folderAbs, { recursive: true })
     const wsId = getWorkspaceOfSession(sessionId)
-    const anchor: SessionFolderAnchor = { sessionId, title: session.title, createdAt: session.created_at, v: 1, ...(wsId ? { workspaceId: wsId } : {}) }
+    const anchor: SessionFolderAnchor = {
+      sessionId,
+      title: session.title,
+      createdAt: session.created_at,
+      v: 1,
+      ...(tutorFolderResolver?.(sessionId, getSetting) ? { kind: 'tutor' as const } : {}),
+      ...(wsId ? { workspaceId: wsId } : {}),
+    }
     writeFileSync(join(folderAbs, ANCHOR_FILE), JSON.stringify(anchor, null, 2), 'utf-8')
     const parentRel = finalRel.includes('/') ? finalRel.slice(0, finalRel.lastIndexOf('/')) : rootDir
     broadcastTreeRefresh(parentRel)
@@ -729,6 +761,11 @@ export function sourceTemplateText(wsName: string, convName: string): string {
 }
 
 export function registerAiTeachingFolderHandlers(getSetting: (key: string) => unknown): void {
+  // 「对话」模式：新建 tutor 会话 + 建夹（处理器由 aiTeachingTutor 模块加载时注入，见 setTutorCreateHandler）
+  ipcMain.handle('aiTeach:tutor:create', (_e, title?: string) =>
+    tutorCreateHandler
+      ? tutorCreateHandler(typeof title === 'string' ? title : undefined, getSetting)
+      : { ok: false, error: '对话模式尚未就绪' })
   ipcMain.handle('aiTeach:ensureSessionFolder', (_e, sessionId: string) => ensureSessionFolder(String(sessionId ?? ''), getSetting))
   ipcMain.handle('aiTeach:sessionFolder', (_e, sessionId: string) => sessionFolder(String(sessionId ?? ''), getSetting))
   ipcMain.handle('aiTeach:renameSessionFolder', (_e, sessionId: string, title: string) => renameSessionFolder(String(sessionId ?? ''), String(title ?? ''), getSetting))

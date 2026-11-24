@@ -7,6 +7,7 @@ import { writeAdoptNotice } from './agentAdoptNotice'
 import { adoptLegacyGlobalAgentStore, type AdoptResult } from './agentSessionMigrate'
 import { normalizeSessionFields } from './agentSessionNormalizePure'
 import { selectAllSideLanes } from './sideLaneMeta'
+import type { TutorTurnMode } from './aiTeachingTutorPrompt'
 // 类型专用导入（零运行时代价）：续跑现场的结构真源在 agentInterruptPure，仓库不另立一份
 import type { SessionResume } from './agentInterruptPure'
 import {
@@ -107,6 +108,8 @@ export interface AgentSessionRow {
   instructions?: string
   /** 来源（缺省=assistant；存量老数据无此字段，由 backfillSessionSources 回填） */
   source?: AgentSessionSource
+  /** AI 教学「对话」模式会话标记：'tutor' = 对话会话（不归工作区）；缺省 = 课程会话，行为不变 */
+  aiTeachMode?: 'tutor'
   /** 通道（N-1 手册通道）：'manual'=使用帮助通道；缺省/'agent'=通用助手。仅 assistant 来源适用 */
   mode?: AgentSessionMode
   created_at: string
@@ -250,7 +253,11 @@ export function adoptLegacyAgentSessionsToVault(): AdoptResult | null {
   }
 }
 
-export function createAgentSession(title = '新会话', source: AgentSessionSource = 'assistant'): AgentSessionRow {
+export function createAgentSession(
+  title = '新会话',
+  source: AgentSessionSource = 'assistant',
+  opts?: { aiTeachMode?: 'tutor' },
+): AgentSessionRow {
   const legacyAiAssistant = source === 'aiAssistant'
   const unified = source === 'assistant' || legacyAiAssistant
   const row: AgentSessionRow = {
@@ -259,6 +266,7 @@ export function createAgentSession(title = '新会话', source: AgentSessionSour
     instructions: '',
     // 新统一助手不再产生 aiAssistant 来源；兼容入口仍归一成 assistant
     source: legacyAiAssistant ? 'assistant' : source,
+    ...(opts?.aiTeachMode ? { aiTeachMode: opts.aiTeachMode } : {}),
     ...(unified
       ? {
           scopeAll: !legacyAiAssistant,
@@ -600,6 +608,7 @@ export function appendAgentMessage(
   content: string,
   trace?: unknown,
   images?: Array<{ relPath: string; mime: string; name?: string; w?: number; h?: number; bytes?: number }>,
+  teachMode?: TutorTurnMode,
 ): string {
   ensureMigrated()
   const id = randomUUID()
@@ -609,6 +618,8 @@ export function appendAgentMessage(
     role,
     content,
     ...(images && images.length > 0 ? { images } : {}),
+    // 每轮方式只挂在 assistant 消息上（用户消息无意义，旧行无此字段）
+    ...(role === 'assistant' && teachMode ? { teach_mode: teachMode } : {}),
     trace_json: trace ? JSON.stringify(trace) : null,
     created_at: nowLocal(),
   })

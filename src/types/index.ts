@@ -1429,11 +1429,27 @@ export interface AgentContextInfo {
  *  二者同表存储、同一套 AgentRunner，仅列表展示分流。与主进程 agentSessionRepo 同构。 */
 export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant' | 'intel'
 
+/** AI 教学「对话」模式 · 每轮辅导方式（'auto' 只在渲染层存在，主进程只认这四种）。 */
+export type TutorTurnMode = 'chat' | 'read' | 'solve' | 'ask'
+
+/** AI 教学「对话」模式 · 当前资料（渲染层截到 ≤3000 字后随请求发送；主进程再截一次）。 */
+export interface TutorReadingContext {
+  relPath: string
+  kind: 'pdf' | 'epub' | 'txt' | 'md'
+  /** PDF 页码（1-based） */
+  page?: number
+  /** 章节 / 小节名 */
+  label?: string
+  text: string
+}
+
 export interface AgentSessionInfo {
   id: string
   title: string
   /** 来源（缺省=assistant） */
   source?: AgentSessionSource
+  /** AI 教学「对话」模式会话标记：'tutor' = 对话会话（不归工作区）；缺省 = 课程会话 */
+  aiTeachMode?: 'tutor'
   /** 通道（N-1 手册通道）：'manual'=使用帮助；缺省/'agent'=通用助手 */
   mode?: 'manual' | 'agent'
   /** 会话级全局要求（仅本会话生效；空串/缺省=无） */
@@ -1848,6 +1864,8 @@ export interface AgentStoredMessage {
   content: string
   /** 用户消息携带的图片（P2 多模态）：仓库相对路径 + 元信息；历史回放与缩略图用 */
   images?: AgentImageRef[]
+  /** AI 教学「对话」模式：本轮辅导方式（只写 assistant；旧消息无此字段 = 不显示方式徽标） */
+  teachMode?: TutorTurnMode
   /** JSON 字符串（原始行格式），前端自行解析 */
   traceJson?: string | null
   createdAt: string
@@ -3329,7 +3347,7 @@ export interface ElectronAPI {
   pdfExport: (payload: { data: Uint8Array; defaultName: string; kind?: 'pdf' | 'txt' }) => Promise<PdfExportResult>
   /** 界面逐页阅读：当前仓库内 .pptx → [{n,text}] */
   docsPptxPages: (relPath: string) => Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }>
-  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string; images?: AgentImageInput[] }) => Promise<AgentChatResult>
+  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string; images?: AgentImageInput[]; teachMode?: TutorTurnMode; reading?: TutorReadingContext }) => Promise<AgentChatResult>
   agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   /** A 方案：从断点续跑（中断卡上的「继续」）；不追加用户消息，现场由主进程一次性 claim */
   agentResume: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
@@ -3399,6 +3417,8 @@ export interface ElectronAPI {
   /** 打开支线详情即已读（写 lane_seen_at） */
   agentMarkSideLaneRead: (laneId: string) => Promise<boolean>
   // ===== AI教学 P1：会话 ⇄ 文件夹绑定（docs/ai-teaching-module-rework.md §二）=====
+  /** AI 教学「对话」模式：新建 tutor 会话 + 建夹（标题空 = 新对话；建夹失败仍返回 sessionId） */
+  aiTeachTutorCreate: (title?: string) => Promise<{ ok: boolean; sessionId?: string; relPath?: string | null; error?: string }>
   aiTeachEnsureSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachRenameSessionFolder: (id: string, title: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>

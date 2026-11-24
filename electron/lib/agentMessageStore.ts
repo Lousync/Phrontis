@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import type { TutorTurnMode } from './aiTeachingTutorPrompt'
 
 /**
  * AI 会话消息存储 v2 —— 一个会话一个 JSONL 文件，追加写（feature/ai-plugin-upgrade B）。
@@ -27,6 +28,8 @@ export interface AgentMessageRow {
   content: string
   /** 用户消息携带的图片（P2 多模态；历史回放 / 缩略图） */
   images?: Array<{ relPath: string; mime: string; name?: string; w?: number; h?: number; bytes?: number }>
+  /** AI 教学「对话」模式：本轮辅导方式（只写 assistant；旧行无此字段） */
+  teach_mode?: TutorTurnMode
   trace_json: string | null
   created_at: string
 }

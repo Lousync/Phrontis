@@ -359,7 +359,7 @@ const api = {
   pdfOrganize: (payload: { data: Uint8Array; pages: number[]; rotations?: Record<string, number> }) => ipcRenderer.invoke('pdf:organize', payload),
   pdfExport: (payload: { data: Uint8Array; defaultName: string; kind?: 'pdf' | 'txt' }) => ipcRenderer.invoke('pdf:export', payload),
   docsPptxPages: (relPath: string) => ipcRenderer.invoke('docs:pptxPages', relPath),
-  agentChat: (req: { sessionId: string; message: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string; skillName?: string }) => ipcRenderer.invoke('agent:chat', req),
+  agentChat: (req: { sessionId: string; message: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string; skillName?: string; teachMode?: string; reading?: unknown }) => ipcRenderer.invoke('agent:chat', req),
   agentRegenerate: (req: { sessionId: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:regenerate', req),
   // A 方案：从断点续跑（中断卡上的「继续」）；不追加用户消息，现场由主进程一次性 claim
   agentResume: (req: { sessionId: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string }) => ipcRenderer.invoke('agent:resume', req),
@@ -430,6 +430,8 @@ const api = {
   agentPromoteSideLane: (laneSessionId: string) => ipcRenderer.invoke('agent:promoteSideLane', laneSessionId),
   agentMarkSideLaneRead: (laneId: string) => ipcRenderer.invoke('agent:markSideLaneRead', laneId),
   // AI教学 P1：会话 ⇄ 文件夹绑定
+  /** 「对话」模式：新建 tutor 会话 + 建夹（标题空 = 新对话） */
+  aiTeachTutorCreate: (title?: string) => ipcRenderer.invoke('aiTeach:tutor:create', title),
   aiTeachEnsureSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:ensureSessionFolder', id),
   aiTeachSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:sessionFolder', id),
   aiTeachRenameSessionFolder: (id: string, title: string) => ipcRenderer.invoke('aiTeach:renameSessionFolder', id, title),

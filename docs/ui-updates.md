@@ -3178,3 +3178,42 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 输入区显示「圆环 + 1%」，DOM 实测 SVG `16×16`、文字 `11px`、间距 `4px`、两者水平居中对齐；颜色 = 当前主题 `--text-secondary`。
 - 窄窗 900px（输入卡约 420px）下仍单行、无横向溢出，圆环与 `1%` 完整可见。
 - 未设窗口时仍显示 `≈ 10k`（不摆空环）。
+
+## 2026-11-24 · AI 教学 · 「对话」模式（不建课）
+
+**背景**：素材、段会话、题单、错题、右栏查看器都已存在，缺的是「单份资料 / 单题」不建课的入口。本批按 `docs/ai-teaching-tutor-mode-plan.md` 落第一批 + 第二批：容器 + 默认对话 + 四形态 + 当前页上下文。
+
+**入口与容器**
+- 选择工作区页工具栏（搜索框与 `+ 新建工作区` 之间）新增「对话」按钮；进入后是左会话列表（约 248px）+ 中聊天 + 右查看器，复用工作区外壳，不复制聊天区。
+- 顶栏面包屑 `AI教学 / 对话 / 标题`；课程专属块（画像 / 要求、preflight、课程跳转、章节 / 段、结课卡、打开课程助手、hero chips、资源管理器）在对话态全部隐藏；ask 卡、图片、思考 / 引用 / 模型 / 用量保留。
+- 左栏会话列表：`aiTeachMode === 'tutor'` 过滤、今天 / 昨天 / 更早分组、搜索、新建、双击改名、hover 删除（沿用文件夹 ask/keep/delete）；底部显示会话夹路径。
+
+**会话与文件夹**
+- 会话仍 `source: 'aiTeaching'`，新增 `aiTeachMode: 'tutor'`；不写 `sessionWs`。
+- 文件夹 `{AI教学根}/对话/{MM-DD 标题}/`，重名 `(n)`；`.session.json` 写 `kind: 'tutor'`。建会话 + 建夹 IPC `aiTeach:tutor:create`；建夹失败仍返回 sessionId。
+- 首条消息后后端把标题从「新对话」改成用户首句时，文件夹跟着改名，保持 `{MM-DD 标题}` 一致。
+
+**四形态与方式 chip**
+- 输入卡上方五档：自动 / 对话 / 讲解 / 解题 / 先问我；默认自动，发送后回自动。
+- 自动路由纯函数 `resolveTutorMode`：有图 / 题目词 → 解题；有资料且指向这页这段原文 → 讲解；低信息量短语 → 先问我；其余对话。
+- 主进程只认四种（`normalizeTutorTurnMode`，不识别 auto）；每轮 `teachMode` 落 assistant 消息的 `teach_mode`，UI 在时间戳旁显示方式徽标；重新生成 / 继续 / 编辑后重跑沿用最后一条 assistant 的方式。
+- 三种协议写进 `aiTeachingTutorPrompt` 并并入现有 `teachStyleHint` 分区：先问我（一次 ```ask、2–6 选项、不重复问、答完继续）、解题（卡点 → 一级提示 → 二级提示 → 完整解 + 考点 + 易错点 → 2 道 ```quiz 变式、题号 1..N）、讲解（三句地图 → 选层 → 每次一层 + 检查问题 → `[p.N]` / 小节、无原文要声明）。
+
+**资料与右侧查看器**
+- 阅读上下文 store：PDF 当前页 / EPUB 当前章节发布当前文本（去重、3000 字截断、请求序号守卫、卸载只清自己）；输入卡显示单枚资料 chip（文件名 · 第 N 页 / 章节），点文件名聚焦右栏、`×` 移除。
+- 发送时把 `reading` 随 `agent:chat` 带给主进程；主进程在**用户消息层**（requestInjection）注入 `【当前资料】…`，不进 system，避免打散 prompt cache；3000 字双保险。
+- 每个对话各自记右侧页签与宽度（`persistScope = tutor:<sessionId>`，空态 `tutor:empty`）；课程会话继续用旧键，行为不变。切换对话时清掉宿主的活动文件高亮，避免串会话。
+
+**解题动作行**
+- 只挂**最新一条** `teachMode === 'solve'` 的 assistant 回复：「再来两道变式」以解题方式再发一轮；「加入题单」把回复里的 ```quiz 围栏追加到 `{会话夹}/产物/题单.md`。
+- 「加入错题」本期不渲染：聊天回答不是知识页、拿不到 `pageId`，不做假按钮，登记第三批。
+
+**契约与验证**
+- `verify-tutor-mode.mjs` 72/72、`verify-tutor-ui.mjs` 72/72、`verify-reading-context.mjs` 54/54、`verify-right-viewer-tabs.mjs` 220/220；`verify-all-p0` **42/42**；`tsc` web/node 0 错；`npm run build` 通过。
+- 真机（devbridge 隔离实例 + 临时仓库）：选择页「对话」入口可见；新建对话后磁盘出现 `AI教学/对话/11-24 新对话/.session.json`（`kind: 'tutor'`）且会话行 `aiTeachMode: 'tutor'`；右侧页签键为 `aiTeachViewerTabs:tutor:<sid>`、空态为 `tutor:empty`；方式 chip 五档齐全，点「解题」发送后 assistant 中断卡带「解题」徽标（本机无 LLM，走错误卡链路），发送后方式回到「自动」。
+
+**未覆盖 / 已知边界**
+- 本机无 LLM：四形态的真实回复内容、变式题质量、当前页引用准确性未验；错误链路只验到「方式透传 + 徽标落库」。
+- md / txt 阅读上下文尚未发布（PDF / EPUB 已覆盖），当前 md / txt 资料 chip 只有文件名。
+- 右侧宽度按作用域用 localStorage 覆盖层（`viewerResize.ts` 不在本批范围），挂载首帧可能被全局宽度短暂覆盖（150ms 兜底）；后续可把宽度键参数化。
+- 「[p.N] 跳转高亮」「以此建课」「加入错题」属第三批。

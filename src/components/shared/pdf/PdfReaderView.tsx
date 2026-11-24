@@ -13,6 +13,12 @@ import { openExternal, copyText, excerptCreate, excerptList, pdfReaderGet, pdfRe
 import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
 import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
+import {
+  READING_CONTEXT_LIMIT,
+  clampReadingText,
+  clearReadingContextOf,
+  publishReadingContext,
+} from '../../../lib/readingContext'
 import { detectScanMode, resolveScanPages } from 'phrontis-core/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
@@ -48,6 +54,31 @@ function b64ToU8(b64: string): Uint8Array {
   const out = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
   return out
+}
+
+/**
+ * pdf.js 文本项 → 可读正文（只给「当前页阅读上下文」用，不追求完美排版）：
+ * - `hasEOL` = pdf.js 给的换行标记，直接落 `\n`；
+ * - 相邻项之间**不盲目加空格**（中文逐项切分，加了就成满屏空格），只在「拉丁字母/数字接拉丁」时补一个；
+ * - 折叠行尾空白与三个以上连续换行。
+ */
+function pdfPageText(items: ReadonlyArray<unknown>): string {
+  let out = ''
+  for (const raw of items) {
+    if (!raw || typeof raw !== 'object') continue
+    const it = raw as { str?: unknown; hasEOL?: unknown }
+    const s = typeof it.str === 'string' ? it.str : ''
+    if (!s) continue
+    if (out) {
+      const a = out[out.length - 1]
+      const b = s[0]
+      out += /[A-Za-z0-9,.;:!?)]/.test(a) && /[A-Za-z0-9(\[]/.test(b) ? ` ${s}` : s
+    } else {
+      out = s
+    }
+    if (it.hasEOL === true) out += '\n'
+  }
+  return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 /**
@@ -663,6 +694,48 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootId, relPath])
+
+  // ===== 当前页阅读上下文（AI 教学「对话」输入卡取用；方案 docs/ai-teaching-tutor-mode-plan.md §2.4）=====
+  /** 请求序号守卫：快速翻页时旧请求回来直接丢（只认最后一次） */
+  const readingSeqRef = useRef(0)
+  const readingTimerRef = useRef(0)
+
+  useEffect(() => {
+    if (loading || numPages === 0) return
+    const pdf = pdfRef.current
+    if (!pdf) return
+    const page = pageNum
+    const seq = ++readingSeqRef.current
+    // 去抖 260ms：翻页/滚动的中间态不提取，落定后才读一次（每页一次）
+    readingTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const p = await pdf.getPage(page)
+          const tc = await p.getTextContent()
+          if (seq !== readingSeqRef.current) return
+          const text = clampReadingText(pdfPageText(tc.items), READING_CONTEXT_LIMIT)
+          if (!text.trim()) {
+            // 扫描页 / 无可读文本：清空，宁可没有也不要拿上一页冒充
+            clearReadingContextOf(relPath)
+            return
+          }
+          publishReadingContext({ relPath, kind: 'pdf', page, label: `第 ${page} 页`, text })
+        } catch {
+          // 辅助上下文：提取失败静默（不能影响阅读），但要把旧页内容撤掉
+          if (seq === readingSeqRef.current) clearReadingContextOf(relPath)
+        }
+      })()
+    }, 260)
+    return () => {
+      window.clearTimeout(readingTimerRef.current)
+      // 作废本轮在途请求（下一页 / 卸载后回来的结果一律丢弃）
+      readingSeqRef.current += 1
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageNum, loading, numPages, relPath])
+
+  /** 卸载 / 换文件：只清自己发布的那一份（别误清刚打开的另一份资料） */
+  useEffect(() => () => { clearReadingContextOf(relPath) }, [relPath])
 
   // 加载完 → 读书级状态（进度/模式/缩放/护眼/书签）→ 交给 applyBookState 落到 viewer
   useEffect(() => {

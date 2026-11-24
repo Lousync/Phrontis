@@ -54,6 +54,8 @@ const {
   firstTabOfType, isDraftAskTab, appendTab, updateTab, activateTab, closeTabById,
   selectLiveIds, stripOverflow, serializeViewerState, parseViewerState,
   migrateLegacyViewerState, parseLegacyWebTabs,
+  sanitizeViewerScope, scopedViewerTabsKey, scopedViewerWidthKey,
+  VIEWER_SCOPED_TABS_PREFIX, VIEWER_SCOPED_WIDTH_PREFIX,
   VIEWER_LIVE_WINDOW, VIEWER_WEB_LIVE_CAP, VIEWER_FILE_LIVE_CAP,
 } = T
 
@@ -603,6 +605,91 @@ check('every existing-tab activation path outside selectTab revives first',
   && bookBody.indexOf('reviveClosing(shelfTab.id)') < bookBody.indexOf('apply(next, shelfTab.id)'))
 check('liveIds still excludes closing tabs (revival is the only way back in)',
   /closingIds\.length \? ids\.filter\(\(id\) => !closingIds\.includes\(id\)\) : ids/.test(shell))
+
+/* ---------------------------------------------------------------- 14. 作用域持久化 */
+console.log('\n=== 14. scoped persistence (persistScope) ===')
+
+// A. 纯函数：清洗与键名（真实执行 viewerTabs.ts）
+check('scope sanitize keeps letters / digits / dash / underscore / colon',
+  sanitizeViewerScope('tutor:ses-01_x') === 'tutor:ses-01_x',
+  sanitizeViewerScope('tutor:ses-01_x'))
+check('scope sanitize replaces illegal chars with _',
+  sanitizeViewerScope('tutor:ses 01/x?') === 'tutor:ses_01_x_',
+  sanitizeViewerScope('tutor:ses 01/x?'))
+check('scope sanitize trims surrounding whitespace',
+  sanitizeViewerScope('  tutor:1  ') === 'tutor:1', sanitizeViewerScope('  tutor:1  '))
+check('empty / undefined scope means "course session"',
+  sanitizeViewerScope('') === '' && sanitizeViewerScope(undefined) === ''
+  && sanitizeViewerScope('   ') === '')
+check('scope sanitize is idempotent',
+  sanitizeViewerScope(sanitizeViewerScope('a b/c')) === sanitizeViewerScope('a b/c'))
+check('scoped tabs key carries the sanitized scope',
+  scopedViewerTabsKey('tutor:ses 01') === `${VIEWER_SCOPED_TABS_PREFIX}tutor:ses_01`,
+  String(scopedViewerTabsKey('tutor:ses 01')))
+check('scoped width key carries the sanitized scope',
+  scopedViewerWidthKey('tutor:ses 01') === `${VIEWER_SCOPED_WIDTH_PREFIX}tutor:ses_01`,
+  String(scopedViewerWidthKey('tutor:ses 01')))
+check('no scope -> null (caller falls back to the legacy keys)',
+  scopedViewerTabsKey('') === null && scopedViewerTabsKey(undefined) === null
+  && scopedViewerWidthKey('') === null && scopedViewerWidthKey(undefined) === null)
+check('NEGATIVE: scoped keys never collide with the course keys',
+  scopedViewerTabsKey('x') !== 'aiTeach.rightTabs.v2'
+  && !scopedViewerTabsKey('x').startsWith('aiTeach.')
+  && scopedViewerWidthKey('x') !== 'aiTeachRightViewerWidth')
+check('two scopes never share a key',
+  scopedViewerTabsKey('tutor:a') !== scopedViewerTabsKey('tutor:b')
+  && scopedViewerWidthKey('tutor:a') !== scopedViewerWidthKey('tutor:b'))
+
+// B. 渲染层静态接线：可选 prop / 按作用域读写 / 切换时重载 / 旧键保留
+const viewerTabsSrc = read(`${DIR}/viewerTabs.ts`)
+check('shell accepts an optional persistScope prop',
+  /persistScope\?: string/.test(shell))
+check('shell sanitizes the scope before touching storage',
+  /sanitizeViewerScope\(persistScope\)/.test(shell))
+check('viewerTabs owns the sanitizer and both scoped key builders',
+  /export function sanitizeViewerScope/.test(viewerTabsSrc)
+  && /export function scopedViewerTabsKey/.test(viewerTabsSrc)
+  && /export function scopedViewerWidthKey/.test(viewerTabsSrc))
+check('shell reads the scoped tabs key before the legacy key',
+  shell.includes('scopedViewerTabsKey(scope)')
+  && shell.indexOf('scopedViewerTabsKey(scope)') < shell.indexOf('VIEWER_LS_KEYS.tabsV2'))
+check('a scoped session starts empty instead of inheriting course tabs',
+  /return parseViewerState\(readJson\(readLs\(scopedKey\)\)\) \?\? \{ v: 2, tabs: \[\], activeId: null \}/.test(shell))
+check('scope switch reloads tabs for the new scope',
+  /if \(tabsScopeRef\.current === persistScopeKey\) return/.test(shell)
+  && shell.includes('loadBootState(sessionIdRef.current, persistScopeKey)'))
+
+const scopeEffect = sliceBetween(
+  shell,
+  '/* ------------------------------------------------------------ 作用域切换 */',
+  '/* ------------------------------------------------------------ 持久化 */',
+)
+check('scope switch drops per-tab transient state (closing timers / dirty / callbacks)',
+  scopeEffect.length > 0
+  && /closeTimersRef\.current\.forEach/.test(scopeEffect)
+  && /setClosingIds\(\[\]\)/.test(scopeEffect)
+  && /setDirtyIds\(\[\]\)/.test(scopeEffect)
+  && /flushRef\.current\.clear\(\)/.test(scopeEffect)
+  && /cbCacheRef\.current\.clear\(\)/.test(scopeEffect))
+check('scope switch writes the outgoing scope before replacing the tab list',
+  scopeEffect.indexOf('persistTabsState(tabsScopeRef.current') >= 0
+  && scopeEffect.indexOf('persistTabsState(tabsScopeRef.current') < scopeEffect.indexOf('apply(boot.tabs'))
+check('scope switch reloads the scoped width (or restores the course baseline)',
+  /readScopedWidth\(nextWidthKey\)/.test(scopeEffect)
+  && /setWidth\(stored\)/.test(scopeEffect)
+  && /setWidth\(courseWidthRef\.current\)/.test(scopeEffect))
+check('scoped width is read and written under its own key',
+  /function readScopedWidth/.test(shell) && /function writeScopedWidth/.test(shell)
+  && /scopedViewerWidthKey\(/.test(shell))
+check('width writes are gated per scope (no cross-scope clobbering)',
+  /lastScopedWidthRef/.test(shell) && /prev\.scope !== persistScopeKey/.test(shell))
+check('legacy tabs key is still written for course sessions (backward compatible)',
+  /window\.localStorage\.setItem\(VIEWER_LS_KEYS\.tabsV2/.test(shell))
+check('legacy migration still runs only in the course branch',
+  /migrateLegacyViewerState\(\{/.test(shell)
+  && shell.indexOf('if (scopedKey)') < shell.indexOf('migrateLegacyViewerState({'))
+check('scoped code never removes the legacy keys',
+  !/removeItem\(/.test(shell))
 
 /* ---------------------------------------------------------------- 报告 */
 const failed = checks.filter((c) => !c.pass)

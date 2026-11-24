@@ -9,6 +9,12 @@ import { useDataChanged } from '../../../lib/dataChanged'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { bookmarkCfiKey } from '../../../lib/bookmarkCfi'
+import {
+  READING_CONTEXT_LIMIT,
+  clampReadingText,
+  clearReadingContextOf,
+  publishReadingContext,
+} from '../../../lib/readingContext'
 import { KB_BOOKMARK_DELETE, KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
 // 真源（扩展名 / kind / MIME 三张表都在那里）。★ 本文件**不得**再出现 MIME 或书籍扩展名字面量：
 // foliate 的 makeBook() 按 File 的 name/type 分派解码器（view.js:13-21，不看魔数），
@@ -318,6 +324,15 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const paperRef = useRef<ReaderPaper>('default')
   const chapterRef = useRef('')
   const cfiRef = useRef('')
+  /**
+   * 阅读上下文（AI 教学「对话」输入卡取用，2026-11-24）：
+   * - `readingSeqRef` 请求序号守卫（快速翻章只认最后一次，旧结果丢弃）；
+   * - `readingTimerRef` 去抖定时器（relocate 在滚动中很密，落定后才提取）；
+   * - `readingKeyRef` 已发布键（section index + 章节名）：同一章内翻页不重复提取。
+   */
+  const readingSeqRef = useRef(0)
+  const readingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const readingKeyRef = useRef('')
   /** 书签快照（与 excerptsRef 同款：foliate 回调注册在 effect 里，闭包拿不到最新 state） */
   const bkmRef = useRef<BookBookmark[]>([])
   const pctRef = useRef(0)
@@ -671,6 +686,10 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     readyRef.current = false
     setCapture(null)
     setNotePop(null)
+    // 阅读上下文：换书从头开始（旧章节键作废，在途请求一律丢弃）
+    readingKeyRef.current = ''
+    readingSeqRef.current += 1
+    if (readingTimerRef.current) { clearTimeout(readingTimerRef.current); readingTimerRef.current = null }
 
     // 加载阶段文字：延迟 250ms 才亮（小书转眼就好，立刻显示会闪一下；见 showPhase 的声明处）
     setPhase('read')
@@ -850,6 +869,41 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       doc.addEventListener('mousemove', onMouseMove)
     }
 
+    /**
+     * 发布当前章节正文（AI 教学「对话」输入卡在发送时取用；方案 §2.4）。
+     * - 只读**当前已渲染 section** 的正文（`renderer.getContents()`），不读全文档；
+     * - 章节粒度去重（section index + label）：同一章内滚动翻页不重复提取；
+     * - 去抖 320ms + 序号守卫：快速翻章只认最后一章，旧结果回来直接丢；
+     * - 固定版式（cbz）整页是图片、没有可读正文，跳过；
+     * - 空文本 / 失败静默清空自己那一份（宁可没有，也不拿上一章冒充）。
+     */
+    const scheduleReadingContext = (index: number, label: string) => {
+      if (isFixedLayoutBook) return
+      const key = `${index}\u0000${label}`
+      if (readingKeyRef.current === key) return
+      readingKeyRef.current = key
+      const seq = ++readingSeqRef.current
+      if (readingTimerRef.current) clearTimeout(readingTimerRef.current)
+      readingTimerRef.current = setTimeout(() => {
+        readingTimerRef.current = null
+        if (!alive || seq !== readingSeqRef.current) return
+        try {
+          const contents = viewRef.current?.renderer?.getContents?.() ?? []
+          const body = contents.find((x) => x.index === index)?.doc?.body
+          const raw = String(body?.innerText ?? body?.textContent ?? '').trim()
+          const text = clampReadingText(raw, READING_CONTEXT_LIMIT)
+          if (!text.trim()) {
+            clearReadingContextOf(relPath)
+            return
+          }
+          publishReadingContext({ relPath, kind: 'epub', ...(label ? { label } : {}), text })
+        } catch {
+          // 辅助上下文：提取失败静默（不影响阅读），清掉旧章节内容
+          clearReadingContextOf(relPath)
+        }
+      }, 320)
+    }
+
     const onRelocate = (e: Event) => {
       const d = (e as CustomEvent).detail as FoliateRelocateDetail
       if (!d) return
@@ -874,6 +928,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       setPct(nextPct)
       setPageCfi(cfiRef.current)
       setChapter(label)
+      scheduleReadingContext(cur, label)
       try {
         window.dispatchEvent(new CustomEvent(KB_READER_STATE_CHANGED, { detail: { relPath, kind, pct: nextPct } }))
       } catch { /* 广播失败不影响阅读 */ }
@@ -1091,9 +1146,17 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       thumbCacheRef.current.clear()
       thumbBusyRef.current = false
       clearTimeout(phaseTimer)
+      // 阅读上下文：作废在途请求、收起自己发布的那一份（换书 / 关书）
+      readingSeqRef.current += 1
+      if (readingTimerRef.current) { clearTimeout(readingTimerRef.current); readingTimerRef.current = null }
+      readingKeyRef.current = ''
+      clearReadingContextOf(relPath)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootId, relPath, reloadKey])
+
+  /** 卸载 / 换文件：只清自己发布的那一份（别误清刚打开的另一份资料） */
+  useEffect(() => () => { clearReadingContextOf(relPath) }, [relPath])
 
   // ===== 摘录列表：挂载/换书拉一次 + excerpt 广播刷新 =====
   useEffect(() => {

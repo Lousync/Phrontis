@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
@@ -14,6 +14,8 @@ import {
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
   aiTeachProfileWriteSession, aiTeachProfileApplyPatch, getSetting,
   aiTeachCourseGetEndState, aiTeachCourseReopenCourse,
+  aiTeachTutorCreate,
+  workspaceWriteFile, workspaceMkdir,
 } from '../../lib/ipc'
 import { AiTeachFileTree } from './AiTeachFileTree'
 import { CourseRail } from './CourseRail'
@@ -25,6 +27,7 @@ import { buildCourseRail, activeChapterId as pickRailChapter, type RailChapterIn
 import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { RightViewer } from './right-viewer/RightViewer'
+import { relativeTime } from './right-viewer/notesPanePure'
 import { viewerReserveWidth } from './right-viewer/rightViewerPure'
 import type { ViewerOpenRequest, ViewerTabKey } from './right-viewer/paneContracts'
 import { SideLanePanel } from './SideLanePanel'
@@ -48,6 +51,8 @@ import { toolActionLabel } from '../../lib/toolLabels'
 import { TurnRail } from './TurnRail'
 import { ACTIVE_THRESHOLD, clampTurn, pickTurn, turnTitle, type TurnItem } from './turnRailPure'
 import { prefersReducedMotion } from '../../lib/usePresence'
+import { TUTOR_MODE_LABELS, resolveTutorMode, type TutorUiMode } from '../../lib/tutorModePure'
+import { getReadingContext, publishReadingContext, subscribeReadingContext } from '../../lib/readingContext'
 
 /** AI 教学面的斜杠指令（/mindmap、/生图）已收口到 src/lib/chatCommands.ts 的
  *  PASSTHROUGH_COMMANDS 单一真源 —— 弹层候选与「放行给模型」判定读同一张表，
@@ -72,7 +77,7 @@ import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
  * `agent:listSideLanes` 带回的每条支线都带 `branchFromMessageId`，据此在回答下方显示
  * 「支线追问 · 已开」（点击进右栏支线中心重开）；不再落 localStorage（修掉清缓存/换机即失联）。
  */
-import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChatResult, AgentImageRef, AiTeachInjectionStats, LlmUsageInfo, LlmModelEntry, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState } from '../../types'
+import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChatResult, AgentImageRef, AgentImageInput, AgentContextInfo, AiTeachInjectionStats, LlmUsageInfo, LlmModelEntry, AiTeachWorkspaceInfo, AiTeachSourcesPayload, AiTeachSegmentSource, AiTeachSource, AiTeachCourseChapter, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState, AiTeachEndState, TutorTurnMode, TutorReadingContext } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -115,6 +120,50 @@ import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTrac
  * 收尾本段改为左栏 ✓ + 段会话里 AI 回复的 ```wrapup 围栏卡两处行内两段式确认（2026-11-23：围栏卡
  * 不再常驻流末尾，只在 AI 判断该收尾时才出现）；结课由 AI 回复里的 ```endcourse 围栏给按钮。
  */
+
+/* ══════════════════════════════════════════════════════════════════════════════
+ * AI 教学「对话」模式（不建课，直接拿资料问）—— 纯函数与常量
+ * 方案 docs/ai-teaching-tutor-mode-plan.md §2；界面原型 tmp/ai-teach-tutor-mode/index.html
+ * 口径：`auto` 只在渲染层存在；发送前由 `resolveTutorMode` 解析成 chat / read / solve / ask。
+ * ══════════════════════════════════════════════════════════════════════════════ */
+
+/** 五档方式的一行提示（文案取自原型 mode-chip 的 title） */
+const TUTOR_MODE_TIPS: Record<TutorUiMode, string> = {
+  auto: '按当前输入 / 资料自动选择',
+  chat: '普通问答，不套辅导协议',
+  read: '先给地图，再分层讲',
+  solve: '先问卡点，再给提示',
+  ask: '先出提问卡，确认目标',
+}
+
+/** 文案指向「这页 / 这段 / 这份资料」——自动路由的 readingQuestion 判据（方案 §2.2） */
+const TUTOR_READING_Q_RE = /这页|这一页|这段|这一段|这份资料|这个资料|原文|讲解/
+
+/** 对话会话分组：按本地日历日划分 今天 / 昨天 / 更早（`updatedAt` 优先，缺省退 `createdAt`） */
+function tutorDayGroup(iso: string, nowMs: number = Date.now()): '今天' | '昨天' | '更早' {
+  const t = Date.parse(String(iso ?? '').replace(' ', 'T'))
+  if (!Number.isFinite(t)) return '更早'
+  const startOfDay = (ms: number): number => {
+    const d = new Date(ms)
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  }
+  const days = Math.round((startOfDay(nowMs) - startOfDay(t)) / 86_400_000)
+  if (days <= 0) return '今天'
+  if (days === 1) return '昨天'
+  return '更早'
+}
+
+/** 从一条 AI 回复里取出全部 ```quiz 围栏（原文连同围栏一起保留，追加进题单即可作答） */
+function extractQuizFences(text: string): string[] {
+  const out: string[] = []
+  const re = /```quiz[^\n]*\n([\s\S]*?)```/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(String(text ?? '')))) {
+    const body = m[1].trim()
+    if (body) out.push('```quiz\n' + body + '\n```')
+  }
+  return out
+}
 
 /** P5：工作区卡片「最近活跃」相对时间（updated_at 'YYYY-MM-DD HH:MM:SS' 本地串） */
 /** 结课日期（MM-DD；跨年补年份） */
@@ -259,6 +308,8 @@ interface UiMsg {
   content: string
   /** P2 多模态：用户消息图片（乐观消息带 dataUrl；落库消息带 relPath） */
   images?: AgentImageRef[]
+  /** AI 教学「对话」模式：本轮辅导方式（只写 assistant；旧消息无此字段 = 不显示徽标） */
+  teachMode?: TutorTurnMode
   createdAt: string
   trace?: AgentTraceStep[]
 }
@@ -546,6 +597,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [viewerW, setViewerW] = useState(0)
   /** 查看器活动页签对应的仓库相对路径（左栏文件树回显高亮；null = 没有活动文件） */
   const [viewerActiveRel, setViewerActiveRel] = useState<string | null>(null)
+  /** sendText 在 useCallback 里读「右栏是否有资料」（自动路由 hasMaterial）——用 ref 避免把回调身份绑到面板状态上 */
+  const viewerActiveRelRef = useRef<string | null>(null)
+  useEffect(() => { viewerActiveRelRef.current = viewerActiveRel }, [viewerActiveRel])
   /**
    * 中栏 reserve = `中栏左缘 + VIEWER_MIN_MIDDLE_WIDTH`（查看器宽度上限的唯一依据）。
    *
@@ -669,6 +723,37 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [activeWs, setActiveWs] = useState<string | null>(null) // null = 工作区选择页（3-38：默认记住上次直接进，仅首次/无记忆时可见）
   const activeWsRef = useRef<string | null>(null)
   useEffect(() => { activeWsRef.current = activeWs }, [activeWs])
+  /* ---------- AI 教学「对话」模式（不建课，直接拿资料问；方案 docs/ai-teaching-tutor-mode-plan.md） ----------
+     容器 = 左会话列表 + 中聊天 + 右查看器（复用工作区外壳，只换左栏内容与顶栏面包屑）。
+     `tutorActive` 与 `activeWs` 互斥：对话模式不归任何工作区（主进程也不写 sessionWs）。 */
+  const [tutorActive, setTutorActive] = useState(false)
+  const tutorActiveRef = useRef(false)
+  useEffect(() => { tutorActiveRef.current = tutorActive }, [tutorActive])
+  /** 左栏会话搜索 / 行内改名 / 新建中 */
+  const [tutorSearch, setTutorSearch] = useState('')
+  const [tutorRenamingId, setTutorRenamingId] = useState<string | null>(null)
+  const [tutorRenameDraft, setTutorRenameDraft] = useState('')
+  const [tutorCreating, setTutorCreating] = useState(false)
+  /** 当前会话文件夹（`AI教学/对话/...`；列表底部弱化小字） */
+  const [tutorFolder, setTutorFolder] = useState<string | null>(null)
+  /** 本轮辅导方式（`auto` 只在渲染层存在；发送后回 auto） */
+  const [tutorMode, setTutorMode] = useState<TutorUiMode>('auto')
+  /** 当前阅读上下文（R 段发布：PDF 当前页 / EPUB 当前章节）；资料 chip 与自动路由共用 */
+  const readingCtx = useSyncExternalStore(subscribeReadingContext, getReadingContext)
+  /** 「对话」模式：消息数组里最后一条 assistant 的下标（解题动作行只挂这一条） */
+  const lastAssistantIdx = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'assistant') return i
+    return -1
+  }, [messages])
+  /** 解题动作行：最后一条 assistant 且本轮方式 = solve；其后再无 assistant 才挂（方案 §六-3） */
+  const tutorSolveRowIdx = tutorActive && !pending && lastAssistantIdx >= 0 && messages[lastAssistantIdx]?.teachMode === 'solve'
+    ? lastAssistantIdx
+    : -1
+  /** 资料 chip：文件名（右栏当前资料优先，退回查看器活动文件）+ 页码 / 章节 */
+  const tutorMaterialName = readingCtx
+    ? (readingCtx.relPath.split('/').pop() || readingCtx.relPath)
+    : viewerActiveRel ? (viewerActiveRel.split('/').pop() || viewerActiveRel) : ''
+  const tutorMaterialMeta = readingCtx?.page ? `第 ${readingCtx.page} 页` : (readingCtx?.label ?? '')
   const wsMapRef = useRef<Record<string, string>>({})
   useEffect(() => { wsMapRef.current = wsSessionMap }, [wsSessionMap])
   const [wsSearch, setWsSearch] = useState('')
@@ -1047,7 +1132,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // → 整模块崩溃）。
   const zenActive = zenLevel >= 1 && !!onZenLevelChange
 
-  const refreshSessions = useCallback(async () => {
+  const refreshSessions = useCallback(async (): Promise<AgentSessionInfo[]> => {
     // 只保留 AI 教学来源的会话：助手侧栏 / AI 学堂 / 日程助手都有自己的列表（同表存储，按 source 分流）。
     // ★ 2026-10-13（F-8）：原来是排除法（`!== 'assistant'`）—— `schedule` 行也满足它，
     //   于是日程助手的会话会在「无工作区」桶里混进教学左栏。改成白名单，与 useAssistantChat 同一口径。
@@ -1063,7 +1148,44 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       activeIdRef.current = null
       setActiveId(null)
     }
+    return list
   }, [])
+
+  /* ---------- 「对话」模式会话列表（左栏；今天 / 昨天 / 更早） ---------- */
+  const tutorSessions = useMemo(
+    () => sessions.filter(s => s.aiTeachMode === 'tutor'),
+    [sessions],
+  )
+  const tutorGrouped = useMemo(() => {
+    const q = tutorSearch.trim().toLowerCase()
+    const now = Date.now()
+    const rows = tutorSessions
+      .filter(s => !q || String(s.title ?? '').toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => String(b.updatedAt ?? b.createdAt).localeCompare(String(a.updatedAt ?? a.createdAt)))
+    const out: Array<{ label: '今天' | '昨天' | '更早'; rows: AgentSessionInfo[] }> = [
+      { label: '今天', rows: [] }, { label: '昨天', rows: [] }, { label: '更早', rows: [] },
+    ]
+    for (const r of rows) out.find(g => g.label === tutorDayGroup(String(r.updatedAt ?? r.createdAt), now))!.rows.push(r)
+    return out
+  }, [tutorSessions, tutorSearch])
+  useEffect(() => {
+    if (!tutorActive || !activeId) { setTutorFolder(null); return }
+    let alive = true
+    const load = async () => {
+      const r = await aiTeachSessionFolder(activeId).catch(() => null)
+      let rel = r?.ok ? (r.relPath ?? null) : null
+      // 首条消息后后端把标题从「新对话」改成用户首句：文件夹跟着改名，保持 {MM-DD 标题} 一致。
+      // 手动改名走的是同一通道，改完 rel 已不含「新对话」，不会重复触发。
+      if (rel && activeTitle && activeTitle !== '新对话' && /新对话$/.test(rel)) {
+        const rr = await aiTeachRenameSessionFolder(activeId, activeTitle).catch(() => null)
+        if (rr?.ok && rr.relPath) rel = rr.relPath
+      }
+      if (alive) setTutorFolder(rel)
+    }
+    void load()
+    return () => { alive = false }
+  }, [tutorActive, activeId, activeTitle])
 
   /** 右栏支线中心「引用到主线」：把支线末条 AI 回答作为引用胶囊放进主线输入框（不自动发送） */
   const quoteFromLane = useCallback((text: string) => {
@@ -1092,6 +1214,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setMessages(rows.map(m => ({
       id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
       ...(m.images && m.images.length > 0 ? { images: m.images } : {}),
+      ...(m.teachMode ? { teachMode: m.teachMode } : {}),
       trace: m.traceJson ? (() => { try { return JSON.parse(m.traceJson) as AgentTraceStep[] } catch { return undefined } })() : undefined,
     })))
     return rows.length
@@ -1191,6 +1314,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (activeIdRef.current !== sid) {
       messagesSidRef.current = null
       setMessages([])
+      // 「对话」模式：每个会话各自一份右栏页签（RightViewer persistScope = tutor:<sid>）。
+      // 切会话前清掉宿主侧「当前活动文件」，避免旧会话的高亮 / 聚焦串到新会话；页签本身由 scope 重载。
+      if (tutorActiveRef.current) setViewerActiveRel(null)
       // 旧会话若正在生成产物：占位页签是**全局**的（不随会话重建），切走前必须 drop，
       // 否则完成事件被会话守卫丢掉，屏幕上会留一个禁关的「生成中」页签。
       if (generatingArtifactRef.current) {
@@ -1248,7 +1374,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return r
   }, [refreshMessages, reloadCourse, openViewerFile, requestViewer, refreshSessions])
 
-  const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string, images: ComposerImage[] = []): Promise<AgentChatResult | null> => {
+  const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string, images: ComposerImage[] = [], mode?: TutorTurnMode): Promise<AgentChatResult | null> => {
     const sid = activeIdRef.current
     if (!sid) return null
     // 同一会话只允许一个 run（与 useAssistantChat 同口径）；不同会话可并行（N-3）
@@ -1257,6 +1383,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       return null
     }
     beginRun(sid)
+    /* 「对话」模式的本轮方式与当前资料（方案 §2.2 / §2.4）：
+       · 非对话会话 `tutorTurn=false` → 两个参数都是 undefined，发送行为逐字不变；
+       · 对话会话未显式给 mode（提问卡答完 / 断点续跑等间接发送）= 走自动路由兜底。 */
+    const tutorTurn = tutorActiveRef.current
+    const teachMode: TutorTurnMode | undefined = tutorTurn
+      ? (mode ?? resolveTutorMode({
+          text: raw,
+          hasImages: images.length > 0,
+          hasMaterial: !!getReadingContext() || !!viewerActiveRelRef.current,
+          readingQuestion: TUTOR_READING_Q_RE.test(raw),
+        }))
+      : undefined
+    const reading: TutorReadingContext | undefined = tutorTurn ? (getReadingContext() ?? undefined) : undefined
     // 划词引用片段：仅「输入框发送」路径消费（withQuote），避免逐页讲解/模板等命令误带上无关引用。
     // 会话引用形式：引用以可见的 markdown 引用块并入消息正文（对话回看时来源可查），
     // 不再走不可见的 selectionContext 注入；单条截断 600 字防刷屏
@@ -1276,10 +1415,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // v3.2.0 条目6 规则1：**发送 = 无条件滚到底**（与规则3「上滚不打断」刻意不对称，对标 ChatGPT：
     // 刚发出消息本就该看到它，哪怕之前正在上方阅读）。共用 jumpToBottom 一份实现，见其定义处注释。
     jumpToBottom()
+    // 方式 chip 一次性：发出即回「自动」，避免用户忘了自己开过哪一档（方案 §3.1）
+    if (tutorTurn) setTutorMode('auto')
     const ov = convoLlm.current.get(sid)
     try {
       const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName,
-        images.length > 0 ? images.map(im => ({ name: im.name, mime: im.mime, dataUrl: im.dataUrl, w: im.w, h: im.h, bytes: im.bytes })) : undefined)
+        images.length > 0 ? images.map(im => ({ name: im.name, mime: im.mime, dataUrl: im.dataUrl, w: im.w, h: im.h, bytes: im.bytes })) : undefined,
+        teachMode, reading)
       return await finishRun(r, sid)
     } catch (err) {
       // 主进程异常逃逸：finishRun 仍要清 bucket / 拉消息，否则会话会永久停在「生成中」
@@ -1317,7 +1459,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (sid) void agentAbortSession(sid)
   }, [])
 
-  const doSend = useCallback(async (override?: string) => {
+  const doSend = useCallback(async (override?: string, forceMode?: TutorTurnMode) => {
     const text = (override ?? inputValueRef.current).trim()
     /** P2 多模态：本次随消息发送的图片（发出即清；失败也不留着误发下一轮） */
     const images = composerImages.images.slice()
@@ -1350,8 +1492,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const sk = pickedSkill
     setPickedSkill(null)
     const cid = crypto.randomUUID()
-    await sendText(text, cid, true, sk?.registryName, images) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
-  }, [pending, compressing, sendText, pickedSkill, composerImages.images, composerImages.clearImages, visionChatOk])
+    /* 「对话」模式：先按方式 chip 定本轮方式（auto → 渲染层路由，方案 §2.2），再带上当前资料。
+       非对话会话 `teachMode` / `reading` 均为 undefined，调用行为与旧版逐字一致。 */
+    const tutorTurn = tutorActiveRef.current
+    const teachMode: TutorTurnMode | undefined = tutorTurn
+      ? (forceMode ?? (tutorMode === 'auto'
+          ? resolveTutorMode({
+              text,
+              hasImages: images.length > 0,
+              hasMaterial: !!readingCtx || !!viewerActiveRelRef.current,
+              readingQuestion: TUTOR_READING_Q_RE.test(text),
+            })
+          : tutorMode))
+      : undefined
+    await sendText(text, cid, true, sk?.registryName, images, teachMode) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
+  }, [pending, compressing, sendText, pickedSkill, composerImages.images, composerImages.clearImages, visionChatOk, tutorMode, readingCtx])
 
   // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
@@ -1405,6 +1560,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
 
   // ---------- P5：工作区进出与管理 ----------
   const enterWs = useCallback((id: string) => {
+    // 工作区与「对话」模式互斥：进任何工作区都先退出对话容器（否则左栏 / 顶栏会挂着对话态）
+    tutorActiveRef.current = false
+    setTutorActive(false)
     setActiveWs(id); activeWsRef.current = id
     setWsSearch('')
     if (id !== '__none__') void aiTeachSetLastWorkspace(id)
@@ -1460,15 +1618,114 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // 只在选择页态（用户未手动退出过：boot 尝试仅一次）且记忆有效时自动进入；首次使用停留在选择页。
   const wsBootRef = useRef(false)
   useEffect(() => {
-    if (wsBootRef.current || wsList.length === 0) return
+    if (wsBootRef.current || wsList.length === 0 || tutorActive) return
     wsBootRef.current = true
     const candidate = lastWsId ? wsList.find(w => w.id === lastWsId) : null
     if (activeWs === null && candidate && !candidate.endedAt) enterWs(candidate.id)
-  }, [wsList, lastWsId, activeWs, enterWs])
+  }, [wsList, lastWsId, activeWs, enterWs, tutorActive])
   const exitToPicker = useCallback(() => {
+    // 从对话容器返回 = 同一个选择页出口；顺手清掉对话态的会话列表 UI（会话本身不删）
+    tutorActiveRef.current = false
+    setTutorActive(false)
+    setTutorRenamingId(null)
     setActiveWs(null); activeWsRef.current = null
     void refreshWorkspaces()
   }, [refreshWorkspaces])
+
+  /* ---------- 「对话」模式：进入 / 新建 / 打开 / 改名 / 加入题单 ---------- */
+  /** 进入对话：不建课、不建大纲，直接拿资料问（入口在选择工作区页工具栏） */
+  const enterTutor = useCallback(async () => {
+    tutorActiveRef.current = true
+    // 先清掉课程会话身份，避免切换那一帧把右栏 scope 记到课程会话上、顶栏短暂显示旧标题
+    activeIdRef.current = null
+    setActiveId(null); setActiveTitle(''); setMessages([])
+    setTutorActive(true)
+    wsBootRef.current = true // 「记住上次工作区」的自动进入不得打断对话模式
+    activeWsRef.current = null
+    setActiveWs(null)
+    setWsSearch(''); setWsSwitcherOpen(false); setEndFlow(null); setEndReportWs(null)
+    setActiveSegmentSid(null); setActiveUnitId(null); setSegmentStatus('open'); setCourseReviewChapter(null)
+    setPreflight(null); setSourcePayload(null); setAssistantSid(null)
+    setTutorMode('auto'); setTutorSearch(''); setTutorRenamingId(null)
+    setViewerActiveRel(null)
+    const list = await refreshSessions()
+    const recent = list
+      .filter(s => s.aiTeachMode === 'tutor')
+      .sort((a, b) => String(b.updatedAt ?? b.createdAt).localeCompare(String(a.updatedAt ?? a.createdAt)))[0]
+    if (recent) await openSession(recent.id, recent.title)
+    else {
+      activeIdRef.current = null
+      setActiveId(null); setActiveTitle(''); setMessages([])
+    }
+    void refreshWorkspaces()
+  }, [refreshSessions, openSession, refreshWorkspaces])
+
+  /** 新建对话：主进程建 `AI教学/对话/{MM-DD 标题}/` + 锚点 kind:'tutor'，随后打开 */
+  const createTutorSession = useCallback(async () => {
+    if (tutorCreating) return
+    setTutorCreating(true)
+    try {
+      const r = await aiTeachTutorCreate().catch(() => null)
+      if (!r?.ok || !r.sessionId) {
+        showToast({ type: 'error', message: `新建对话失败${r?.error ? `：${r.error}` : ''}` })
+        return
+      }
+      await refreshSessions()
+      await openSession(r.sessionId, '新对话')
+    } finally {
+      setTutorCreating(false)
+    }
+  }, [tutorCreating, refreshSessions, openSession])
+
+  /** 空态建议：没有会话时先建一个（不自动发送），再执行对应的填 / 切动作 */
+  const tutorSuggest = useCallback(async (act: () => void) => {
+    if (!activeIdRef.current) {
+      await createTutorSession()
+      if (!activeIdRef.current) return
+    }
+    act()
+  }, [createTutorSession])
+
+  /** 左栏行内改名：会话库标题 + 会话文件夹同步改名（与课程会话同一口径） */
+  const commitTutorRename = useCallback(async (sid: string) => {
+    const t = tutorRenameDraft.trim().slice(0, 40)
+    setTutorRenamingId(null)
+    const row = sessions.find(s => s.id === sid)
+    if (!t || !row || t === row.title) return
+    setSessions(prev => prev.map(s => (s.id === sid ? { ...s, title: t } : s)))
+    if (activeIdRef.current === sid) setActiveTitle(t)
+    await agentRenameSession(sid, t).catch(() => null)
+    void aiTeachRenameSessionFolder(sid, t).then(r => {
+      if (r && !r.ok && r.error) showToast({ type: 'error', message: `会话文件夹改名失败：${r.error}` })
+    })
+    void refreshSessions()
+  }, [tutorRenameDraft, sessions, refreshSessions])
+
+  /** 解题动作行「加入题单」：把这条回复里的 ```quiz 围栏追加进 `{会话夹}/产物/题单.md`（只追加不覆盖） */
+  const addSolveToSheet = useCallback(async (content: string) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    const fences = extractQuizFences(content)
+    if (fences.length === 0) { showToast({ type: 'warning', message: '这条回复里没有可加入题单的题目' }); return }
+    const f = await aiTeachSessionFolder(sid).catch(() => null)
+    const dir = f?.ok && f.relPath ? f.relPath : ''
+    if (!dir) { showToast({ type: 'warning', message: '会话文件夹还没建立（先发一条消息）' }); return }
+    const rootId = vaultRootId
+    if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
+    const rel = `${dir}/产物/题单.md`
+    const cur = await workspaceReadFile(rootId, rel).catch(() => null)
+    const exists = !!cur && typeof cur.content === 'string'
+    const head = exists ? String(cur.content) : '# 题单\n\n'
+    const block = `\n## ${new Date().toISOString().slice(0, 10)} · 来自对话\n\n${fences.join('\n\n')}\n`
+    let w = await workspaceWriteFile(rootId, rel, head + block).catch(() => null)
+    if (!w?.ok && !exists) {
+      // 「产物」目录还没建：写失败时补建一次再重试（ws:mkdir 会重名加后缀，故只在缺目录时调）
+      const mk = await workspaceMkdir(rootId, `${dir}/产物`).catch(() => null)
+      if (mk?.ok) w = await workspaceWriteFile(rootId, rel, head + block).catch(() => null)
+    }
+    if (!w?.ok) { showToast({ type: 'error', message: `加入题单失败${w?.error ? `：${w.error}` : ''}` }); return }
+    showToast({ type: 'info', message: '已加入题单', detail: rel })
+  }, [vaultRootId])
   /** 结课流程入口（选择页「提前结课…」/ 已结课预览「资料沉淀」） */
   const startEndFlow = useCallback((wsId: string, step: 1 | 2 | 3 = 1) => setEndFlow({ wsId, step }), [])
   const exitEndFlow = useCallback(() => {
@@ -1894,7 +2151,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * 推荐动作条只在「已进入课程段」的空态露出：没开段的自由对话 / 课程助手建课没有段内动作可推荐。
    * 与 emptyState 分离，是为了让居中位移覆盖所有空态、而推荐动作仍只照顾本段。
    */
-  const heroMode = emptyState && !!activeSegment
+  const heroMode = emptyState && !!activeSegment && !tutorActive
   /**
    * 空态居中位移量（2026-11-20 对齐原型）：
    * 居中的是**整组** —— 空态标题 + 说明 + 输入卡 + 卡下控件行 / 推荐动作条；后几项都在 dock 内部，
@@ -3044,15 +3301,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     <div className="kb-theme-surface kb-theme-surface--solid h-full flex flex-col min-h-0 relative">
       {/* v3.8.0 §二：顶栏瘦身 —— 去掉会话页签与课程分段器（会话导航归左栏列表、课程切换归中栏视图切换器）；
           工作区 chip 改为面包屑「AI教学 / 工作区 / 会话名」；2026-11-22 起右侧只剩一枚「打开右侧栏」图标 */}
-      {activeWs ? (
+      {(activeWs || tutorActive) ? (
       <>
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 shrink-0 select-none">
-        <button onClick={exitToPicker} data-tip="返回工作区选择页" aria-label="返回工作区选择页"
+        <button onClick={exitToPicker} data-tip={tutorActive ? '返回选择页' : '返回工作区选择页'} aria-label={tutorActive ? '返回选择页' : '返回工作区选择页'}
           className="shrink-0 flex items-center gap-1 max-w-[260px] px-1.5 py-0.5 rounded-md text-[11.5px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-          <Folder size={12} className="shrink-0 text-[var(--accent)]" />
+          {tutorActive
+            ? <MessagesSquare size={12} className="shrink-0 text-[var(--accent)]" />
+            : <Folder size={12} className="shrink-0 text-[var(--accent)]" />}
           <span className="shrink-0 opacity-60">AI教学</span>
           <span className="shrink-0 opacity-30">/</span>
-          <span className="truncate">{wsActive?.name ?? '工作区'}</span>
+          <span className="truncate">{tutorActive ? '对话' : (wsActive?.name ?? '工作区')}</span>
         </button>
         {activeId && (
           <>
@@ -3155,6 +3414,89 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               )}
             </div>
           )}
+          {tutorActive ? (
+          /* 「对话」模式左栏：会话列表（约 248px）。没有课程树 / 资源管理器 / 素材 —— 对话不建课。 */
+          <div className="flex h-full min-h-0 flex-col" data-wb="aiTutorSessionRail">
+            <div className="shrink-0 border-b border-[var(--border-color)] px-2 py-1.5 select-none">
+              <div className="flex items-center gap-1.5">
+                <MessagesSquare size={12} className="shrink-0 text-[var(--accent)]" />
+                <span className="text-[11.5px] font-semibold text-[var(--text-primary)]">对话</span>
+                <span className="shrink-0 rounded-full bg-[var(--bg-hover)] px-1.5 text-[9.5px] text-[var(--text-muted)] tabular-nums">{tutorSessions.length}</span>
+                <span className="flex-1" />
+                <button type="button" onClick={() => void createTutorSession()} disabled={tutorCreating}
+                  data-tip="新建对话（不建课）" aria-label="新建对话（不建课）" data-wb="aiTutorNewSession"
+                  className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors disabled:opacity-40">
+                  {tutorCreating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                </button>
+              </div>
+              <div className="relative mt-1.5">
+                <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                <input value={tutorSearch} onChange={e => setTutorSearch(e.target.value)} placeholder="搜索对话" spellCheck={false}
+                  data-wb="aiTutorSearch"
+                  className="w-full rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] py-1 pl-7 pr-2 text-[11.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
+              </div>
+            </div>
+            <div className="kb-thin-scroll min-h-0 flex-1 overflow-y-auto px-1 py-1">
+              {tutorGrouped.every(g => g.rows.length === 0) ? (
+                <div className="px-2 py-6 text-center text-[11px] leading-relaxed text-[var(--text-muted)]">
+                  {tutorSessions.length === 0 ? '还没有对话' : '没有匹配的对话'}
+                  <button type="button" onClick={() => void createTutorSession()}
+                    className="mt-1.5 block w-full rounded-md py-1 text-[10.5px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]">新建对话</button>
+                </div>
+              ) : tutorGrouped.map(g => g.rows.length === 0 ? null : (
+                <div key={g.label} className="mb-1">
+                  <div className="px-1.5 py-1 text-[10px] text-[var(--text-muted)] select-none">{g.label}</div>
+                  {g.rows.map(s => {
+                    const on = activeId === s.id
+                    const t = Date.parse(String(s.updatedAt ?? s.createdAt).replace(' ', 'T'))
+                    return (
+                      <div key={s.id} role="button" tabIndex={0}
+                        onClick={() => { if (tutorRenamingId !== s.id && activeId !== s.id) void openSession(s.id, s.title) }}
+                        onDoubleClick={() => { setTutorRenamingId(s.id); setTutorRenameDraft(s.title) }}
+                        onKeyDown={e => { if (e.key === 'Enter' && tutorRenamingId !== s.id && activeId !== s.id) void openSession(s.id, s.title) }}
+                        data-wb="aiTutorSessionRow"
+                        className={`group relative flex items-start gap-1.5 rounded-md px-1.5 py-1 cursor-default transition-colors ${on ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
+                        <div className="min-w-0 flex-1">
+                          {tutorRenamingId === s.id ? (
+                            <input autoFocus value={tutorRenameDraft} maxLength={40}
+                              onClick={e => e.stopPropagation()}
+                              onDoubleClick={e => e.stopPropagation()}
+                              onChange={e => setTutorRenameDraft(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.nativeEvent.isComposing) return
+                                if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); void commitTutorRename(s.id) }
+                                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setTutorRenamingId(null) }
+                              }}
+                              onBlur={() => setTutorRenamingId(null)}
+                              className="w-full rounded border border-[var(--accent)] bg-[var(--bg-primary)] px-1 py-0.5 text-[12px] text-[var(--text-primary)] outline-none" />
+                          ) : (
+                            <>
+                              <div className={`truncate text-[12px] ${on ? 'font-medium' : ''}`} data-tip={s.title}>{s.title || '未命名对话'}</div>
+                              <div className="mt-0.5 truncate text-[10px] text-[var(--text-muted)] tabular-nums">
+                                {Number.isFinite(t) ? relativeTime(Date.now(), t) : ''}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                        <button type="button" data-tip="删除对话" aria-label="删除对话"
+                          onClick={e => void delSession(e, s.id, s.title)}
+                          className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] ${on ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}>
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+            <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 select-none">
+              <div className="truncate text-[9.5px] text-[var(--text-muted)]" data-tip={tutorFolder ?? undefined}>
+                {tutorFolder ? tutorFolder : '不建课 · 每个对话一个文件夹'}
+              </div>
+            </div>
+          </div>
+          ) : (
+          <>
           {/* v3.1.2（开发负责人 2026-09-14）：会话列表区回归，与资源管理器「分区并列共存」——
               形态 A：会话（上，限高可折叠）+ 资源管理器（中，撑满剩余）。
               折叠任一分区，其余分区自动获得空间（原会话列表区曾因「页签即会话切换器」退役，本次恢复）。 */}
@@ -3267,6 +3609,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             )}
           </div>
           </div>
+          </>
+          )}
         </ResizablePanel>
 
         {/* 中栏：对话主区固定、永不替换；md / pptx / html / 图片等阅读都在右侧查看器页签里。
@@ -3280,7 +3624,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             transition: 'padding-right var(--dur-std) var(--ease-kb)',
           }}
         >
-          {preflight && preflightChapter ? (
+          {!tutorActive && preflight && preflightChapter ? (
             <Preflight
               key={`${preflight.chapterId}:${preflight.unitId}`}
               chapter={preflightChapter}
@@ -3300,7 +3644,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               {/* 段上下文条（章名 · 第N段 · N 个知识点 · 收尾 · 要求 · 进度）已于 2026-11-22 整块退役：
                   收尾 → 左栏当前段行 ✓ + AI 回复里的 ```wrapup 围栏卡；要求 → 输入区「要求」pill；进度 → 左栏课程树本身。
                   段标题信息仍在中栏空态标题与左栏段行（「第N段 · N 个」）里，没有丢独有信息。 */}
-              {courseReviewChapter && activeId && courseState?.reviews[courseReviewChapter]?.sessionId === activeId && (
+              {!tutorActive && courseReviewChapter && activeId && courseState?.reviews[courseReviewChapter]?.sessionId === activeId && (
                 <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
                   <span className="shrink-0 text-[11px] font-medium text-[var(--text-primary)]">章末复习 · {courseReviewChapterName}</span>
                   <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]">本章学完已解锁；复习不引入新知识点</span>
@@ -3354,7 +3698,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           codeBlockChrome="card"
                         />
                         {/* L4 引用网络：跳转 chip（AI 输出 `跳转：<知识点名>` → 打开最近段） */}
-                        {parsedMsg(m).jumps.map((name, k) => {
+                        {!tutorActive && parsedMsg(m).jumps.map((name, k) => {
                           const hit = courseJumpByName.get(normName(name))
                           return (
                             <button key={k} disabled={!hit}
@@ -3416,7 +3760,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             居中并与输入区那条带子左右对齐（同 `max-w-[820px] mx-auto px-3`）。
                             满意才「正式生成」落 课程.md；落盘后转「已落盘 · 课程.md + 打开课程」。
                             2026-10-14 拍板：从输入区带子挪进对话流、删「继续修改」、章节列表不再内部滚动。 */}
-                        {outlineFence?.idx === idx && outlineDraft && (
+                        {!tutorActive && outlineFence?.idx === idx && outlineDraft && (
                           <div className="mt-2 w-full max-w-[820px] mx-auto px-3">
                             <div className="kb-pop rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
                               <div className="flex items-center gap-2">
@@ -3460,7 +3804,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             （照抄 ```outline 的「围栏 → 消息内卡 → 按钮直接调 UI 动作」模式，不新增 AI 工具、不改 IPC）。
                             守卫：无工作区 / '__none__' 不渲染；已结课不渲染（流末尾「本课已结课」卡接管回看）。
                             `endCourseFence` 是全局唯一结果 → 全对话至多一张卡。 */}
-                        {endCourseFence?.idx === idx && activeWs && activeWs !== '__none__' && !courseEnded && (
+                        {!tutorActive && endCourseFence?.idx === idx && activeWs && activeWs !== '__none__' && !courseEnded && (
                           <div className="mt-2 w-full max-w-[820px] mx-auto px-3">
                             <div className="kb-pop flex items-center gap-2 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
                               <ScrollText size={12} className="shrink-0 text-[var(--accent)]" />
@@ -3478,7 +3822,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             2026-11-23 之前这张卡常驻流末尾、每轮都挂 —— 改为围栏驱动后只有模型判断该收尾才出现。
                             `wrapupFence` 取最后一条带围栏的 assistant 消息 → 全对话至多一张；
                             已收尾 / 已结课 / 非当前段会话都不渲染（流末尾换成「本段已收尾 · 交接.md」行）。 */}
-                        {wrapupFence?.idx === idx && activeSegment && activeId === activeSegmentSid && segmentStatus === 'open' && !courseEnded && (
+                        {!tutorActive && wrapupFence?.idx === idx && activeSegment && activeId === activeSegmentSid && segmentStatus === 'open' && !courseEnded && (
                           endConfirm === 'card' ? (
                             <div className="mt-2 w-full max-w-[820px] mx-auto px-3">
                               <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--accent)]/45 bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
@@ -3506,6 +3850,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               </div>
                             </div>
                           )
+                        )}
+                        {/* 「对话」模式 · 解题动作行：只挂**最后一条** assistant 且其本轮方式 = solve（方案 §六-3）。
+                            「加入错题」本期不渲染：聊天回答不是知识页，拿不到 pageId → 不做假按钮（登记第三批）。 */}
+                        {idx === tutorSolveRowIdx && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1.5" data-wb="aiTutorSolveActions">
+                            <button type="button"
+                              onClick={() => { void doSend('再来两道同类型变式题，题号从 1 开始，用 ```quiz 围栏。', 'solve') }}
+                              className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/50 hover:text-[var(--text-primary)]">
+                              <Repeat size={11} />再来两道变式
+                            </button>
+                            <button type="button" onClick={() => void addSolveToSheet(m.content)}
+                              className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/50 hover:text-[var(--text-primary)]">
+                              <ClipboardList size={11} />加入题单
+                            </button>
+                          </div>
                         )}
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
@@ -3550,6 +3909,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                             <Copy size={12} />复制
                           </button>
+                          {m.teachMode && (
+                            <span className="shrink-0 rounded-full bg-[var(--bg-hover)] px-1.5 text-[10px] text-[var(--text-muted)]" data-wb="aiTutorTurnBadge">{TUTOR_MODE_LABELS[m.teachMode]}</span>
+                          )}
                           {fmtTime(m.createdAt) && <span className="text-[11px] text-[var(--text-muted)] tabular-nums ml-0.5">{fmtTime(m.createdAt)}</span>}
                         </div>
                         {/* 本轮消耗：中栏是**自己渲染消息**（不走共用 MessageList），这行与助手面同源同口径 ——
@@ -3618,7 +3980,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     · 本段已收尾 → 一行「本段已收尾 · 交接.md」（点开交接文档）
                     · 本课程已结课 → 「本课已结课」卡（结课报告 / 重新开课）—— 顶栏结课组退役后的落点
                     复习课 / 自由对话 / 课程助手没有这张卡。不用模态（铁律 25）；进场走 .kb-item-in。 */}
-                {activeSegment && activeId === activeSegmentSid && segmentStatus === 'ended' && !courseEnded && (
+                {!tutorActive && activeSegment && activeId === activeSegmentSid && segmentStatus === 'ended' && !courseEnded && (
                   <div className="kb-item-in flex items-center gap-1.5 pt-0.5 text-[10.5px] text-[var(--text-muted)] select-none">
                     <Check size={11} className="shrink-0 text-[var(--success)]" />
                     <span className="shrink-0">本段已收尾 ·</span>
@@ -3631,7 +3993,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     )}
                   </div>
                 )}
-                {courseEnded && activeWs && activeWs !== '__none__' && (
+                {courseEnded && activeWs && activeWs !== '__none__' && !tutorActive && (
                   <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
                     <div className="min-w-0 flex-1">
                       <div className="text-[11.5px] text-[var(--text-primary)]">本课已结课</div>
@@ -3800,15 +4162,30 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         「章末复习」保留状态名（它是模式而不是对话开场）；小字说明整段删除 ——
                         用户要的是标语，不是操作手册。 */}
                     <div className="max-w-[620px] text-balance text-[24px] font-semibold leading-snug text-[var(--text-primary)]">
-                      {courseReviewChapter ? '章末复习' : (
+                      {tutorActive ? '对话' : courseReviewChapter ? '章末复习' : (
                         <>
                           {emptyQuote.text}
                           <span className="ml-2 align-middle text-[12px] font-normal text-[var(--text-muted)]">— {emptyQuote.source}</span>
                         </>
                       )}
                     </div>
-                    {!activeId && (
+                    {!tutorActive && !activeId && (
                       <button onClick={() => void courseOpenAssistant()} className="mt-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-[11.5px] text-white hover:opacity-90">打开课程助手</button>
+                    )}
+                    {/* 「对话」模式空态建议：只填输入框 / 切对应方式 / 打开资料面，绝不自动发送 */}
+                    {tutorActive && (
+                      <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5" data-wb="aiTutorSuggestions">
+                        {([
+                          { label: '拖题目照片给我', act: () => { setTutorMode('solve'); composerImages.openPicker() } },
+                          { label: '打开资料让我讲', act: () => { setTutorMode('read'); openRail() } },
+                          { label: '先问我几个问题', act: () => { setTutorMode('ask'); setTimeout(() => inputRef.current?.focus(), 0) } },
+                        ]).map(c => (
+                          <button key={c.label} type="button" onClick={() => { void tutorSuggest(c.act) }}
+                            className="rounded-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-[color,background-color,border-color,transform] hover:-translate-y-px hover:border-[var(--accent)]/50 hover:text-[var(--text-primary)] active:translate-y-0 motion-reduce:transform-none">
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}
@@ -4090,7 +4467,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         </span>
                       </div>
                     )}
-                    {activeSegment && activeId === activeSegmentSid && prevHandoff && prevHandoffSid === activeSegmentSid && (
+                    {!tutorActive && activeSegment && activeId === activeSegmentSid && prevHandoff && prevHandoffSid === activeSegmentSid && (
                       <Collapsible open={segmentHandoffVisible} innerClassName="" className="shrink-0">
                         {() => (
                           <div className="mb-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden kb-view-in">
@@ -4108,6 +4485,39 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         )}
                       </Collapsible>
                     )}
+                    {tutorActive && (
+                      /* 「对话」模式方式行（原型 mode-row）：单枚资料 chip + 五档方式；不挤进 footer。
+                         auto 只在渲染层存在，发送前由 resolveTutorMode 解析（方案 §2.2 / §3.1）。 */
+                      <div className="mb-1.5 flex min-w-0 items-center gap-2 select-none" data-wb="aiTutorModeRow">
+                        {(readingCtx || viewerActiveRel) && tutorMaterialName && (
+                          <span className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] py-0.5 pl-2 pr-1 text-[10.5px] text-[var(--text-secondary)]" data-wb="aiTutorMaterialChip">
+                            <FileText size={10} className="shrink-0 text-[var(--accent)]" />
+                            <button type="button" onClick={openRail} data-tip="打开右侧栏" aria-label="打开右侧栏"
+                              className="min-w-0 max-w-[180px] truncate text-left transition-colors hover:text-[var(--text-primary)]">
+                              {tutorMaterialName}{tutorMaterialMeta ? ` · ${tutorMaterialMeta}` : ''}
+                            </button>
+                            {readingCtx && (
+                              <button type="button" onClick={() => publishReadingContext(null)} data-tip="移除当前资料" aria-label="移除当前资料"
+                                className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]">
+                                <X size={9} />
+                              </button>
+                            )}
+                          </span>
+                        )}
+                        <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">方式</span>
+                        <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="group" aria-label="本轮方式">
+                          {(['auto', 'chat', 'read', 'solve', 'ask'] as TutorUiMode[]).map(m => (
+                            <button key={m} type="button" aria-pressed={tutorMode === m} onClick={() => setTutorMode(m)}
+                              data-tip={TUTOR_MODE_TIPS[m]} aria-label={TUTOR_MODE_LABELS[m]}
+                              className={`shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] transition-colors ${tutorMode === m
+                                ? 'border-[var(--accent)]/55 bg-[var(--accent)]/10 text-[var(--accent)]'
+                                : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                              {TUTOR_MODE_LABELS[m]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="relative">
                       {slashOpen && (
                         <SlashCommandMenu items={slashItems} activeIndex={slashActive} onHover={setSlashActive} onPick={pickSlash} />
@@ -4116,7 +4526,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         onPaste={composerImages.onPaste}
                         onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void doSend() } }}
                         disabled={courseReadonly}
-                        rows={2} placeholder={courseReadonly ? '本段已收尾（只读）· 要补充请开新段' : quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
+                        rows={2} placeholder={courseReadonly ? '本段已收尾（只读）· 要补充请开新段' : tutorActive ? '把题目、材料，或者卡住的地方贴进来…（Enter 发送）' : quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
                         className="w-full appearance-none px-0.5 py-[6px] text-[15px] leading-[1.6] resize-none outline-none bg-transparent! border-0! rounded-none! disabled:opacity-60" />
                     </div>
                     {composerFooter}
@@ -4153,8 +4563,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           className={`kb-tray-row w-full h-[34px] flex items-center gap-1.5 rounded-xl border border-[var(--border-color)] px-1.5 transition-opacity duration-[200ms] motion-reduce:transition-none ${trayOpen ? 'opacity-100' : 'opacity-0'}`}
                           style={{ background: 'color-mix(in srgb, var(--bg-secondary) 72%, var(--bg-primary))' }}
                         >
-                          {docPills}
-                          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+                          {!tutorActive && (
+                            <>
+                              {docPills}
+                              <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+                            </>
+                          )}
                           {/* 段已收尾 / 课程已结课：只压暗并禁点右侧控制（pill 不压暗、仍可点，打开右栏笔记页签）；
                               抽屉本身**不自动收起**、抓手不禁用 —— 收尾态最可能想回看画像 / 要求。 */}
                           <div className={`flex min-w-0 flex-1 items-center gap-1.5 ${courseReadonly || courseEnded ? 'opacity-45 pointer-events-none select-none' : ''}`}>
@@ -4258,6 +4672,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         rootId={vaultRootId}
         sessionId={activeId ?? ''}
         sessionTitle={activeTitle}
+        persistScope={tutorActive ? `tutor:${activeId || 'empty'}` : undefined}
         workspaceId={activeWs && activeWs !== '__none__' ? activeWs : ''}
         request={viewerReq}
         onOpenInEditor={(rel) => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))}
@@ -4312,6 +4727,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={11} /></button>
                 )}
               </div>
+              <button onClick={() => void enterTutor()} data-tip="不建课，直接拿资料问" aria-label="对话：不建课，直接拿资料问" data-wb="aiTeachTutorEntry"
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-[12.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)]/50 hover:text-[var(--text-primary)]">
+                <MessagesSquare size={12} /><span>对话</span>
+              </button>
               <button onClick={openWsCreate}
                 className="flex shrink-0 items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12.5px] text-white transition-opacity hover:opacity-90">
                 <Plus size={12} /><span className="kb-l1">新建工作区</span>

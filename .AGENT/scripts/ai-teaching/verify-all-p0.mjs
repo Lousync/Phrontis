@@ -58,6 +58,9 @@ const SCRIPTS = [
   'verify-session-isolation.mjs',
   'verify-ai-teaching-tools.mjs',
   'verify-doc-ipc.mjs',
+  'verify-tutor-mode.mjs',
+  'verify-tutor-ui.mjs',
+  'verify-reading-context.mjs',
 ]
 
 const dir = path.join(ROOT, '.AGENT/scripts/ai-teaching')
