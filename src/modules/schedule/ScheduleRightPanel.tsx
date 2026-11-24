@@ -3,6 +3,7 @@ import { Bot, GitBranch, ListTodo } from 'lucide-react'
 import type { ScheduleTag, ScheduleTodo, ScheduleWorkflow } from '../../types'
 import { getAllScheduleTodos, getScheduleTags, listScheduleWorkflows } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
+import { claimToastRight } from '../../lib/toastAvoid'
 import { useScheduleUi, type SchedulePanelTab } from './ScheduleUiContext'
 import { ScheduleAssistantPanel } from './ScheduleAssistantPanel'
 import { TaskPanel } from './components/TaskPanel'
@@ -34,18 +35,25 @@ export function ScheduleRightPanel() {
   useEffect(() => { reload() }, [reload])
   useDataChanged('schedule', reload)
 
+  // Toast 避让：右栏盖住的右下角不属于 DOM（固定定位的 Toast 会被整块压住）。
+  // 宽度用实测；面板随模块 Tab 被 `display:none` 隐藏时 IntersectionObserver 会再报一次，
+  // 那次量到 0 宽 → 撤销登记，切到别的模块不会留下一个凭空偏左的 Toast（2026-11-24 收口）。
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
     const apply = () => {
-      document.documentElement.style.setProperty('--kb-toast-right', `${Math.round(el.getBoundingClientRect().width) + 16}px`)
+      const width = el.getBoundingClientRect().width
+      claimToastRight('schedule-right-panel', width > 0 ? width + 16 : null)
     }
     apply()
     const ro = new ResizeObserver(apply)
     ro.observe(el)
+    const io = new IntersectionObserver(apply, { threshold: 0 })
+    io.observe(el)
     return () => {
       ro.disconnect()
-      document.documentElement.style.removeProperty('--kb-toast-right')
+      io.disconnect()
+      claimToastRight('schedule-right-panel', null)
     }
   }, [])
 

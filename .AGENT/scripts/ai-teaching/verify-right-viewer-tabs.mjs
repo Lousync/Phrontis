@@ -496,6 +496,9 @@ check('blocked flush keeps the tab and explains why',
 check('tab removal animates with the shared .kb-item-out token', /kb-item-out/.test(shell) || /closingIds/.test(shell))
 check('web native view is hidden for menus, restored via a sync token',
   /webPaneHideAll/.test(shell) && /webSyncToken/.test(shell))
+check('menus keep the native view suppressed for the whole open period',
+  /const \[chromeMenuOpen, setChromeMenuOpen\]/.test(shell)
+  && /suppressed=\{chromeMenuOpen\}/.test(shell))
 check('pane slots stay mounted via display:none', /display: active \? 'flex' : 'none'/.test(shell))
 check('no alert() / confirm() in the shell', !/\balert\s*\(/.test(shell) && !/\bconfirm\s*\(/.test(shell))
 check('shell keeps an empty state card for zero tabs', /ViewerEmptyCard/.test(shell))

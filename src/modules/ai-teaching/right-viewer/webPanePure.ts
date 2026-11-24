@@ -153,13 +153,21 @@ export function boundsPayload(rect: {
  *
  * 原生视图永远盖在 DOM 上，所以这是「白块」的唯一闸门：只要有一条不满足就 hide。
  * 失败态同样 hide —— 否则错误卡片会被一块白屏盖住（§8 层级硬约束）。
+ *
+ * `suppressed`（2026-11-24）：壳的浮层（`+` 菜单 / 全部页签 / 旁问历史）打开期间必须一直 hide。
+ * ★ 为什么不能只靠壳调一次 `webPaneHideAll()`：页面还在加载时 `webPane:changed`
+ *   （标题 / 地址 / 进度）会驱动 `scheduleSync`，几何重算看到「页签仍活动 + 面板仍开」
+ *   就会把视图重新 show 回来，把刚弹出的菜单盖掉 —— 用户侧表象是「菜单被网页吃掉一截」。
  */
 export function shouldShowView(input: {
   active: boolean
   open: boolean
   url: string
   error?: string
+  /** 浮层打开中：任何几何刷新都不得把原生视图放回来 */
+  suppressed?: boolean
 }): boolean {
+  if (input.suppressed) return false
   return !!(input.active && input.open && input.url && !input.error)
 }
 

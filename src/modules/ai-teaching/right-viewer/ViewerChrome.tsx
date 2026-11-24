@@ -214,7 +214,12 @@ export function ViewerChrome(props: ViewerChromeProps) {
     tabRefs.current[id]?.focus({ preventScroll: true })
   }, [tabs, activeId, onSelect])
 
-  const openMenu = (kind: Exclude<MenuKind, 'none'>) => setMenu((m) => (m === kind ? 'none' : kind))
+  const openMenu = (kind: Exclude<MenuKind, 'none'>) => {
+    const next = menu === kind ? 'none' : kind
+    // 打开这一拍就通知壳收起网页原生视图（不能等 effect：晚一帧菜单就会被切掉一截）
+    if (next !== 'none') onMenuOpenChange(true)
+    setMenu(next)
+  }
 
   /* ------------------------------ 页签按钮 ------------------------------ */
 

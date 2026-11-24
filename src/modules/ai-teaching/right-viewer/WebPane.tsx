@@ -14,6 +14,7 @@ import {
   webPaneSetVisible,
 } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
+import { claimToastRight } from '../../../lib/toastAvoid'
 import {
   boundsPayload,
   normalizeUrl,
@@ -52,6 +53,8 @@ interface PaneSnapshot {
   active: boolean
   open: boolean
   error?: string
+  /** 壳的浮层打开中（新建菜单 / 全部页签 / 旁问历史） */
+  suppressed: boolean
 }
 
 /**
@@ -111,11 +114,23 @@ export function WebPane(props: WebPaneProps) {
   const createdRef = useRef<Set<string>>(new Set())
   const visibleRef = useRef<string | null>(null)
   const frameRef = useRef<number>(0)
+  /** 占位区此刻是否在视口内（模块切 Tab 时会被 `display:none` 收起） */
+  const intersectingRef = useRef(true)
+  /** 上一次真正发出去的原生视图几何：跟手循环每帧都会量，没变就不发 IPC */
+  const lastSentRef = useRef('')
   const sessionRef = useRef('')
   const lastReqRef = useRef('')
   /** 首次挂载 ≠ 换会话：挂载时 initialUrl 是「用户刚点开的东西」，必须直接加载 */
   const firstMountRef = useRef(true)
-  const latestRef = useRef<PaneSnapshot>({ tabs: [], activeIndex: 0, active: false, open: false })
+  /**
+   * 首帧 / 首次渲染时的占位快照。`suppressed` 缺省 false ——
+   * 壳没传（旧调用方）时行为与加这个字段之前完全一致。
+   */
+  const latestRef = useRef<PaneSnapshot>({
+    tabs: [], activeIndex: 0, active: false, open: false, suppressed: false,
+  })
+  /** Toast 避让的登记身份（一个 pane 一个；卸载时撤销） */
+  const toastKey = `ai-teach-web-pane:${props.tabId}`
 
   const activeTab = tabs[activeIndex] ?? null
   const activeRuntime = (activeTab && runtime[activeTab.id]) || EMPTY_RUNTIME
@@ -128,6 +143,7 @@ export function WebPane(props: WebPaneProps) {
     active: props.active,
     open: props.open,
     error: activeRuntime.error,
+    suppressed: !!props.suppressed,
   }
 
   /* ------------------------------------------------------------ 主进程桥 */
@@ -141,28 +157,32 @@ export function WebPane(props: WebPaneProps) {
    * 为什么「先 setBounds 再 setVisible」：先显形再改几何 = 白块闪一下再跳位。
    *
    * 为什么 `want=false` 也一定要发 hide：原生视图永远盖在 DOM 上，
-   * 面板收起（open=false）、切到别的页签（active=false）、加载失败、宽度归零，
+   * 面板收起（open=false）、切到别的页签（active=false）、加载失败、宽度归零、浮层打开，
    * 任何一种漏 hide 都会在别处留一块不属于任何界面的白。
    */
+  const hideVisible = useCallback(() => {
+    const visible = visibleRef.current
+    if (visible) {
+      visibleRef.current = null
+      void webPaneSetVisible(visible, false)
+    }
+    // 重新显形时必须重发一次几何（隐藏期间布局可能已经变了，而视图自己不会知道）
+    lastSentRef.current = ''
+    claimToastRight(toastKey, null)
+  }, [toastKey])
+
   const syncBounds = useCallback(() => {
     const snap = latestRef.current
     const tab = snap.tabs[snap.activeIndex]
-    const prevVisible = visibleRef.current
 
     // 没有当前页签 / 该页签还没建 view：把上一块收掉就结束
     if (!tab || !createdRef.current.has(tab.id)) {
-      if (prevVisible) {
-        visibleRef.current = null
-        void webPaneSetVisible(prevVisible, false)
-      }
+      hideVisible()
       return
     }
 
     // 切页签：先把上一个视图收掉，别让两个原生视图叠在同一块占位区
-    if (prevVisible && prevVisible !== tab.id) {
-      visibleRef.current = null
-      void webPaneSetVisible(prevVisible, false)
-    }
+    if (visibleRef.current && visibleRef.current !== tab.id) hideVisible()
 
     const el = slotRef.current
     const rect = el ? el.getBoundingClientRect() : null
@@ -172,20 +192,30 @@ export function WebPane(props: WebPaneProps) {
       open: snap.open,
       url: tab.url,
       error: snap.error,
+      suppressed: snap.suppressed,
     })
 
     if (!bounds || !want) {
-      if (visibleRef.current === tab.id || prevVisible === tab.id) {
-        visibleRef.current = null
-        void webPaneSetVisible(tab.id, false)
-      }
+      hideVisible()
       return
     }
 
-    void webPaneSetBounds(tab.id, bounds)
-    visibleRef.current = tab.id
-    void webPaneSetVisible(tab.id, true)
-  }, [])
+    // 几何没变就不发 IPC：跟手循环每帧都会走到这里（见下方 follow effect）
+    const key = `${bounds.x},${bounds.y},${bounds.width},${bounds.height}`
+    if (key !== lastSentRef.current) {
+      lastSentRef.current = key
+      void webPaneSetBounds(tab.id, bounds)
+    }
+    if (visibleRef.current !== tab.id) {
+      visibleRef.current = tab.id
+      void webPaneSetVisible(tab.id, true)
+    }
+    // Toast 固定在右下角，会被原生视图整块压住 → 让出「视图左缘到窗口右缘」这一段
+    claimToastRight(toastKey, Math.max(0, window.innerWidth - bounds.x))
+  }, [hideVisible, toastKey])
+
+  /** 启动跟手循环（幂等）；循环自己会在「不该跟」时停住 */
+  const followStartRef = useRef<(() => void) | null>(null)
 
   /** 同一帧最多发一次 bounds / visible（拖拽 / 宽度过渡一帧能触发几十次回调） */
   const scheduleSync = useCallback(() => {
@@ -193,6 +223,7 @@ export function WebPane(props: WebPaneProps) {
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = 0
       syncBounds()
+      followStartRef.current?.()
     })
   }, [syncBounds])
 
@@ -434,12 +465,66 @@ export function WebPane(props: WebPaneProps) {
     }
   }, [scheduleSync])
 
-  // 可见性 / 页签 / 失败态的显式触发（ResizeObserver 看不到这些）。
-  // `syncToken`：壳在浮层（`+` 菜单 / 全部页签 / 旁问历史）打开时 `webPaneHideAll()`，
-  // 浮层关掉后 bump 这个值让原生视图回来 —— 它不会自己重新 show。
+  /**
+   * 可见性观察（2026-11-24 修「切模块回来网页漂移」）。
+   *
+   * 模块 Tab 是 `display:none` 保活，切走再切回来时**尺寸可能完全没变**，只是整块平移
+   * （左栏 / 布局差异）；`ResizeObserver` 只报尺寸，报不出平移 → 原生视图停在旧坐标，
+   * 表象是网页浮在面板左边一截（用户截图）。IntersectionObserver 在进入 / 离开可见区时
+   * 必发一次，用它当「重新量一次」的扳机；同时它也是「模块被隐藏 → 必须收视图」的唯一可靠信号。
+   */
+  useEffect(() => {
+    const el = slotRef.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      const last = entries[entries.length - 1]
+      intersectingRef.current = !!last?.isIntersecting
+      scheduleSync()
+    }, { threshold: 0 })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [scheduleSync])
+
+  /**
+   * 跟手循环：每帧量一次占位区，几何真变了才发 IPC。
+   *
+   * 为什么需要它（而不是只靠 RO / resize 事件）：原生视图是主进程合成的一层，
+   * 渲染层任何「纯平移」的布局变化（切模块、侧栏让位、过渡动画里的中间态）都不会
+   * 触发 RO，视图就会停在旧坐标。每帧一次 `getBoundingClientRect` + 字符串比对成本
+   * 可以忽略，而且**只在「网页页签处于活动态 + 面板打开 + 占位区在视口内」时运行**，
+   * 其余情况立刻停住，不常驻空转。
+   */
+  useEffect(() => {
+    let alive = true
+    let raf = 0
+    const tick = () => {
+      raf = 0
+      if (!alive) return
+      syncBounds()
+      const snap = latestRef.current
+      const tab = snap.tabs[snap.activeIndex]
+      const keep = intersectingRef.current && !!tab && createdRef.current.has(tab.id)
+        && snap.active && snap.open && !snap.suppressed
+      if (keep) raf = requestAnimationFrame(tick)
+    }
+    const start = () => {
+      if (!alive || raf) return
+      raf = requestAnimationFrame(tick)
+    }
+    followStartRef.current = start
+    start()
+    return () => {
+      alive = false
+      followStartRef.current = null
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [syncBounds])
+
+  // 可见性 / 页签 / 失败态 / 浮层让位的显式触发（ResizeObserver 看不到这些）。
+  // `syncToken`：壳在浮层关闭后 bump 一次；`suppressed`：浮层打开期间必须一直收起。
   useEffect(() => {
     scheduleSync()
-  }, [props.width, props.active, props.open, props.syncToken, activeTab?.id, activeTab?.url, activeRuntime.error, scheduleSync])
+  }, [props.width, props.active, props.open, props.syncToken, props.suppressed, activeTab?.id, activeTab?.url, activeRuntime.error, scheduleSync])
 
   // 卸载只关自己建的 view：disposeAll 是全局的，会把别的会话正在用的页面一起关掉
   useEffect(
@@ -451,11 +536,12 @@ export function WebPane(props: WebPaneProps) {
       const visible = visibleRef.current
       visibleRef.current = null
       if (visible) void webPaneSetVisible(visible, false)
+      claimToastRight(toastKey, null)
       const ids = Array.from(createdRef.current)
       createdRef.current.clear()
       for (const id of ids) void webPaneClose(id)
     },
-    [],
+    [toastKey],
   )
 
   /* ------------------------------------------------------------ 渲染 */

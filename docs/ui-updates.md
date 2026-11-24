@@ -3302,3 +3302,22 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - `verify-model-pill` **61/61**（hook 状态机 / linger 1200 / `.kb-collapse-x` / aria / 无 transition-all / 未硬编码模型名）；登记进 `verify-all-p0` 后 **44/44**；`tsc` 0 错；build 通过。
 - 交互原型：`tmp/ai-model-pill/index.html`（360/480/960、深浅主题、reduced-motion、展开/菜单/linger 状态栏）；关键帧截图在 `tmp/ai-model-pill/shots/`。
 - 未覆盖：Windows 真机（字体宽度差 1–2px，菜单右缘需复核）、触摸设备（无 hover，依赖点击展开 + rAF 锚点）。
+
+## 2026-11-24 · 右侧网页页签：菜单 / Toast 不再被原生视图吃掉，切模块回来不再漂移
+
+**用户反馈**（两条）：① 右侧活动栏是网页页签时，页签条的菜单（如「新建页签」）和右下角通知会被网页盖住；② 从工作台等其它模块切回 AI 教学时，网页整体偏左一截（漂移）。
+
+**根因**
+- 网页页签的内容是主进程 `WebContentsView`，**永远盖在 DOM 之上**（不是 z-index 能解决的合成层级）；任何与它重叠的 DOM 浮层都会被切断。
+- 原实现只在打开 `+` 菜单时调一次 `webPaneHideAll()`：页面还在加载时 `webPane:changed`（标题 / 地址 / 进度）会驱动 `syncBounds` 重新把视图 show 回来 → 菜单下半截被吃掉。判据 `shouldShowView` 里没有「浮层打开」这一条。
+- 漂移：`ResizeObserver` 只报尺寸。模块 Tab 是 `display:none` 保活，切回来时**尺寸不变、整块平移**（左栏 / 布局差异）→ 没有任何回调 → 视图停在旧坐标。
+- Toast 是 `fixed right-4`，与网页区域重叠时被整块压住；日程右栏用 `--kb-toast-right` 让过，AI 教学查看器没有接。
+
+**改动**
+- `webPanePure.shouldShowView` 增加 `suppressed`；壳把「页签条浮层打开中」作为 `suppressed` 传给 `WebPane`，浮层期间**任何几何刷新都不放回视图**（打开这一拍在点击处先上报一次，不等 effect）。
+- `WebPane` 增加 `IntersectionObserver`（进入 / 离开可见区必发一次 → 切模块回来重新量）+ 逐帧跟手循环（比较 rect 字符串，变了才发 `setBounds`；只在网页页签活动 + 面板打开 + 占位区在视口内时运行）。
+- 新增 `src/lib/toastAvoid.ts`：按 key 登记的右侧避让表（取最大值，撤销即回落）。`WebPane` 在视图可见时登记「视图左缘到窗口右缘」，`ScheduleRightPanel` 改用同一张表并用 `IntersectionObserver` 在模块切走时撤销（修掉「提示停在偏左位置」的遗留）。`Toast` 的 `right` 加 `min()` 兜底，右栏比屏幕还宽时不会把气泡挤出屏幕左边。
+
+**契约**
+- `verify-web-pane-renderer` **59/59**（新增 suppressed 两例 + 四条静态断言）；`verify-right-viewer-tabs` **221/221**；`verify-right-viewer-shell` 94/94；`verify-artifact-tabs` 26/26；`verify-notes-pane` 52/52；`verify-web-pane-security` 61/61；`tsc` web/node 0 错；`npm run build` 通过。
+- 未覆盖：Windows 真机（原生视图合成层级与 Linux 一致，但菜单 / Toast 位置需复验）；同一类风险仍存于「模块级浮层」——AI 教学里悬浮旁问窗（`floatLane`）与课程结束抽屉（`CourseEndReportDrawer`）覆盖右下角时同样会被原生视图压住，本批未动。

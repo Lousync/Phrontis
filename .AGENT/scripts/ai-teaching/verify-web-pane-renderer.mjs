@@ -142,6 +142,14 @@ check(
   'failed load -> hide (placeholder must stay visible)',
   shouldShowView({ active: true, open: true, url: 'https://a.com/', error: 'ERR_NAME_NOT_RESOLVED' }) === false,
 )
+check(
+  'overlay open (chrome menu) -> hide even when the tab is live',
+  shouldShowView({ active: true, open: true, url: 'https://a.com/', suppressed: true }) === false,
+)
+check(
+  'overlay closed -> show again',
+  shouldShowView({ active: true, open: true, url: 'https://a.com/', suppressed: false }) === true,
+)
 
 /* ---------------------------------------------------------------- 7. restoreTabs */
 console.log('\n=== 7. restoreTabs ===')
@@ -223,6 +231,21 @@ check('empty state is a dot-grid layer, not a start block',
   /radial-gradient/.test(paneSrc) && !paneSrc.includes('快捷入口'))
 check('the five placeholder states stay distinguishable',
   ['start', 'dormant', 'loading', 'error', 'ready'].every((s) => new RegExp(`'${s}'`).test(paneSrc)))
+
+/* 2026-11-24：原生视图永远盖在 DOM 上，两条「看得见 / 对得上」的硬约束。
+   1. 浮层打开期间必须**持续**收起（suppressed 进 shouldShowView），
+      只 hideAll 一次会被加载事件驱动的同步重新 show 回来，把菜单吃掉一截；
+   2. 模块 Tab 切回来会「整块平移」而尺寸不变（RO 报不出）→ 视图停在旧坐标（漂移）。
+      必须用 IntersectionObserver 当重算扳机 + 可见期间逐帧跟手。 */
+check('overlay suppression is part of the show gate',
+  /shouldShowView\(\{[\s\S]{0,220}?suppressed:\s*snap\.suppressed/.test(paneSrc))
+check('visibility changes re-measure via IntersectionObserver',
+  /new IntersectionObserver\(/.test(paneSrc) && /intersectingRef\.current\s*=/.test(paneSrc))
+check('bounds follow layout shifts frame by frame (rect compare before IPC)',
+  /const key = `\$\{bounds\.x\},\$\{bounds\.y\},\$\{bounds\.width\},\$\{bounds\.height\}`/.test(paneSrc)
+  && /if \(key !== lastSentRef\.current\)/.test(paneSrc))
+check('toast is shifted out of the native view (shared claim registry)',
+  /claimToastRight\(/.test(paneSrc) && paneSrc.includes('toastAvoid'))
 
 /* 2026-11-23 会话恢复 / 跨会话保活（缺陷 1 / 2）。
    只截会话 effect 本身，避免拿整份文件的 `webPaneClose`（卸载清理里合法存在）误判。 */

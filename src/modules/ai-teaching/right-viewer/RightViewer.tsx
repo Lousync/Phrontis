@@ -294,6 +294,12 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
   /** 网页原生视图可见性令牌：浮层关掉后 bump，让 pane 重新 show */
   const [webSyncToken, setWebSyncToken] = useState(0)
   /**
+   * 页签条浮层（`+` / 全部页签 / 旁问历史）打开中。
+   * 原生视图永远盖在 DOM 上，所以浮层期间必须**持续**收起 ——
+   * 只调一次 `webPaneHideAll()` 会被后续的加载事件同步重新 show 回来。
+   */
+  const [chromeMenuOpen, setChromeMenuOpen] = useState(false)
+  /**
    * 一次性「请这个页签再打开一次」请求。`seq` 只保证单调递增 —— pane 只认「变了」。
    * 用于：外链换地址、同一文件被重新请求（例如画像文件被删后 ensure 又建回来）。
    */
@@ -1138,8 +1144,10 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     })
   }, [open, activeType])
 
-  /** 浮层（`+` / 全部页签 / 旁问历史）会盖到网页区：开时 hide，关后 bump 令牌让视图回来 */
+  /** 浮层（`+` / 全部页签 / 旁问历史）会盖到网页区：打开时 hide 且**整个打开期间保持收起**，
+   *  关闭后再 bump 令牌让视图回来 */
   const onMenuOpenChange = useCallback((isOpen: boolean) => {
+    setChromeMenuOpen(isOpen)
     if (isOpen) {
       void webPaneHideAll().catch(() => undefined)
       return
@@ -1190,6 +1198,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
             initialUrl={tab.url}
             request={reqFor(tab.id)}
             syncToken={webSyncToken}
+            suppressed={chromeMenuOpen}
             onTitleChange={cached(`${tab.id}:title`, () => (t: string) => setTitle(tab.id, t))}
             onUrlChange={cached(`${tab.id}:url`, () => (u: string) => patchTab(tab.id, { url: u }))}
           />

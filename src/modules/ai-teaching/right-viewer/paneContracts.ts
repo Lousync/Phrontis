@@ -146,8 +146,13 @@ export interface WebPaneProps extends ViewerPaneContext {
   /** 原生视图 bounds 失效时上报（壳可据此收起浮层，避免被原生视图盖住） */
   onOverlayRisk?: (risk: boolean) => void
   /**
-   * 可见性重算令牌：壳在浮层打开时 `webPaneHideAll()`，
-   * 浮层关闭后 bump 这个值让 pane 重新 show（原生视图不会自己回来）。
+   * 浮层打开中：原生视图必须收起，且**任何几何刷新都不得把它放回来**。
+   * 只调一次 `webPaneHideAll()` 不够 —— 页面加载事件会驱动同步，把视图重新 show 出来盖住菜单。
+   */
+  suppressed?: boolean
+  /**
+   * 可见性重算令牌：浮层关闭后 bump 一次，让 pane 立刻重新算一遍可见性
+   * （原生视图不会自己回来）。
    */
   syncToken?: number
 }

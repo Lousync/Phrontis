@@ -103,7 +103,14 @@ export function Toast() {
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed bottom-4 z-[100] flex flex-col gap-3 pointer-events-none" style={{ right: 'calc(1rem + var(--kb-toast-right, 0px))' }}>
+    <div
+      className="fixed bottom-4 z-[100] flex flex-col gap-3 pointer-events-none"
+      // 右侧避让（2026-11-24）：网页页签的原生视图永远盖在 DOM 上，Toast 只能让开。
+      // 让位量由 `toastAvoid.ts` 的登记表给（`--kb-toast-right`）；`min()` 兜住
+      // 「右栏比屏幕还宽」的极端情况 —— 宁可与视图叠一点，也不能把气泡挤出屏幕左边。
+      // 25rem = 4px 余量 + 380px 气泡 + 16px 右侧留白。
+      style={{ right: 'min(calc(1rem + var(--kb-toast-right, 0px)), calc(100vw - 25rem))' }}
+    >
       {toasts.map(t => (
         <ToastItem key={t.id} toast={t} closing={leaving.includes(t.id)} onDismiss={remove} />
       ))}
