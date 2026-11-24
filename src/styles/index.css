@@ -2182,6 +2182,16 @@ input:focus, textarea:focus, select:focus {
 @container kb-aicourse (max-width: 560px) { .kb-l1 { display: none; } }  /* 进度条 */
 @container kb-aicourse (max-width: 430px) { .kb-l2 { display: none; } }  /* 整块进度（数字 + 条） */
 
+/* ---- ⑧ 思维导图工具条（MindMapView.tsx，2026-11-24）----
+   容器 = MindMapView 根，★ `container-type` 必须挂在根上：容器查询对**容器自身**不生效，
+   工具条是根的后代才量得到。AI 教学查看器宽 360–480 → 窄态；笔记区 / 宽窗口 ≥720 → 宽态。
+   ① <720 隐按钮文字（图标保留，data-tip / aria-label 仍带全文）—— 380 宽下工具条从 4 行 112px 降到 1 行 34px；
+   ② <420 再把「· N 节点」让给标题（标题是识别导图的唯一线索，优先保住）。
+   导出按钮不参与退化（绿色实底常驻）。 */
+.kb-mm-root { container-type: inline-size; container-name: mindmap; }
+@container mindmap (max-width: 720px) { .kb-mm-tool-label { display: none; } }
+@container mindmap (max-width: 420px) { .kb-mm-tool-count { display: none; } }
+
 
 
 /* ===== 页面条 Edge Fluent 风格（2026-09-19 反馈「模块标签页没质感」） =====

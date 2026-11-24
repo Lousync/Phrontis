@@ -3132,3 +3132,32 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **契约**：`verify-all-p0` 39/39（`verify-teach-toolbar-ui` 150、`verify-ai-teaching-tools` 98、`verify-right-viewer-shell` 94、`verify-right-viewer-tabs` 196、`verify-artifact-inplace` 36 等）；`tsc` web/node 双配置 0 错；`npm run build` 通过。
 
 **未覆盖 / 已知边界**：本机无 LLM 配置，AI 产物的 `begin → commit → drop` 只做了结构与契约断言，未真机触发；pptx 因无样例文件只做了组件接线与契约断言；PDF 改走电子书页签属于行为变更，建议真机再点一次确认。
+
+## 2026-11-24 · 思维导图 · 工具条单行合并 + 折叠 / 展开相机回中
+
+**现状 / 用户反馈**：AI 教学查看器宽 360–480，导图页签顶部有两条横栏 —— FilePane 的动作行（文件名 / 重读 / 复制）和 MindMapView 的工具条（标题 / 撤销 / 适应画布 / 全部展开 / 全部折叠 / 导出 / 源码），二者各占 32 / 112px，合计 4 行；同时折叠主节点后相机完全不动，被折叠的子树留在原屏幕位置，节点常被推到视野边缘、右侧大片空白。
+
+**改动点 · 工具条（合并 + 窄态图标化）**：
+- FilePane 在 `fileKind === 'mindmap'` 时**不渲染自己的动作行**（`data-pane-action-row` 条件化），MindMapView 的工具条成为唯一一条；其它 fileKind 不变，文件不存在仍走行内错误卡。
+- MindMapView 工具条改为**单行 34px**：左 = 导图图标 + 标题（截断，`data-tip` 全名）+ `· N 节点`；右 = 撤销 / 重做 │ 适应画布 / 全部展开 / 全部折叠 │ 导出为笔记（绿色实底）/ 查看源码 │ 重读 / 复制路径。全部按钮 24px 高、图标 + 文字。
+- **CSS 容器查询**（`.kb-mm-root` = MindMapView 根，`container-type: inline-size; container-name: mindmap`）：`max-width: 720px` 隐去 `.kb-mm-tool-label` 只留图标（`data-tip` / `aria-label` 保留全文）；`max-width: 420px` 再把 `.kb-mm-tool-count` 让给标题。导出按钮不参与退化。
+- 图标：全部展开 / 全部折叠 = `CirclePlus` / `CircleMinus`（13px 下比 Chevrons 清楚）、源码 = `Code2`、重读 = `RefreshCw`、复制 = `Copy`；重读复用现有 `load()`，复制走 `navigator.clipboard.writeText(relPath)` + Toast。
+
+**改动点 · 相机（B 居中 + 展开 C 有界缩放）**：
+- 新增 `pendingFocusRef`（折叠前记录被点节点与方向）/ `camAnimRef`（rAF 句柄）；折叠 / 展开后由 `useLayoutEffect(..., [layout])` 消费，目标 = `x = cw*0.45 - nodeCenter.x*s`、`y = ch/2 - nodeCenter.y*s`，scale 不变。
+- 死区 40px：不改 scale 且目标位移 < 40px → 不动。展开时算可见子树包围盒，装不下才缩，且 `max(need, s*0.75)` 有界、只缩不放；包围盒中心压 `(cw*0.45, ch/2)`，宽度仍装不下则左对齐保住根。
+- 动画 200ms rAF 手写补间（ease-out + scale 对数插值，锚点 = 被点节点，不用 CSS transition）；`prefers-reduced-motion` 直接落位。fit / wheel / 拖拽 / zoomBy / 重置 100% / 新一次折叠都先取消上一段动画。
+- 批量：全部折叠 → 对根做 B；全部展开 → 对根做 C。自动 fit 的触发条件仍是 `[doc, activeView]`，foldVersion 不触发整图 fit。
+
+**契约**：`verify-mindmap.mjs` 77 → **106 条**（新增 FilePane 动作行条件化、单行工具条 / 容器查询 720·420 / 导出绿常驻 / 重读复制接线、相机常量 / pendingFocus / useLayoutEffect / 死区 / 0.75x / 减少动效 / 打断 / 批量回根、ResizeObserver 不再随 fold 重建、无 `transition-all`）；`verify-all-p0` 39/39；`tsc` web/node 双配置 0 错；`npm run build` 通过。
+
+**帮助手册**：`resources/help/思维导图.md` 「折叠 / 展开」补一句相机行为（折叠 / 展开把当前节点带回视野安全区，大子树最多缩到 75%）。
+
+**真机验证**（Linux，devbridge 同款隔离探针实例 `tmp/probe-app` + CDP，临时仓库 `tmp/vault-fixture`，导图 21 节点）：
+- 窄宿主（PageEditor 导图容器 354×299）：工具条 **1 行 34px**、按钮 24px、`.kb-mm-tool-label` 计算样式 `display:none`、`.kb-mm-tool-count` 也隐藏（<420）；窗口拉到 1440（容器 794px）后 label / 节点数恢复显示，仍单行 34px。
+- 相机：折叠根节点后 scale 0.353 → **0.353 不变**，根节点屏幕 x 0.261 → **0.450**、y 0.501 → 0.501（45% 安全区 + 中线）；折叠后可见节点 = 1。
+- 展开 C：先「重置 100%」→ 点根展开，s 1.000 → **0.750**（0.75x 下限生效），21 节点全部回来，根节点 x 0.266（构图不跳）。
+- 快速连点 3 次：600ms 后两次采样 transform 完全一致（dx=0.00 / dy=0.00），无残留动画。
+- **顺带修掉一个既有缺陷**：`ResizeObserver` effect 原依赖 `[fit, activeView]`，而 `fit` 引用随 layout（含 foldVersion）变化 —— 折叠会重建 RO，`observe()` 首次回调立刻再整图 fit（探针里表现为折叠瞬间 s 0.353 → 1.15）。改为 `fitRef` + 依赖 `[activeView]`，折叠不再触发整图 fit（契约新增一条守住）。
+
+**未覆盖**：AI 教学查看器宿主（FilePane + `showExport` 导图页签）需要先建会话才进得去文件树，本轮只做到「PageEditor 宿主」；「FilePane 对 mindmap 不渲染动作行」与「导出绿色常驻」由契约 + 构建守住，未在查看器里点。

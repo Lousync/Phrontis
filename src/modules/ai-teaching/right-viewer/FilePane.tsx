@@ -4,6 +4,8 @@
  * 方案：`docs/ai-teaching-right-viewer-unify-plan.md` §5 / §12.5 D。
  * 内部按 `fileKind` 分派到既有查看器，本组件只做「文件级」的事：
  *   · 动作行（文件名 / 重读 / 复制路径；html 额外「在编辑器中打开」）
+ *     —— **导图例外**：MindMapView 自带单行工具条（标题 / 节点数 / 撤销 / 折叠 / 导出 / 重读 / 复制），
+ *        这里再渲染一行就是两条标题 + 两套重读复制，380 宽下白占 32px。
  *   · AI 生成中的安静骨架（不读盘，禁关由壳负责）
  *   · pptx 逐页阅读 + 「讲解此页」（只上报页信息，发送逻辑留在宿主）
  *   · 外部写入后自己 bump 重读序号，不依赖壳
@@ -289,50 +291,53 @@ export function FilePane(props: FilePaneProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-file-pane={fileKind}>
-      {/* 动作行：32px，与 NotesPane 同密度；文件名常显，其余动作靠 data-tip 解释 */}
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-1.5">
-        <span className="shrink-0 text-[var(--text-muted)]">
-          <KindIcon kind={fileKind} />
-        </span>
-        <span
-          className="min-w-0 truncate text-[11.5px] text-[var(--text-primary)]"
-          data-tip={relPath}
-          aria-label={relPath}
-        >
-          {name}
-        </span>
-        <span className="min-w-0 flex-1" />
+      {/* 动作行：32px，与 NotesPane 同密度；文件名常显，其余动作靠 data-tip 解释。
+          导图页签不渲染这一行 —— 让 MindMapView 的工具条成为唯一一条（见文件头注）。 */}
+      {fileKind !== 'mindmap' && (
+        <div data-pane-action-row className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-1.5">
+          <span className="shrink-0 text-[var(--text-muted)]">
+            <KindIcon kind={fileKind} />
+          </span>
+          <span
+            className="min-w-0 truncate text-[11.5px] text-[var(--text-primary)]"
+            data-tip={relPath}
+            aria-label={relPath}
+          >
+            {name}
+          </span>
+          <span className="min-w-0 flex-1" />
 
-        {fileKind === 'html' && onOpenInEditor && (
+          {fileKind === 'html' && onOpenInEditor && (
+            <button
+              type="button"
+              onClick={() => onOpenInEditor(relPath)}
+              data-tip="在编辑器中打开"
+              aria-label="在编辑器中打开"
+              className="kb-press shrink-0 rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              <ExternalLink size={12} />
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => onOpenInEditor(relPath)}
-            data-tip="在编辑器中打开"
-            aria-label="在编辑器中打开"
+            onClick={retry}
+            data-tip="重读磁盘文件"
+            aria-label="重读磁盘文件"
             className="kb-press shrink-0 rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
-            <ExternalLink size={12} />
+            <RefreshCw size={12} />
           </button>
-        )}
-        <button
-          type="button"
-          onClick={retry}
-          data-tip="重读磁盘文件"
-          aria-label="重读磁盘文件"
-          className="kb-press shrink-0 rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <RefreshCw size={12} />
-        </button>
-        <button
-          type="button"
-          onClick={copyPath}
-          data-tip="复制仓库相对路径"
-          aria-label="复制路径"
-          className="kb-press shrink-0 rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <Copy size={12} />
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={copyPath}
+            data-tip="复制仓库相对路径"
+            aria-label="复制路径"
+            className="kb-press shrink-0 rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <Copy size={12} />
+          </button>
+        </div>
+      )}
 
       {/* 内容区：每类渲染器自己铺满；换文件时按 key 重建，避免残留上一份状态 */}
       <div key={`${fileKind}:${relPath}`} className="flex min-h-0 flex-1 flex-col">

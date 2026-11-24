@@ -226,6 +226,97 @@ const srcMDP2 = read('src/components/shared/MarkdownPreview.tsx')
 check('wiki span 带 data-wiki 定位锚', srcMDP2.includes('data-wiki={display}'))
 check('高亮样式 .kb-wiki-flash 存在', read('src/styles/index.css').includes('.kb-wiki-flash'))
 
+// ---------------------------------------------------------------- 9. 页签工具条合并 + 窄态图标化（2026-11-24）
+console.log('\n=== 9. 页签工具条合并（单行 / 容器查询 / 导出常驻） ===')
+const srcCSS = read('src/styles/index.css')
+check('FilePane 对 mindmap 不渲染自己的动作行（让位给 MindMapView 工具条）',
+  /\{fileKind !== 'mindmap' && \(\s*<div data-pane-action-row/.test(srcAP))
+check('其余 fileKind 的动作行仍在（重读 / 复制路径接线未丢）',
+  srcAP.includes('data-pane-action-row') && srcAP.includes('onClick={retry}') && srcAP.includes('onClick={copyPath}'))
+check('MindMapView 工具条单行 34px（不再 flex-wrap）',
+  /kb-mm-toolbar[\s\S]{0,160}h-\[34px\]/.test(srcMMV) && !/kb-mm-toolbar[\s\S]{0,300}flex-wrap/.test(srcMMV))
+check('工具条左侧：导图图标 + 标题（data-tip 全名）+ 节点数',
+  /kb-mm-toolbar[\s\S]{0,600}<Network size=\{13\}/.test(srcMMV)
+  && srcMMV.includes("data-tip={doc?.title || '思维导图'}")
+  && srcMMV.includes('kb-mm-tool-count'))
+check('工具条右侧按钮齐全（撤销/重做/适应画布/全部展开/全部折叠/导出/源码/重读/复制）',
+  ['undo', 'redo', 'fit', 'expand-all', 'fold-all', 'export', 'source', 'reload', 'copy']
+    .every(t => srcMMV.includes(`tool="${t}"`)))
+check('展开 / 折叠用 CirclePlus / CircleMinus，源码 Code2，重读 RefreshCw，复制 Copy',
+  /tool="expand-all" icon=\{CirclePlus\}/.test(srcMMV)
+  && /tool="fold-all" icon=\{CircleMinus\}/.test(srcMMV)
+  && /tool="source"\s+icon=\{Code2\}/.test(srcMMV)
+  && /tool="reload" icon=\{RefreshCw\}/.test(srcMMV)
+  && /tool="copy" icon=\{Copy\}/.test(srcMMV))
+check('全部按钮 24px 高（h-6）且带 data-tip / aria-label',
+  /className=\{`kb-press flex h-6 shrink-0[^`]*`\}/.test(srcMMV)
+  && srcMMV.includes('data-tip={tip}') && srcMMV.includes('aria-label={tip}'))
+check('文字包在 .kb-mm-tool-label（窄态隐文字），节点数包在 .kb-mm-tool-count（更窄让位）',
+  srcMMV.includes('className="kb-mm-tool-label whitespace-nowrap"') && srcMMV.includes('kb-mm-tool-count shrink-0'))
+check('容器查询：container-type 挂 MindMapView 根（不是工具条自身）',
+  /kb-mm-root \{ container-type: inline-size; container-name: mindmap; \}/.test(srcCSS)
+  && /<div className="kb-mm-root h-full[\s\S]{0,300}kb-mm-toolbar/.test(srcMMV))
+check('容器查询断点 720 隐文字 / 420 隐节点数',
+  /@container mindmap \(max-width: 720px\) \{ \.kb-mm-tool-label \{ display: none; \} \}/.test(srcCSS)
+  && /@container mindmap \(max-width: 420px\) \{ \.kb-mm-tool-count \{ display: none; \} \}/.test(srcCSS))
+check('导出按钮绿色常驻（accent 实底不参与退化）',
+  /bg-\[var\(--accent\)\] text-white hover:bg-\[var\(--accent-hover\)\]/.test(srcMMV)
+  && /tool="export"[\s\S]{0,220}\baccent\b/.test(srcMMV))
+check('重读调用现有 load()', /tool="reload"[\s\S]{0,200}void load\(\)/.test(srcMMV))
+check('复制路径走 navigator.clipboard.writeText(relPath) + Toast',
+  /navigator\.clipboard[\s\S]{0,120}writeText\(relPath\)/.test(srcMMV)
+  && /writeText\(relPath\)[\s\S]{0,220}showToast\(\{ type: 'info', message: '已复制路径' \}\)/.test(srcMMV))
+check('工具条不引入 transition-all（只动颜色）',
+  !srcMMV.includes('transition-all') && !/@container mindmap[\s\S]{0,400}transition-all/.test(srcCSS))
+
+// ---------------------------------------------------------------- 10. 相机：折叠 / 展开回中（B + C，2026-11-24）
+console.log('\n=== 10. 相机：折叠 / 展开回中（B 居中 + 展开 C 有界缩放） ===')
+const camSrc = srcMMV.slice(srcMMV.indexOf('// ---------------- 相机'), srcMMV.indexOf('interface Props'))
+check('相机常量齐全（0.45 / 40 / 200 / 28 / 0.75 / 0.35 / 2.4）',
+  /SAFE_X: 0\.45/.test(camSrc) && /DEAD_ZONE: 40/.test(camSrc) && /ANIM_MS: 200/.test(camSrc)
+  && /FIT_MARGIN: 28/.test(camSrc) && /MAX_ZOOM_OUT: 0\.75/.test(camSrc)
+  && /MIN_S: 0\.35/.test(camSrc) && /MAX_S: 2\.4/.test(camSrc))
+check('新增 pendingFocusRef / camAnimRef', srcMMV.includes('pendingFocusRef = useRef<{ id: string; kind: \'expand\' | \'collapse\' } | null>(null)')
+  && srcMMV.includes('camAnimRef = useRef<number | null>(null)'))
+check('折叠前记录方向：pendingFocusRef 写在 collapsed 翻转之前',
+  (() => {
+    const setIdx = srcMMV.indexOf("kind: n.collapsed ? 'expand' : 'collapse'")
+    const flipIdx = srcMMV.indexOf('n.collapsed = !n.collapsed')
+    return setIdx > 0 && flipIdx > setIdx
+  })())
+check('useLayoutEffect 依赖 layout，且有 pending 才动作',
+  /useLayoutEffect\(\(\) => \{[\s\S]{0,900}pendingFocusRef\.current[\s\S]{0,9000}\}, \[layout\]\)/.test(srcMMV)
+  && /if \(!p \|\| !layout\) return/.test(srcMMV))
+check('B 居中：cw * SAFE_X / ch / 2（scale 不变）',
+  srcMMV.includes('cw * CAM.SAFE_X - nw.x * view.s') && srcMMV.includes('ch / 2 - nw.y * view.s'))
+check('死区 40px：只挡不改 scale 的目标',
+  /Math\.hypot\(dx, dy\) < CAM\.DEAD_ZONE/.test(srcMMV) && srcMMV.includes("reason: 'dead-zone'"))
+check('展开 C：只缩不放 + 有界 0.75x（MIN_S / MAX_S 夹住）',
+  /Math\.max\(Math\.min\(need, view\.s\), view\.s \* CAM\.MAX_ZOOM_OUT\)/.test(srcMMV)
+  && /Math\.min\(Math\.max\(s2, CAM\.MIN_S\), CAM\.MAX_S, view\.s\)/.test(srcMMV))
+check('C 按可见子树包围盒（跳过 collapsed 后代）',
+  srcMMV.includes('function visibleSubtreeRect(') && srcMMV.includes('if (!n.collapsed) (n.children ?? []).forEach(walk)'))
+check('rAF 200ms ease-out 补间 + 对数 scale 插值',
+  /requestAnimationFrame\(step\)/.test(srcMMV) && /1 - Math\.pow\(1 - p, 3\)/.test(srcMMV)
+  && /s0 \* Math\.pow\(s1 \/ s0, e\)/.test(srcMMV))
+check('减少动效 → 立即落位', srcMMV.includes("(prefers-reduced-motion: reduce)"))
+check('用户操作打断相机动画：fit / wheel / zoomBy / pointerdown / 重置 100%',
+  /const fit = useCallback\(\(\) => \{\s*stopCamAnim\(\)/.test(srcMMV)
+  && /const onWheel = \(e: WheelEvent\): void => \{[\s\S]{0,120}stopCamAnim\(\)/.test(srcMMV)
+  && /const zoomBy = useCallback\(\(f: number\) => \{[\s\S]{0,160}stopCamAnim\(\)/.test(srcMMV)
+  && /const onCanvasPointerDown[\s\S]{0,400}stopCamAnim\(\)/.test(srcMMV)
+  && /重置 100%[\s\S]{0,80}stopCamAnim\(\)/.test(srcMMV))
+check('批量按钮：全部折叠 → 根 B，全部展开 → 根 C',
+  /pendingFocusRef\.current = \{ id: d\.root\._id as string, kind: 'collapse' \}/.test(srcMMV)
+  && /pendingFocusRef\.current = \{ id: d\.root\._id as string, kind: 'expand' \}/.test(srcMMV))
+check('自动 fit 仍不依赖 foldVersion（结构变不整图 fit）',
+  !/\}, \[doc, activeView, foldVersion\]\)/.test(srcMMV) && /\}, \[doc, activeView\]\)/.test(srcMMV))
+check('折叠不触发整图 fit：ResizeObserver 依赖只留 activeView（fit 走 ref）',
+  /const fitRef = useRef\(fit\)/.test(srcMMV) && srcMMV.includes('fitRef.current()')
+  && !srcMMV.includes('}, [fit, activeView])'))
+check('相机动画不用 CSS transition（不出现 transition-all / 相机类过渡）',
+  !srcMMV.includes('transition-all') && !/\.kb-mm-(root|toolbar)[\s\S]{0,300}transition:/.test(srcCSS))
+
 // ---------------------------------------------------------------- 汇总
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) {

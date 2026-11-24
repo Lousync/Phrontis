@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, ChevronDown, ChevronsDownUp, ChevronsUpDown, FileDown, Frame, Plus, Redo2, Undo2, X } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowUpRight, ChevronDown, CircleMinus, CirclePlus, Code2, Copy, FileDown, Frame,
+  Network, Plus, Redo2, RefreshCw, Undo2, X, type LucideIcon,
+} from 'lucide-react'
 import { workspaceGetCurrent, workspaceReadFile, workspaceWriteFile, createKnowledgePage, getKnowledgeCategories } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { MonacoPane } from './MonacoPane'
@@ -25,6 +28,120 @@ const NODE_H = 40
 const GAP_X = 64
 const GAP_Y = 22
 const PAD = 48
+
+// ---------------- 相机（折叠 / 展开后把被点节点带回安全区） ----------------
+// 方案：docs/mindmap-camera-plan.md §3（B 居中默认，展开时叠加 C 的有界缩放）。
+// 纯函数放在组件外，便于契约脚本按源码断言；动画由组件内的 rAF 胶水负责。
+
+interface CamView { x: number; y: number; s: number }
+interface WorldRect { x: number; y: number; w: number; h: number }
+
+const CAM = {
+  SAFE_X: 0.45,      // 居中锚点：45% 而不是 50%，右侧留给展开出来的子节点
+  DEAD_ZONE: 40,     // 不改 scale 的目标：屏幕位移小于它就不动
+  ANIM_MS: 200,
+  FIT_MARGIN: 28,
+  MAX_ZOOM_OUT: 0.75, // 展开适配最多缩到 75%，再装不下交给用户 pan
+  MIN_S: 0.35,
+  MAX_S: 2.4,
+} as const
+
+/** 可见子树世界包围盒（含自身，跳过 collapsed 的后代；节点表里查不到的位置直接忽略）。 */
+function visibleSubtreeRect(
+  root: MindMapNode,
+  nodes: { node: MindMapNode; x: number; y: number }[],
+  nodeW: number,
+  nodeH: number,
+): WorldRect | null {
+  const posById = new Map<string, { x: number; y: number }>()
+  for (const ln of nodes) posById.set(ln.node._id as string, ln)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const walk = (n: MindMapNode): void => {
+    const pos = posById.get(n._id as string)
+    if (pos) {
+      minX = Math.min(minX, pos.x); minY = Math.min(minY, pos.y)
+      maxX = Math.max(maxX, pos.x + nodeW); maxY = Math.max(maxY, pos.y + nodeH)
+    }
+    if (!n.collapsed) (n.children ?? []).forEach(walk)
+  }
+  walk(root)
+  if (!Number.isFinite(minX)) return null
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+}
+
+/**
+ * 相机目标：`view === null` 表示不动。
+ * - collapse：只做 B 居中（scale 不变）；位移小于 DEAD_ZONE 就跳过。
+ * - expand：可见子树放不下 → C 有界缩放（最多缩到 0.75x，只缩不放）；否则同 B。
+ */
+function resolveCameraTarget(opts: {
+  kind: 'collapse' | 'expand'
+  view: CamView
+  viewport: { w: number; h: number }
+  clickedWorld: { x: number; y: number }
+  subtree: WorldRect | null
+}): { view: CamView | null; reason: string } {
+  const { view, viewport: { w: cw, h: ch }, clickedWorld: nw } = opts
+  const cur = { x: view.x + nw.x * view.s, y: view.y + nw.y * view.s }
+
+  if (opts.kind === 'expand' && opts.subtree) {
+    const bb = opts.subtree
+    const need = Math.min(
+      (cw - 2 * CAM.FIT_MARGIN) / bb.w,
+      (ch - 2 * CAM.FIT_MARGIN) / bb.h,
+      view.s,
+    )
+    if (need < view.s - 1e-3) {
+      const s2 = Math.max(Math.min(need, view.s), view.s * CAM.MAX_ZOOM_OUT)
+      const s3 = Math.min(Math.max(s2, CAM.MIN_S), CAM.MAX_S, view.s)
+      const fitsX = bb.w * s3 <= cw - 2 * CAM.FIT_MARGIN
+      return {
+        view: {
+          s: s3,
+          x: fitsX ? cw * CAM.SAFE_X - (bb.x + bb.w / 2) * s3 : CAM.FIT_MARGIN - bb.x * s3,
+          y: ch / 2 - (bb.y + bb.h / 2) * s3,
+        },
+        reason: 'fit-subtree',
+      }
+    }
+  }
+
+  const center: CamView = { s: view.s, x: cw * CAM.SAFE_X - nw.x * view.s, y: ch / 2 - nw.y * view.s }
+  const dx = (center.x + nw.x * center.s) - cur.x
+  const dy = (center.y + nw.y * center.s) - cur.y
+  if (Math.hypot(dx, dy) < CAM.DEAD_ZONE) return { view: null, reason: 'dead-zone' }
+  return { view: center, reason: 'center' }
+}
+
+/** 工具条按钮：24px 高，图标 + 文字。窄态（容器 <720）由 CSS 隐去 `.kb-mm-tool-label`。 */
+function ToolBtn({ tool, icon: Icon, label, tip, onClick, disabled, accent }: {
+  tool: string
+  icon: LucideIcon
+  label: string
+  tip: string
+  onClick: () => void
+  disabled?: boolean
+  accent?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      data-mm-tool={tool}
+      data-tip={tip}
+      aria-label={tip}
+      onClick={onClick}
+      disabled={disabled}
+      className={`kb-press flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 transition-colors ${
+        accent
+          ? 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]'
+          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30'
+      }`}
+    >
+      <Icon size={12} />
+      <span className="kb-mm-tool-label whitespace-nowrap">{label}</span>
+    </button>
+  )
+}
 
 interface Props {
   relPath: string
@@ -70,6 +187,10 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
   const dragRef = useRef<{ id: string; sx: number; sy: number; dragging: boolean } | null>(null)
   const undoRef = useRef<string[]>([])
   const redoRef = useRef<string[]>([])
+  /** 相机动画句柄（rAF）；任何新折叠 / 滚轮 / 拖拽 / fit 都先取消 */
+  const camAnimRef = useRef<number | null>(null)
+  /** 折叠 / 展开后待聚焦的节点（layout 重算完成后由 useLayoutEffect 消费） */
+  const pendingFocusRef = useRef<{ id: string; kind: 'expand' | 'collapse' } | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** 用户是否手动调过视图（缩放/平移）——手动后不再自动 fit（ResizeObserver 用） */
   const userAdjRef = useRef(false)
@@ -188,7 +309,44 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
     s.style.transform = `translate(${v.x}px,${v.y}px) scale(${v.s})`
   }, [])
 
+  const stopCamAnim = useCallback(() => {
+    if (camAnimRef.current !== null) { cancelAnimationFrame(camAnimRef.current); camAnimRef.current = null }
+  }, [])
+
+  /**
+   * 相机动画：rAF 手写补间（不用 CSS transition —— wheel / 拖拽 / fit 要能随时接管）。
+   * 插值口径 = 被点节点在屏幕上从哪儿滑到哪儿 + scale 对数插值，避免「缩放游泳」。
+   */
+  const startCamAnim = useCallback((to: CamView, anchor: { x: number; y: number }) => {
+    stopCamAnim()
+    const from = viewRef.current
+    if (Math.abs(from.s - to.s) < 1e-4 && Math.abs(from.x - to.x) < 0.5 && Math.abs(from.y - to.y) < 0.5) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      viewRef.current = to
+      applyView()
+      return
+    }
+    const s0 = from.s, s1 = to.s
+    const a0 = { x: from.x + anchor.x * s0, y: from.y + anchor.y * s0 }
+    const a1 = { x: to.x + anchor.x * s1, y: to.y + anchor.y * s1 }
+    const t0 = performance.now()
+    const step = (now: number): void => {
+      const p = Math.min(1, (now - t0) / CAM.ANIM_MS)
+      const e = 1 - Math.pow(1 - p, 3)
+      const s = s0 * Math.pow(s1 / s0, e)
+      const sx = a0.x + (a1.x - a0.x) * e
+      const sy = a0.y + (a1.y - a0.y) * e
+      viewRef.current = { s, x: sx - anchor.x * s, y: sy - anchor.y * s }
+      applyView()
+      camAnimRef.current = p < 1 ? requestAnimationFrame(step) : null
+    }
+    camAnimRef.current = requestAnimationFrame(step)
+  }, [applyView, stopCamAnim])
+
+  useEffect(() => () => stopCamAnim(), [stopCamAnim])
+
   const fit = useCallback(() => {
+    stopCamAnim()
     const canvas = canvasRef.current
     if (!canvas || !layout) return
     const { nodes, nodeW, nodeH } = layout
@@ -204,7 +362,7 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
     const s = Math.min(cw / w, ch / h, 1.15)
     viewRef.current = { s, x: (cw - w * s) / 2 - (minX - 32) * s, y: (ch - h * s) / 2 - (minY - 32) * s }
     applyView()
-  }, [layout, applyView])
+  }, [layout, applyView, stopCamAnim])
 
   // 自动 fit 的触发时机：① 载入/切换文档（doc 换引用）② map ⇄ source 切换（画布 DOM 重建，
   // 见内容区分支 key）③ 首挂。★ 绝不能依赖 fit —— fit 的引用随 layout（含 foldVersion）变化，
@@ -217,21 +375,56 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
   }, [doc, activeView])
 
   // 容器尺寸变化（首挂时可能 0 宽/切换 Tab/窗口缩放）→ 未手动调整过就自动 fit
+  // ★ fit 走 ref：fit 的引用随 layout（含 foldVersion）变化，若把它放进依赖，折叠 / 改字时
+  //   effect 会重建 ResizeObserver —— observe() 的首次回调会立刻再 fit 一次，等于「折一下就适应画布」。
+  //   依赖只留 activeView（画布 DOM 在该分支重建），折叠不再触发整图 fit。
+  const fitRef = useRef(fit)
+  useEffect(() => { fitRef.current = fit }, [fit])
   useEffect(() => {
     const c = canvasRef.current
     if (!c || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(() => {
-      if (c.clientWidth > 2 && c.clientHeight > 2 && !userAdjRef.current) fit()
+      if (c.clientWidth > 2 && c.clientHeight > 2 && !userAdjRef.current) fitRef.current()
     })
     ro.observe(c)
     return () => ro.disconnect()
-  }, [fit, activeView])
+  }, [activeView])
+
+  // 折叠 / 展开后的相机动作（B 居中 + 展开 C 有界缩放）。
+  // ★ 依赖 layout 但只在 pendingFocus 有值时才动作 —— 所以「折叠 / 改字 / 增删」不会重跑整图 fit。
+  // useLayoutEffect：DOM（新布局）已更新、尚未绘制，动画第一帧不会闪跳。
+  useLayoutEffect(() => {
+    const p = pendingFocusRef.current
+    pendingFocusRef.current = null
+    if (!p || !layout) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const cw = canvas.clientWidth, ch = canvas.clientHeight
+    if (cw < 2 || ch < 2) return // 隐藏 / 页签切换中 → 跳过（与 fit 同口径）
+    const ln = layout.nodes.find(x => x.node._id === p.id)
+    if (!ln) return // 节点已不在布局里（批量 / 被删）→ 不动
+    const world = { x: ln.x + layout.nodeW / 2, y: ln.y + layout.nodeH / 2 }
+    const subtree = p.kind === 'expand'
+      ? visibleSubtreeRect(ln.node, layout.nodes, layout.nodeW, layout.nodeH)
+      : null
+    const res = resolveCameraTarget({
+      kind: p.kind,
+      view: viewRef.current,
+      viewport: { w: cw, h: ch },
+      clickedWorld: world,
+      subtree,
+    })
+    if (!res.view) return
+    startCamAnim(res.view, world)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout])
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault()
+      stopCamAnim() // 相机动画中滚轮 = 立即接管
       const r = canvas.getBoundingClientRect()
       const mx = e.clientX - r.left, my = e.clientY - r.top
       const v = viewRef.current
@@ -242,26 +435,28 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
     }
     canvas.addEventListener('wheel', onWheel, { passive: false })
     return () => canvas.removeEventListener('wheel', onWheel)
-  }, [applyView, activeView])
+  }, [applyView, activeView, stopCamAnim])
 
   const zoomBy = useCallback((f: number) => {
     const c = canvasRef.current
     if (!c) return
+    stopCamAnim()
     const v = viewRef.current
     const ns = Math.min(2.4, Math.max(0.35, v.s * f))
     userAdjRef.current = true
     viewRef.current = { s: ns, x: c.clientWidth / 2 - (c.clientWidth / 2 - v.x) * (ns / v.s), y: c.clientHeight / 2 - (c.clientHeight / 2 - v.y) * (ns / v.s) }
     applyView()
-  }, [applyView])
+  }, [applyView, stopCamAnim])
 
   const onCanvasPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement
     if (t.closest('.mm-node') || t.closest('.mm-zoombar')) return
+    stopCamAnim() // 开始拖拽平移 = 立即接管相机
     userAdjRef.current = true
     panRef.current = { sx: e.clientX, sy: e.clientY, ox: viewRef.current.x, oy: viewRef.current.y }
     canvasRef.current?.classList.add('cursor-grabbing')
     e.currentTarget.setPointerCapture(e.pointerId)
-  }, [])
+  }, [stopCamAnim])
   const onCanvasPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const d = panRef.current
     if (!d) return
@@ -276,10 +471,33 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
   }, [])
 
   // ---------------- 折叠 / 展开 ----------------
-  const toggleFold = useCallback((n: MindMapNode) => { n.collapsed = !n.collapsed; setFoldVersion(v => v + 1) }, [])
+  const toggleFold = useCallback((n: MindMapNode) => {
+    // ★ 必须在改 collapsed 之前记录方向：collapsed === true 表示「即将展开」。
+    // layout 重算后由上面的 useLayoutEffect 消费，把被点节点带回视野安全区。
+    pendingFocusRef.current = { id: n._id as string, kind: n.collapsed ? 'expand' : 'collapse' }
+    n.collapsed = !n.collapsed
+    setFoldVersion(v => v + 1)
+  }, [])
   const setAll = useCallback((node: MindMapNode, collapsed: boolean) => {
     if (node.children?.length) { node.collapsed = collapsed; node.children.forEach(c => setAll(c, collapsed)) }
   }, [])
+  /** 全部折叠 → 折叠完对根做 B 居中（批量操作要有相机交代，同 simple-mind-map）。 */
+  const foldAll = useCallback(() => {
+    const d = docRef.current
+    if (!d) return
+    d.root.children?.forEach(c => setAll(c, true))
+    pendingFocusRef.current = { id: d.root._id as string, kind: 'collapse' }
+    setFoldVersion(v => v + 1)
+  }, [setAll])
+  /** 全部展开 → 对根做 C（子树放不下时可最多缩到 0.75x）。 */
+  const expandAll = useCallback(() => {
+    const d = docRef.current
+    if (!d) return
+    setAll(d.root, false)
+    d.root.collapsed = false
+    pendingFocusRef.current = { id: d.root._id as string, kind: 'expand' }
+    setFoldVersion(v => v + 1)
+  }, [setAll])
   const onNodeClick = useCallback((n: MindMapNode) => {
     if (n.children?.length) { toggleFold(n); return }
     if (n.ref) {
@@ -371,6 +589,15 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
     else setInternalView(v)
   }, [view, onViewChange])
 
+  /** 复制仓库相对路径（工具条自带，替代 FilePane 动作行的那一枚）。 */
+  const copyPath = useCallback(() => {
+    if (!relPath) return
+    void navigator.clipboard
+      .writeText(relPath)
+      .then(() => showToast({ type: 'info', message: '已复制路径' }))
+      .catch(() => { /* 剪贴板不可用时静默：辅助动作，不该打断阅读 */ })
+  }, [relPath])
+
   const saveSource = useCallback(async () => {
     const rid = rootIdRef.current
     if (!rid) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
@@ -387,50 +614,56 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
   const canRedo = redoRef.current.length > 0
 
   return (
-    <div className="h-full w-full flex flex-col min-h-0">
-      {/* 工具条 */}
-      <div className="shrink-0 min-h-10 flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 border-b border-[var(--border-color)] text-[12px] select-none">
-        <span className="min-w-0 flex-1 font-medium text-[var(--text-primary)] truncate">
-          {doc?.title || '思维导图'}
-          <span className="ml-1.5 text-[var(--text-muted)] font-normal">思维导图 · {doc ? countNodes(doc.root) : 0} 节点</span>
+    <div className="kb-mm-root h-full w-full flex flex-col min-h-0">
+      {/* 工具条：单行 34px。容器查询（.kb-mm-root，见 styles/index.css）——
+          宽态（≥720）图标 + 文字；窄态只留图标（data-tip / aria-label 保留全文）；
+          <420 时「· N 节点」让位给标题。 */}
+      <div className="kb-mm-toolbar shrink-0 h-[34px] flex items-center gap-1.5 px-2.5 border-b border-[var(--border-color)] text-[12px] select-none">
+        <Network size={13} className="shrink-0 text-[var(--text-muted)]" />
+        <span className="min-w-0 flex-1 flex items-center gap-1 text-[var(--text-primary)]">
+          <span
+            className="min-w-0 truncate font-medium"
+            data-tip={doc?.title || '思维导图'}
+            aria-label={doc?.title || '思维导图'}
+          >
+            {doc?.title || '思维导图'}
+          </span>
+          <span className="kb-mm-tool-count shrink-0 font-normal text-[var(--text-muted)]">
+            · {doc ? countNodes(doc.root) : 0} 节点
+          </span>
         </span>
         {activeView === 'map' && doc && saveState !== 'saved' && (
           <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">{saveState === 'saving' ? '保存中…' : '未保存'}</span>
         )}
-        <div className="flex flex-wrap items-center justify-end gap-1.5">
+        <div className="shrink-0 flex items-center gap-0.5">
           {activeView === 'map' && doc && (
             <>
-              <button type="button" onClick={undo} disabled={!canUndo} data-tip="撤销 (Ctrl+Z)" aria-label="撤销 (Ctrl+Z)"
-                className="p-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
-              <button type="button" onClick={redo} disabled={!canRedo} data-tip="重做 (Ctrl+Y)" aria-label="重做 (Ctrl+Y)"
-                className="p-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>
-              <span className="w-px h-4 bg-[var(--border-color)]" />
-              <button type="button" onClick={fit} data-tip="适应画布（复位）" aria-label="适应画布（复位）"
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                <Frame size={11} /> 适应画布
-              </button>
-              <button type="button" onClick={() => { setAll(doc.root, false); doc.root.collapsed = false; setFoldVersion(v => v + 1) }} data-tip="展开全部节点" aria-label="展开全部节点"
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                <ChevronsUpDown size={11} /> 全部展开
-              </button>
-              <button type="button" onClick={() => { doc.root.children?.forEach(c => setAll(c, true)); setFoldVersion(v => v + 1) }} data-tip="折叠到一级" aria-label="折叠到一级"
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                <ChevronsDownUp size={11} /> 全部折叠
-              </button>
+              <ToolBtn tool="undo" icon={Undo2} label="撤销" tip="撤销 (Ctrl+Z)" onClick={undo} disabled={!canUndo} />
+              <ToolBtn tool="redo" icon={Redo2} label="重做" tip="重做 (Ctrl+Y)" onClick={redo} disabled={!canRedo} />
+              <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+              <ToolBtn tool="fit" icon={Frame} label="适应画布" tip="适应画布（复位）" onClick={fit} />
+              <ToolBtn tool="expand-all" icon={CirclePlus} label="全部展开" tip="展开全部节点" onClick={expandAll} />
+              <ToolBtn tool="fold-all" icon={CircleMinus} label="全部折叠" tip="折叠到一级" onClick={foldAll} />
+              <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--border-color)]" />
               {showExport && (
-                <button type="button" onClick={() => void openExport()}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors">
-                  <FileDown size={11} /> 导出为笔记
-                </button>
+                <ToolBtn tool="export" icon={FileDown} label="导出为笔记" tip="导出为知识库笔记" onClick={() => void openExport()} accent />
               )}
             </>
           )}
           {showSource && view === undefined && (
-            <button type="button" onClick={() => setInternalView(activeView === 'source' ? 'map' : 'source')}
-              className="px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-              {activeView === 'source' ? '← 返回导图' : '查看/编辑 JSON 源码'}
-            </button>
+            <ToolBtn
+              tool="source"
+              icon={Code2}
+              label={activeView === 'source' ? '返回导图' : '查看源码'}
+              tip={activeView === 'source' ? '返回导图' : '查看 / 编辑 JSON 源码'}
+              onClick={() => setInternalView(activeView === 'source' ? 'map' : 'source')}
+            />
           )}
+          {activeView === 'map' && doc && (
+            <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+          )}
+          <ToolBtn tool="reload" icon={RefreshCw} label="重读" tip="重读磁盘文件" onClick={() => void load()} />
+          <ToolBtn tool="copy" icon={Copy} label="复制路径" tip="复制仓库相对路径" onClick={copyPath} />
         </div>
       </div>
 
@@ -559,7 +792,7 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
           <div className="mm-zoombar absolute right-3 bottom-3 flex items-center gap-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-sm">
             <button type="button" data-tip="缩小" aria-label="缩小" onClick={() => zoomBy(1 / 1.15)}
               className="w-6 h-6 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">−</button>
-            <button type="button" data-tip="重置 100%" aria-label="重置 100%" onClick={() => { viewRef.current = { ...viewRef.current, s: 1 }; applyView() }}
+            <button type="button" data-tip="重置 100%" aria-label="重置 100%" onClick={() => { stopCamAnim(); viewRef.current = { ...viewRef.current, s: 1 }; applyView() }}
               className="w-6 h-6 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">⤾</button>
             <button type="button" data-tip="放大" aria-label="放大" onClick={() => zoomBy(1.15)}
               className="w-6 h-6 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">+</button>
