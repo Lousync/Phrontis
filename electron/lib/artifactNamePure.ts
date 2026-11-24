@@ -7,8 +7,8 @@
  * - `sortKeyFor` —— 文件管理器同序的排序键（章号 → 段号 → 课程助手垫底）；
  * - `isOverwriteKind` —— 同名是否允许原地覆盖（测验除外，铁律 19 版本递增由调用方处理）。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.4、
- *       `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §38.5。
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.4、
+ *       `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §38.5。
  *
  * 命名规则（改动必须同步 `.AGENT/scripts/ai-teaching/verify-artifact-naming.mjs`）：
  * ```text

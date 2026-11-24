@@ -8,8 +8,8 @@
  * 可被 stripTypeScriptTypes 后直接 import（契约脚本
  * `.AGENT/scripts/ai-teaching/verify-model-catalog.mjs`）。不读设置、不碰文件系统、不发 IPC。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.9 / §4.3、
- * `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §13–§15、B8 / B12
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.9 / §4.3、
+ * `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §13–§15、B8 / B12
  */
 
 import type {

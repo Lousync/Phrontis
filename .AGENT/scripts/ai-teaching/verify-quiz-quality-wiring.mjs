@@ -7,8 +7,8 @@
  *   B. 真正落盘点 `electron/lib/aiTeachingCourse.ts` 的 `archiveOrganizedPage` 确实在
  *      **写盘前**调用了质量门，且设置键 / 重试上限 / 作答记录保护都没漏。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §9
- *      `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E4
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §9
+ *      `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E4
  *
  * 运行（仓库根）：node .AGENT/scripts/ai-teaching/verify-quiz-quality-wiring.mjs [仓库路径]
  * 输出纯 ASCII（禁 emoji，AGENTS.md）；期望全部 PASS 且 exit=0。

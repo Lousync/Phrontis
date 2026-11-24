@@ -2,7 +2,7 @@
 /**
  * Contract check: AI-teaching material ingest pure functions
  *   implementation: electron/lib/sourceIngestPure.ts
- *   plan: /home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md  sections 2.2 / 2.3 / 4.1 / 9
+ *   plan: /home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md  sections 2.2 / 2.3 / 4.1 / 9
  *
  * Policy notes encoded here (read before changing the implementation):
  *   - nextIngestStatus REJECTS illegal transitions by returning `prev` unchanged

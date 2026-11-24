@@ -2,8 +2,8 @@
 /**
  * Contract check: AI teaching right viewer web pane (native WebContentsView).
  *
- * Plan: docs/ai-teaching-right-viewer-plan.md sections 6.1 / 8
- *       /home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md C1 / C3 / C4
+ * Plan: /home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md sections 6.1 / 8
+ *       /home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md C1 / C3 / C4
  *
  * Static source assertions only: no `electron` import, no app boot. This module is the
  * security boundary of the whole feature, so the checks lock the four guard hooks and the

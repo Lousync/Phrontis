@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 契约验证：AI教学「旁问作用域」纯函数（`electron/lib/sideLanePure.ts`）
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.11 / §4.5 / §6.4 / §9
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.11 / §4.5 / §6.4 / §9
  *       + 内核文档 C8 / C9 / C10 / C11。
  *
  * 断言口径（全部跑真实实现，strip 类型后直接 import）：

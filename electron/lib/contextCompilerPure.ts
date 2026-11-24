@@ -1,8 +1,8 @@
 /**
  * AI 教学 · 上下文编译器 **纯函数**（P0 契约面）
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.7 / §9
- *      `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` A4 / §5.2 / §5.5
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.7 / §9
+ *      `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` A4 / §5.2 / §5.5
  *
  * 三件事（零运行时依赖，契约脚本 strip 类型后直接跑真实实现）：
  *   · `parseConstraintSections` —— `CONSTRAINTS.md` v3 的节语义：必须 / 禁止 / 输出格式 / 范围 → hard，

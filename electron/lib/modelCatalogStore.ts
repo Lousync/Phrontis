@@ -8,7 +8,7 @@
  * 为什么单独一层而不是塞进 llmService：llmService 是请求链路，任何一处新增依赖都可能
  * 让「一轮对话」多走一次设置读取；目录是配置侧，调用时机只在开界面 / 切模型 / 迁移。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.9 / §4.3
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.9 / §4.3
  */
 import { ipcMain } from 'electron'
 import { broadcastDataChanged } from '../main/windowBus'

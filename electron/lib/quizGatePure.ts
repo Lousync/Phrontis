@@ -1,8 +1,8 @@
 /**
  * AI 教学 · 题单质量门 **接线层纯函数**（`course.organize.archive` 写盘前调用）
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §9
- *      `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E4（已拍板全做）
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §9
+ *      `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E4（已拍板全做）
  *
  * 分工：四项能力（结构硬校验 / 字母指代 / 答案均衡 / 长度暗示）的实现全部在
  * `quizQualityPure.ts`（P0 契约面）。本文件只做「把 markdown 题单 → 题集 → 回写」的接线：

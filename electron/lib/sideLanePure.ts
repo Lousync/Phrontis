@@ -1,7 +1,7 @@
 /**
  * AI 教学重构 · 旁问作用域（P0 契约面）
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md`
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md`
  *   §2.11 旁问（AgentSessionRow.sideScope，旧数据按 anchor 读）
  *   §4.5 旁问 IPC（createSideLane 增加 sideScope；conversation 不固化快照）
  *   §6.4 旁问界面（header / badge / 去掉「升格为正式会话」）

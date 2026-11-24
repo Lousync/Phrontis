@@ -3,8 +3,8 @@
  * Contract test: AI teaching workspace (course) model binding pure functions
  *   src/modules/ai-teaching/workspaceModelPure.ts
  *
- * Plan: /home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md 2.9 / 4.3
- *       /home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md 15.1
+ * Plan: /home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md 2.9 / 4.3
+ *       /home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md 15.1
  *
  * Reads the real implementation (strip types, dynamic import), never modifies it.
  * Assertions:

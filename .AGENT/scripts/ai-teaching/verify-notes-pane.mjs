@@ -2,7 +2,7 @@
 /**
  * Contract: AI teaching right-viewer Notes pane (D1 editable notes).
  *
- * Plan: /home/lousync/Projects/Phrontis/docs/ai-teaching-right-viewer-plan.md section 6.2
+ * Plan: /home/lousync/Projects/Phrontis//home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md section 6.2
  *       + kernel doc D1 (markdown editable in the viewer) / D6 (one notes folder per session,
  *         path follows F11 flattening into `产物/`).
  *

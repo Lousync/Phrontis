@@ -1,7 +1,7 @@
 /**
  * 右侧查看器 · 宽度会话（拖拽 / 持久化 / 视口重算）
  *
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §3.3（360–960、innerWidth-300、4px dead-zone、
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §3.3（360–960、innerWidth-300、4px dead-zone、
  * 双击回 480）与 §5.1 / §5.3（`aiTeachRightViewerWidth` 走 SETTINGS）。
  * 2026-11-23：上限改成 `innerWidth - reserve`，`reserve = 中栏左缘 + 420`（由调用方实测传入），
  * 窗口过窄时查看器降到紧凑下限 300（不再把中栏压到一行 4 个字）。

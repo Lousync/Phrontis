@@ -1,7 +1,7 @@
 /**
  * AI 教学重构 · 右侧查看器页签状态（P0 契约面）
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md`
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md`
  *   §2.10 查看器状态（ViewerTab / ViewerState 持久化，只存引用不存正文）
  *   §4.4 查看器 IPC（viewer:state:* / web:tab:*）
  *   §6.2 右侧查看器骨架（懒加载页签 / 切页签只隐藏不卸载 / bounds 同步）

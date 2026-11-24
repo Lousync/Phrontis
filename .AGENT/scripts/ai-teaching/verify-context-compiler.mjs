@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 契约验证：AI 教学「上下文编译器」纯函数（`electron/lib/contextCompilerPure.ts`）
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.7 / §9
- *      `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` A4 / §5.2 / §5.5
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.7 / §9
+ *      `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` A4 / §5.2 / §5.5
  *
  * 锁什么：CONSTRAINTS.md 节语义（hard / soft、散条目归 hard、三种条目写法、HTML 注释）、
  *         三层去重取最细、条数 / 字符截断、块顺序与空块跳过、预算丢弃顺序与 truncated 名单。

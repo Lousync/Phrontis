@@ -5,7 +5,7 @@
  * 放在组件里就只能靠读屏与手点验证。抽到这里后契约脚本
  * `.AGENT/scripts/ai-teaching/verify-notes-pane.mjs` 可以 strip 类型后直接 import 跑真值。
  *
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §6.2（D1 笔记可写）。
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §6.2（D1 笔记可写）。
  */
 
 /** 列表项：仓库相对路径 + 磁盘 mtime（毫秒） */

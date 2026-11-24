@@ -5,8 +5,8 @@
  * 在菜单组件里只能靠点开看；拆成零依赖纯函数后，契约脚本可以逐条钉死
  * （`.AGENT/scripts/ai-teaching/verify-model-menu.mjs`），日后改分组不会悄悄改坏。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §6.1
- * 展示口径：`/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §15.3
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §6.1
+ * 展示口径：`/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §15.3
  *
  * ★ 只 `import type`：契约脚本用 `stripTypeScriptTypes` 直接跑本文件，
  *   任何运行时依赖（含 `src/lib/modelCatalog`）都会让脚本断在解析阶段。

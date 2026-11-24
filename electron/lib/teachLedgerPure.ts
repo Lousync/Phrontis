@@ -1,8 +1,8 @@
 /**
  * AI 教学 · 段内进度台账 **纯函数**（P0 契约面）
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.8 / §9
- *      `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E2（已拍板 A）
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.8 / §9
+ *      `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E2（已拍板 A）
  *
  * 职责（零运行时依赖，只 `import type` 共享类型，专为契约脚本 strip 类型后直接 import）：
  *   · `parseTeachFence` —— 抓回答尾部 ` ```teach ` 围栏里的增量 JSON（对象）；容错见下；

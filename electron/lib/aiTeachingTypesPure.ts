@@ -10,7 +10,7 @@
  * - 不使用 enum / namespace / 装饰器（strip 模式不支持）；
  * - 所有字段可选者都显式写 `?`，不做隐式约定。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2
  */
 
 /* ============================== 素材 ============================== */

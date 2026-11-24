@@ -7,7 +7,7 @@
  *      （URL 归一 / 页签槽位 / 关闭邻位 / bounds 判定 / 恢复容错）；
  *   2. `WebPane.tsx` 的静态硬约束 —— bounds 同步链路与「禁模态提示」。
  *
- * 方案：`/home/lousync/Projects/Phrontis/docs/ai-teaching-right-viewer-plan.md` §6.1 / §8 / §9
+ * 方案：`/home/lousync/Projects/Phrontis//home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §6.1 / §8 / §9
  *       + 内核文档 C2（外链复用当前页签）/ C4（只认 http/https）/ C6（恢复但不预加载）。
  *
  * 2026-11-22 随内层页签条删除更新：第 8 节补了五条静态断言 —— 内层「新建 / 关闭」入口消失、

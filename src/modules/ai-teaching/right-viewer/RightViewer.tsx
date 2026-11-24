@@ -2,7 +2,7 @@
  * AI 教学 · 右侧活动栏外壳（动态多页签 / overlay 定位 / 拖宽 / 持久化 / 保活 / 动效）
  *
  * 方案：`tmp/ai-teach-right-viewer/PLAN.md`（四固定页签 → 动态实例页签）
- *       + `docs/ai-teaching-right-viewer-plan.md` §3（交互）/ §5（持久化）/ §9（动效与 a11y）
+ *       + `/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §3（交互）/ §5（持久化）/ §9（动效与 a11y）
  * 内核决策：C7 overlay 可调宽 · D5 懒加载 + 关页签卸载、**切页签只隐藏不卸载**（本版加保活窗口）
  *
  * 这个文件只做「壳」：页签集合 / 页签条 / 宽度 / 持久化 / 保活窗口 / 去重 / 网页视图可见性

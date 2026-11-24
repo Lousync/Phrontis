@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 契约验证：AI 教学右侧查看器「书架页签」（`src/modules/ai-teaching/right-viewer/`）
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §6.3
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §6.3
  *       + 内核文档 D2（全格式）/ D3（不设固定工具条）/ D5（切页签只隐藏不卸载）
  *         / D7（复用阅读能力、状态按 rootId+relPath 共享）/ D8（入口决定右侧或全屏）
  *

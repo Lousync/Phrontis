@@ -15,7 +15,7 @@
  * 零运行时依赖：只用 `import type` 引共享类型，可被 stripTypeScriptTypes 后直接 import
  * （契约脚本 `.AGENT/scripts/ai-teaching/verify-model-catalog.mjs`）。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §13 / §15.2、B8
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §13 / §15.2、B8
  */
 
 import type { CapabilityKey, CapabilityState } from './aiTeachingTypesPure'

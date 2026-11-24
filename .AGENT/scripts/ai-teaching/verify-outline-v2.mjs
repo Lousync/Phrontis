@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 契约验证：AI 教学重构 P0「课程大纲 v2」纯函数（`electron/lib/courseOutlinePure.ts`）
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.5
- *       `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §39
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.5
+ *       `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §39
  *
  * 断言口径（全部跑真实实现，strip 类型后直接 import）：
  *   · 4 列旧格式可读且**逐字原样重写**（不补 `concept` / 空 requires 列、无章 id 也保留）；

@@ -3,7 +3,7 @@
  * Contract test: AI teaching preflight "course model" line pure functions
  *   src/modules/ai-teaching/preflightModelPure.ts
  *
- * Plan: /home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md B2 / B3
+ * Plan: /home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md B2 / B3
  *
  * Reads the real implementation (strip types, dynamic import), never modifies it.
  * Assertions:

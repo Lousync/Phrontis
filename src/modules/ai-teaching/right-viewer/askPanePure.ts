@@ -1,7 +1,7 @@
 /**
  * 旁问页签 · 纯函数层（零运行时依赖，仅可 `import type`）
  *
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §6.4；内核文档 C8 / C10 / C11。
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §6.4；内核文档 C8 / C10 / C11。
  *
  * 为什么单独一层：徽标 / 摘要 / 检索 / 排序 / 请求解析都是「静默错」高发区
  * （旧数据没有 `anchorOrdinal` 时最容易随手编一个序号），必须能被契约脚本

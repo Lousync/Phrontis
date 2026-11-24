@@ -8,7 +8,7 @@
  * 「这个值是条目还是旧 spec / 这个槽位能不能选它」。口径散开必然出现
  * 「设置里可选、对话里报错」的裂缝，所以统一走 `resolveCatalogEntry`。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §6.1
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §6.1
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { llmCatalogList } from './ipc'

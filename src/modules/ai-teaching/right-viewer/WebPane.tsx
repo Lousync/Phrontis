@@ -33,7 +33,7 @@ import {
  *
  * 内容区的真实像素不在 React 里：主进程用 `WebContentsView` 盖在占位区上面，
  * 渲染层只做两件事 —— 把占位区的 CSS px 几何同步过去、决定它该不该可见。
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §6.1 / §8 / §9；决策 C2 / C4 / C6。
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §6.1 / §8 / §9；决策 C2 / C4 / C6。
  */
 
 interface TabRuntime {

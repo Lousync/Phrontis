@@ -6,7 +6,7 @@
  * 的用例表，再回来改实现。
  *
  * 只放四类东西，对应的落盘契约见方案
- * `/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md`：
+ * `/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md`：
  *   · §2.2 `sources.json` v2 —— 素材登记与 `ingest.status`；
  *   · §2.3 解析缓存 —— `<cacheRoot>/parse/<contentHash>/<engineSig>/`；
  *   · §4.1 素材 IPC —— `material.read` 的 `offset / maxChars / anchor` 切片语义；

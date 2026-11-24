@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 契约验证：AI 教学「题单质量门」纯函数（`electron/lib/quizQualityPure.ts`）
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §9
- *      `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E4
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §9
+ *      `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E4
  *
  * 锁什么：结构硬校验正反例、字母指代检测、答案均衡（分布 / 无 3 连 / 幂等 / 跳过规则）、
  *         长度偏置三种 reason。

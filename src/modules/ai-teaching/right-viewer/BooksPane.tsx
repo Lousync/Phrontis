@@ -12,7 +12,7 @@ import {
 } from './booksPanePure'
 
 /**
- * AI 教学右侧查看器 · 书架页签（方案 `docs/ai-teaching-right-viewer-plan.md` §6.3）。
+ * AI 教学右侧查看器 · 书架页签（方案 `/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §6.3）。
  *
  * 两个视图在组件内切换（`shelf | reader`，不新增路由、不借壳的状态）：
  *   1. 书架列表 —— 数据与 `src/modules/bookshelf/index.tsx` 同源（`pdfReaderListBooks` +

@@ -520,7 +520,7 @@
 | ai-teach-anchor-rail | 右缘轮次导航（2026-11-22 提交 dc8a44ba 一带） |
 | ai-teach-composer-compact | v3.57.0 工具条窄态图标化 |
 | ai-teach-composer-tray | 输入区控件抽屉整体收起（2026-11-22） |
-| ai-teach-right-viewer | 右活动栏多页签（2026-11-22；主仓 `docs/ai-teaching-right-viewer-plan.md`） |
+| ai-teach-right-viewer | 右活动栏多页签（2026-11-22；方案已随 2026-11-24 批次归档 DP `已实现设计文档/ai-teaching-right-viewer-plan.md`） |
 | ai-teach-segment-bar | 段上下文条收敛（2026-11-22） |
 | ai-teach-toolbar | 单图标顶栏 + 输入区工具条（2026-11-22） |
 | ai-teach-topbar | 会话元信息托盘 pill + 右栏笔记页签就地编辑 |
@@ -564,3 +564,40 @@
 ### 同批清理（不进归档）
 
 `kb-ts-*`（292 个，`.AGENT/scripts/shared/ts-module.mjs` 转译中间目录泄漏）、`kb-ai-teach-*`、`devbridge/`（79 张临时截图）、`probe-ai-models-layout/`、`verify-resizable-panel/`（空）、`edge-drag-repro/`（已修 bug 复现件）、tmp 根重复的 `verify-topic-ai-tools.mjs` 与一次性 `probe-pomodoro-upgrade.mjs`。
+
+## 2026-11-24 归档（桌面散件 9 件 + 主仓 docs/ 2 份）
+
+> 背景：`/home/lousync/桌面/` 堆了 11-18～11-20 的 AI 教学批次材料（全部无 git 历史，重启只能从 DP 取），主仓 `docs/` 还留着两份已落码方案。逐件核对代码与 CHANGELOG（v3.45–v3.52）后清仓。
+
+### 设计文档 → `Phrontis/已实现设计文档/`（3 份）
+
+| 文档 | 来源 | 判定依据 |
+|---|---|---|
+| `Phrontis-AI教学-技术方案-2026-11-19.md` | 桌面 | P0–P6 随 v3.45–v3.52 落码（模型条目 / 素材链路 / 四页签查看器 / 旁问 / 段内台账 / 大纲先修 / 题单质量门）；**P7 的 `artifacts.json` / `evidence.json` / 一键整理 从未落码**（产物索引由 `deposits.json` 与 v3.58.0 右栏统一形态接走），归档头已注明判废 |
+| `settings-model-tab-rework-plan.md` | 主仓 `docs/` | 已落码 v3.46.0「设置里的模型页重做」 |
+| `ai-teaching-right-viewer-plan.md` | 主仓 `docs/` | 已落码 v3.45.0 四页签查看器；形态后被 `docs/ai-teaching-right-viewer-unify-plan.md`（v3.58.0 工件栏并入）取代 |
+
+### 设计文档 → `Phrontis/方案与调研/`（2 份）
+
+| 文档 | 来源 | 判定依据 |
+|---|---|---|
+| `Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` | 桌面 | A1–F12 共 55 项全拍板，逐项转技术方案落码；讨论稿本体不再作为开工依据 |
+| `Phrontis-AI教学-决策清单-2026-11-18.md` | 桌面 | 9 项待定全部并入内核重构 + 技术方案；「检查问题改 ask 卡」改判为 quiz 快检（`electron/lib/teachStylePrompt.ts:42`） |
+
+### 原型 → `Phrontis/原型/`（5 件）
+
+| 原型 | 判定依据 |
+|---|---|
+| `Phrontis-AI教学-课堂原型-2026-11-19.html` | 输入卡 v10 浮卡（`src/lib/settings.ts` 的 `assistantInputStyle`、`AssistantPanel/inputShells.ts:23`） |
+| `Phrontis-AI教学-课堂原型-右侧网页-2026-11-19.html` | 网页页签 `WebContentsView`（v3.45.0，v3.50.0 改单页化） |
+| `Phrontis-右侧查看器-原型-2026-11-19.html` | 四页签查看器 v3.45.0 |
+| `Phrontis-模型菜单-原型-2026-11-20.html` | `src/components/shared/ModelMenu.tsx`（2026-11-21 定稿） |
+| `Phrontis-设置模型页-原型-2026-11-20.html` | v3.46.0 设置模型页重做 |
+
+### 其他
+
+| 材料 | 去向 | 判定 |
+|---|---|---|
+| `Phrontis测试视口尺寸表.md`（桌面） | DP `Phrontis-mobile/过程记录/` | 手机端测试视口参考表（768 断点 / 5180 dev 端口），非桌面仓材料；同步登记手机仓 `docs/DESIGN-ARCHIVE.md` |
+
+> **同批路径改写（不按规则 6 挂空）**：代码与契约脚本里 50 处绝对路径引用（31 个文件，指向技术方案 / 内核重构与模型目录）已批量改指 DP 新位置；两份主仓方案头部的原型路径同步改指 DP `原型/`。

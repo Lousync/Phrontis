@@ -1,8 +1,8 @@
 /**
  * AI 教学 · 工作区（课程）模型绑定 —— 零运行时依赖的纯函数层。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.9
- *       `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §15.1
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.9
+ *       `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §15.1
  *
  * ⚠️ 本文件**只允许 `import type`** —— 类型导入会被 Node 的类型剥离整体擦除；
  * 一旦出现普通值导入，契约脚本（strip 后直接 import 真实实现）装载时会留下无法解析的裸 import。

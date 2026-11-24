@@ -1,7 +1,7 @@
 /**
  * 右侧查看器 · 页签契约（冻结层）
  *
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §3 / §6；本轮改版：`tmp/ai-teach-right-viewer/PLAN.md`
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §3 / §6；本轮改版：`tmp/ai-teach-right-viewer/PLAN.md`
  *   （四固定页签 → 动态实例页签；同一 kind 可多开；旁问草稿；文件页签就地编辑）
  *
  * 为什么先冻结这一层：四个 kind 的 pane 由不同批次实现，壳由另外的批次实现。

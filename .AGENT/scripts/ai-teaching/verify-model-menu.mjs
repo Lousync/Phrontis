@@ -3,8 +3,8 @@
  * Contract check: model menu pure layer
  * (`src/components/shared/modelMenuPure.ts`).
  *
- * Plan: /home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md section 6.1
- *       /home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md section 15.3
+ * Plan: /home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md section 6.1
+ *       /home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md section 15.3
  *
  * The script runs the real implementation (types stripped) and locks:
  *   - the four group order (workspace default / workspace curated / global curated / recent);

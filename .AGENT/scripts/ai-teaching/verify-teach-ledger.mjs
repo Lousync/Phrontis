@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * 契约验证：AI 教学「段内进度台账」纯函数（`electron/lib/teachLedgerPure.ts`）
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.8 / §9
- *      `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E2
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.8 / §9
+ *      `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` E2
  *
  * 锁什么：teach 围栏解析容错（单引号 / 尾逗号 / 注释 / 全角引号 / 坏 JSON）、
  *         strip 不碰其它围栏、merge 幂等与 step 单调、terms 大小写去重、

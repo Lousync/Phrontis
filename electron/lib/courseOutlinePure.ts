@@ -9,8 +9,8 @@
  * - `protectLearned` —— 已学知识点拒绝删除 / 改名（方案 §39.3）；
  * - `topoOrderUnits` —— 章内按先修稳定重排，非法输入原样返回（不抛错）。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §2.5、
- *       `/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §39。
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §2.5、
+ *       `/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` §39。
  * 契约脚本：`.AGENT/scripts/ai-teaching/verify-outline-v2.mjs`。
  *
  * 行格式：

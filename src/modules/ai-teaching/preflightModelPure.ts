@@ -1,7 +1,7 @@
 /**
  * AI 教学 · 开段预检「本课程模型」行的纯函数层。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` B2 / B3（工作区默认 + 精选）
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/方案与调研/Phrontis-AI教学-内核重构与模型目录-2026-11-19.md` B2 / B3（工作区默认 + 精选）
  *
  * ⚠️ 本文件**只允许 `import type`**（甚至可以一个 import 都没有）—— 类型导入会被 Node 的
  * 类型剥离整体擦除；一旦出现普通值导入，契约脚本（strip 后直接 import 真实实现）装载时会

@@ -4,7 +4,7 @@
  * (`src/modules/ai-teaching/right-viewer/{rightViewerPure.ts, viewerResize.ts, viewerTabs.ts,
  *   RightViewer.tsx, ViewerChrome.tsx}`).
  *
- * Plan: docs/ai-teaching-right-viewer-plan.md sections 3.2 / 3.3 / 5.1 / 9
+ * Plan: /home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md sections 3.2 / 3.3 / 5.1 / 9
  *       kernel decisions doc (2026-11-19) C5 / C6 / C7 / D5
  *
  * Locks:

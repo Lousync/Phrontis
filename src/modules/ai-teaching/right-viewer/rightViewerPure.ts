@@ -1,7 +1,7 @@
 /**
  * 右侧查看器 · 纯函数层（零运行时依赖，只 `import type`）
  *
- * 方案：`docs/ai-teaching-right-viewer-plan.md` §3.2 / §3.3 / §5.1 / §9，
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md` §3.2 / §3.3 / §5.1 / §9，
  * 内核决策 C5（四页签）/ C7（overlay 可调宽）/ D5（切页签只隐藏不卸载）。
  *
  * 为什么单独拆一层：宽度夹紧与页签迁移都是「看起来一行、实际到处出错」的逻辑

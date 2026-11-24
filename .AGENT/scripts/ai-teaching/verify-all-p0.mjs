@@ -2,7 +2,7 @@
 /**
  * P0 总闸：把 AI 教学重构 P0 阶段的全部契约脚本跑一遍。
  *
- * 方案：`/home/lousync/桌面/Phrontis-AI教学-技术方案-2026-11-19.md` §9 / §10
+ * 方案：`/home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/Phrontis-AI教学-技术方案-2026-11-19.md` §9 / §10
  *
  * 用法（仓库根）：node .AGENT/scripts/ai-teaching/verify-all-p0.mjs [仓库路径]
  * 输出纯 ASCII（AGENTS.md：脚本禁用 emoji）；任一脚本失败即 exit 1。

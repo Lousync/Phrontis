@@ -2,7 +2,7 @@
 /**
  * Contract check: AI teaching right viewer -> "ask" pane (side-lane upgrade).
  *
- * Plan: docs/ai-teaching-right-viewer-plan.md §6.4
+ * Plan: /home/lousync/Projects/DesginProcess/Phrontis/已实现设计文档/ai-teaching-right-viewer-plan.md §6.4
  * Kernel doc: C8 (merge into one ask surface, two scopes), C10 (read-only boundary),
  *             C11 (legacy lanes are anchor lanes, no invented ordinal).
  *
