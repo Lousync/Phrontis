@@ -124,9 +124,9 @@ for (const k of ['teach', 'side', 'assistant', 'learn']) {
   ok(`${k} 停止键 = 圆内方块（恰 1，在输入区）`, count(code[k], SQUARE) === 1, `实际 ${count(code[k], SQUARE)}`)
 }
 ok('assistant 停止键按 pending 分档（不是常驻）',
-  /pending \? \([\s\S]{0,600}?停止生成（已完成的轮次保留）/.test(code.assistant))
+  /pending \? \([\s\S]{0,600}?STOP_RUN_TIP/.test(code.assistant))
 ok('learn 停止键按 disabled + onStop 分档（不是常驻）',
-  /disabled && onStop \? \([\s\S]{0,600}?停止生成（已完成的轮次保留）/.test(code.learn))
+  /disabled && onStop \? \([\s\S]{0,600}?STOP_RUN_TIP/.test(code.learn))
 // 原停止键用的是 <X size={13} />。改后 composer 里只剩方块；全文 <X size={13} /> 仍应**恰 1 处**
 //（L227 消息关闭键，绝不能删）—— 若变成 2 处即「停止键退回 ✕」。
 ok('side 停止键已不是 ✕（全文 <X size={13}> 恰 1 处 = 消息关闭键）',
@@ -170,7 +170,7 @@ for (const k of ['teach', 'side', 'assistant', 'learn']) {
 }
 
 // ── ⑨ 文案保全（只收不删）────────────────────────────────────────────────────────
-ok('teach 发送/停止提示保留', has('teach', "imageBlocked ? '当前模型不支持图片' : '发送'") && has('teach', '停止生成（已完成的轮次保留）'))
+ok('teach 发送/停止提示保留', has('teach', "imageBlocked ? IMAGE_MODEL_SHORT : '发送'") && has('teach', 'STOP_RUN_TIP'))
 ok('side 追问 placeholder 保留', has('side', '就这一点追问…'))
 ok('teach 合规提示上方旧占位注释语义保留（合规提示行仍在 footer 内）',
   has('teach', COMPLIANCE) && has('teach', 'composerFooter'))

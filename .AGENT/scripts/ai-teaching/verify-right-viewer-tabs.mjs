@@ -529,7 +529,7 @@ check('draft does not create a lane on mount', (() => {
 })())
 check('draft registers the run bucket before handing over to the detail pane', /beginRun\(laneId\)/.test(draftPane))
 check('draft reports laneId back so the shell can persist it', /onLaneReady\(laneId, laneTitle\)/.test(draftPane))
-check('draft explains that closing loses nothing', /发出第一个问题后才会保存到旁问历史/.test(draftPane))
+check('draft explains that closing loses nothing', /还没有提问[\s\S]{0,200}发出后才会保存，关掉不留记录/.test(draftPane))
 check('ask pane is a two-state switch (lane detail vs draft)',
   /if \(laneId\)/.test(askPane) && /AskDraftPane/.test(askPane))
 check('ask pane reuses the existing SideLanePanel', askPane.includes("from '../SideLanePanel'"))

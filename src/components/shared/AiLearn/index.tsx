@@ -8,6 +8,7 @@ import { ResizablePanel } from '../ResizablePanel'
 import { MessageList, type UiMessage } from '../AssistantPanel/MessageList'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import { loadHelpDocs, type HelpDoc } from '../../../modules/help/docsLoader'
+import { STOP_RUN_TIP } from '../../../lib/aiCopy'
 import { LESSONS, LESSON_TOTAL, getLesson, type Lesson } from './lessons'
 import type { LearnProgressApi } from './useLearnProgress'
 import type { AgentChange, AgentSessionInfo, AgentTraceStep, TabName } from '../../../types'
@@ -166,7 +167,7 @@ function Composer({ placeholder, onSend, disabled, compact, onStop }: {
           {disabled && onStop ? (
             <button
               onClick={onStop}
-              data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）"
+              data-tip={STOP_RUN_TIP} aria-label={STOP_RUN_TIP}
               className="w-8 h-8 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity"
             >
               <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
@@ -240,7 +241,7 @@ function FollowChat({ chat, lesson, docMode = false, docTitle }: {
           <div className="px-3 pt-8 text-center text-[12px] leading-relaxed text-[var(--text-muted)]">
             {docMode
               ? '左侧是帮助文档。读到不懂的地方，直接在下面问 —— 提问会带上当前这篇。'
-              : <>这一步卡在哪都可以直接问。<br />提问会带上「第 {lesson.n} 步」与它的目标，AI 知道你在哪。</>}
+              : `这一步卡住可以直接问，会带上第 ${lesson.n} 步与它的目标。`}
           </div>
         )}
       />
@@ -500,8 +501,7 @@ export function AiLearnShell({ tab, onTabChange, onCollapse, onClose, active, pr
             onStopRun={chat.onAbort}
             emptyHint={(
               <div className="px-4 pt-16 text-center text-[12.5px] leading-relaxed text-[var(--text-muted)]">
-                这里是完整对话区，与侧栏共用同一份记录。<br />
-                切换到「上手路径」可以边看教程边问。
+                就这一步提问，会带上当前步骤与目标。
               </div>
             )}
           />
@@ -519,15 +519,15 @@ export function AiLearnShell({ tab, onTabChange, onCollapse, onClose, active, pr
           <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-[10.5px] text-[var(--text-secondary)]">
             <Quote size={10} className="text-[var(--accent)]" />
             <b className="font-medium text-[var(--text-primary)]">{chat.selQuotes.length} 条对话引用</b>
-            <span className="text-[var(--text-disabled)]">·发送时并入消息</span>
+            <span className="text-[var(--text-disabled)]">·将随提问附带</span>
           </span>
         ) : (
-          <span className="text-[11.5px] text-[var(--text-disabled)]">未附带页面（提问时按当前所在界面自动判断）</span>
+          <span className="text-[11.5px] text-[var(--text-disabled)]">未附带页面</span>
         )}
       </div>
 
       <div className="mb-4">
-        <div className="mb-1.5 text-[10.5px] tracking-wide text-[var(--text-disabled)]">本对话</div>
+        <div className="mb-1.5 text-[10.5px] tracking-wide text-[var(--text-disabled)]">本会话</div>
         <div className="flex items-center gap-1.5 py-1 text-[11.5px] text-[var(--text-muted)]">
           消息数<b className="ml-auto font-medium text-[var(--text-primary)]">{chat.messages.length}</b>
         </div>

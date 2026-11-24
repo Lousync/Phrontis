@@ -1221,6 +1221,21 @@ input:focus, textarea:focus, select:focus {
   transition: visibility 0s linear var(--dur-std);
 }
 .kb-collapse.open > * { visibility: visible; transition-delay: 0s; }
+/* --- C2 水平展开收起：grid-template-columns 0fr↔1fr（模型选择器，2026-11-24）---
+   与 .kb-collapse 同源：只动网格轨道，不动 width / 不用 transition-all。
+   用法：<span className={'kb-collapse-x' + (open ? ' open' : '')}><span>…</span></span>
+   子元素统一 min-width:0 + overflow:hidden + nowrap；收起后是否 aria-hidden 由调用方决定。 */
+.kb-collapse-x {
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns var(--dur-std) var(--ease-kb);
+}
+.kb-collapse-x.open { grid-template-columns: 1fr; }
+.kb-collapse-x > * {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
 .kb-chevron {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
@@ -1568,6 +1583,7 @@ input:focus, textarea:focus, select:focus {
   .kb-wiki-flash { background: color-mix(in srgb, var(--accent) 22%, transparent); }
   .kb-collapse { transition: none; }
   .kb-collapse > * { transition: none; }
+  .kb-collapse-x { transition: none; }
   .kb-chevron { transition: none; }
   .kb-tray-grip { transition: none; }
   .kb-tray-grip.kb-tray-hint { animation: none; }
@@ -2191,6 +2207,32 @@ input:focus, textarea:focus, select:focus {
 .kb-mm-root { container-type: inline-size; container-name: mindmap; }
 @container mindmap (max-width: 720px) { .kb-mm-tool-label { display: none; } }
 @container mindmap (max-width: 420px) { .kb-mm-tool-count { display: none; } }
+
+/* ---- ⑨ 看板 · AI 用量窗口的「近 7 天」窄 / 矮态（ModuleWindow.tsx AiUsageWindow，2026-11-24）----
+   问题：右列第三卡（`grow`）宽度随栅格（内容盒 306 / 396），高度吃窗口余高。窗口一矮，柱区被压到
+   `min-h-44` 的下限、额度区被挤到只剩 padding（实测 9px 高的滚动盒）→ 柱图是一排 2px 短桩，
+   额度区的滚动条退化成 border-t 线上的小圆角滑块。故：**放不下就整块不画**，而不是挤着画。
+
+   ★ 容器 = 卡片内容盒（含 11px 左右内边距的那层 `.kb-aiusage`）。查询量的是**内容盒**：
+     左右内边距已扣掉 ⇒ 宽度阈值就是「7 根柱实际能分到的宽度」。
+   ★ 用 `container-type: size`（不是 inline-size）：高度阈值也要能问，而它要求容器块尺寸确定
+     —— 这一层是 `flex-1 min-h-0`，高度由卡片 flex 分配，不依赖内容（实测注入后布局尺寸不变）。
+   ★ 不用 JS resize / 不监听窗口宽度（同 §① 口径）：容器查询只看自己这一格。
+
+   阈值依据（真机实测：`body` 内容盒 = border-box − 上下内边距 21px）：
+     · 宽：柱 7 根 × 最小可读 10px（8px 是硬下限，10px 才分得清相邻两根）+ 间隙 5px × 6 = 100，
+       再留 2 根柱的呼吸位 20 ⇒ **120px**。低于它每根柱不足 13px，柱图读成一排色块。
+       （当前栅格下出现不到：两列态内容盒 306/396，单列态 ≥148 —— 这条是给右列继续变窄兜底的。）
+     · 高：今日块 37.3 + 间距 10 + 柱区 44（`min-h-[44px]`）+ 间距 10 + 额度区 44（两行可读）
+       = **146px**。低于它柱区只能贴下限、额度区被挤成 9px 的滚动盒（那张截图里的滑块）。
+     · 额度区滚动条：柱图隐去后额度区 = 内容盒 − 47.3；低于 **74px**（额度区 < 26px，
+       一行的行高都不够）时连纵向滚动也关掉 —— 4px 高的滑块贴在 9px 的盒子里只是噪声。 */
+
+.kb-aiusage { container-type: size; container-name: aiusage; }
+
+@container aiusage (max-width: 119.9px) { .kb-aiusage-trend { display: none; } }
+@container aiusage (max-height: 146px) { .kb-aiusage-trend { display: none; } }
+@container aiusage (max-height: 74px) { .kb-aiusage-quota { overflow-y: hidden; } }
 
 
 

@@ -84,7 +84,7 @@ check('Enter commits / Escape cancels rename',
   /if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); setTutorRenamingId\(null\) \}/.test(src))
 check('delete reuses delSession (folder ask/keep/delete preserved)', /delSession\(e, s\.id, s\.title\)/.test(src))
 check('empty state offers new session', /还没有对话[\s\S]{0,260}?新建对话/.test(src))
-check('session folder path displayed', /aiTeachSessionFolder\(activeId\)/.test(src) && /tutorFolder \? tutorFolder/.test(src))
+check('session folder path displayed (only when folder exists)', /aiTeachSessionFolder\(activeId\)/.test(src) && /\{tutorFolder && \(/.test(src) && /data-tip=\{tutorFolder\}/.test(src) && !src.includes('不建课 · 每个对话一个文件夹'))
 
 // ---------------------------------------------------------------- 3. composer: mode chips + material chip
 console.log(`\n[3] ${rel} - composer mode row and material chip`)

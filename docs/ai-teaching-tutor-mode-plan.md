@@ -246,7 +246,7 @@ function buildTutorProtocolHint(mode: TutorTurnMode): string
 | F 主进程基座 | 完成 | `verify-tutor-mode` 72/72（含 regenerate / resume 沿用上一轮方式）；`verify-all-p0` 40/40；`tsc` 双配置 0 错；build 通过 |
 | V 查看器作用域 | 完成 | `verify-right-viewer-tabs` 220/220；课程旧键不变 |
 | R 阅读上下文 | 完成 | `verify-reading-context` 54/54；PDF/EPUB 发布 + 截断 |
-| U 容器与输入卡 | 完成 | `verify-tutor-ui` 72/72；与 F/V/R 合龙后 `verify-all-p0` 42/42 |
+| U 容器与输入卡 | 完成 | `verify-tutor-ui` 72/72；与 F/V/R 合龙后 `verify-all-p0` 44/44 |
 
 ### 已知偏差 / 待收口
 
@@ -256,4 +256,4 @@ function buildTutorProtocolHint(mode: TutorTurnMode): string
 4. ~~会话标题改了但文件夹仍是「新对话」~~：已加标题变化同步（`aiTeachRenameSessionFolder`），手动改名也走同一通道。
 5. 「加入错题」本期不渲染（聊天回答无知识页 `pageId`），登记第三批；「加入题单」写 `产物/题单.md`。
 6. md/txt 的阅读上下文尚未发布（PDF/EPUB 已覆盖），第二版补。
-7. ~~新脚本未登记~~：`verify-reading-context.mjs` 与 `verify-tutor-ui.mjs` 已登记，`verify-all-p0` 42/42。
+7. ~~新脚本未登记~~：`verify-reading-context.mjs` 与 `verify-tutor-ui.mjs` 已登记，`verify-all-p0` 44/44。

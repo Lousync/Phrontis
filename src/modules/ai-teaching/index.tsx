@@ -35,6 +35,7 @@ import { pickLearningQuote } from './learningQuotes'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { Collapsible } from '../../components/shared/Collapsible'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
+import { useLingerExpand } from '../../lib/useLingerExpand'
 import { looseJsonParse } from '../../components/shared/QuizParser'
 import { showToast } from '../../lib/toast'
 import { handleChatCommand } from '../../lib/chatCommands'
@@ -53,6 +54,7 @@ import { ACTIVE_THRESHOLD, clampTurn, pickTurn, turnTitle, type TurnItem } from 
 import { prefersReducedMotion } from '../../lib/usePresence'
 import { TUTOR_MODE_LABELS, resolveTutorMode, type TutorUiMode } from '../../lib/tutorModePure'
 import { getReadingContext, publishReadingContext, subscribeReadingContext } from '../../lib/readingContext'
+import { IMAGE_MODEL_TITLE, IMAGE_MODEL_HINT, IMAGE_MODEL_SHORT, IMAGE_MODEL_WARN, COMPRESSING_INLINE, STOP_RUN_TIP } from '../../lib/aiCopy'
 
 /** AI 教学面的斜杠指令（/mindmap、/生图）已收口到 src/lib/chatCommands.ts 的
  *  PASSTHROUGH_COMMANDS 单一真源 —— 弹层候选与「放行给模型」判定读同一张表，
@@ -535,6 +537,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const modelMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const modelMenu = useAnchoredMenu(modelMenuTriggerRef, modelMenuRef, 248)
+  /**
+   * 模型按钮的「收起 / 展开」（2026-11-24，参考 DeepTutor 工具栏图标化控件）：
+   * 常态只留 Bot 图标（约 27px 宽，为输入区腾出空间），hover / 键盘聚焦 / 菜单打开时
+   * 用 `.kb-collapse-x` 把「模型名 + · 思考强度 + Chevron」平滑展开；离开或关菜单后
+   * 停留 1.2s 再收起 —— 刚选完模型时名字不会立刻消失。
+   *
+   * `useAnchoredMenu` 不吐 onClose 回调（外部点击 / Esc 在它内部收口），这里用
+   * 「open 由 true 变 false」的边沿做一次补给 `linger()`；选中条目处另有一处显式调用。
+   */
+  const modelPill = useLingerExpand(modelMenu.open)
+  const modelPillWasOpen = useRef(false)
+  const modelPillOpening = useRef(false)
+  useEffect(() => {
+    if (modelPillWasOpen.current && !modelMenu.open) modelPill.linger()
+    modelPillWasOpen.current = modelMenu.open
+  }, [modelMenu.open, modelPill.linger])
   /**
    * 抽屉窄态「思考」气泡（2026-11-23 工具条图标化）：抽屉可用宽 < 380px 时，
    * 四档按钮由 CSS 容器查询收起，只剩「脑图标 + 当前档」一枚；点它在这里选档。
@@ -1465,7 +1483,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const images = composerImages.images.slice()
     if ((!text && images.length === 0) || pending || compressing) return
     if (images.length > 0 && visionChatOk === false) {
-      showToast({ type: 'info', message: '当前模型不支持图片输入', detail: '请先在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）' })
+      showToast({ type: 'info', message: IMAGE_MODEL_TITLE, detail: `${IMAGE_MODEL_HINT}。` })
       return
     }
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（无会话时也拦截并提示）
@@ -2879,7 +2897,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [modelCapable, convoEffort])
   const pickModel = (val: string): void => {
     const sid = activeIdRef.current
-    if (!sid) { showToast({ type: 'warning', message: '请先新建对话，再选择本对话模型' }); return }
+    if (!sid) { showToast({ type: 'warning', message: '请先新建对话，再选择本会话模型' }); return }
     convoLlm.current.set(sid, { ...(convoLlm.current.get(sid) ?? {}), modelId: val })
     setConvoModel(val)
   }
@@ -2913,6 +2931,29 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const openModelMenu = (el: HTMLElement): void => {
     modelMenuTriggerRef.current = el as HTMLButtonElement
     modelMenu.toggle()
+  }
+  /**
+   * 模型按钮点击：已展开时直接开菜单；收起态先在同一帧里展开（`linger()` 保证至少停 1.2s），
+   * 下一帧再交给 `useAnchoredMenu` 量锚点 —— 展开会把按钮从 ~27px 拉到 ~160px，
+   * 让它按「展开后的几何」做 clamp / 翻面。锚点仍取按钮右缘：同一行左侧是 `flex-1`
+   * 的合规提示，按钮变宽时是它让位，右缘不动（原型实测展开前后右缘漂移 0px），
+   * 所以即便量在过渡中途也不会偏。连点由 `modelPillOpening` 挡掉，避免 rAF 里再
+   * toggle 一次、把刚打开的菜单立刻关掉。
+   */
+  const onModelPillClick = (): void => {
+    if (modelMenu.open) {
+      modelPillOpening.current = false
+      modelMenu.close()
+      return
+    }
+    if (modelPillOpening.current) return
+    modelPillOpening.current = true
+    modelPill.linger()
+    requestAnimationFrame(() => {
+      modelPillOpening.current = false
+      const el = modelMenuTriggerRef.current
+      if (el) openModelMenu(el)
+    })
   }
   /**
    * 空态「打开设置 · 模型」：走既有 `settings:open` 事件通道（AI 助手 / 划词翻译同一个入口），
@@ -3102,6 +3143,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     </>
   )
 
+  /**
+   * 模型按钮的可见文案 / 提示文案：收起态只露 Bot 图标，**完整值只从这里出**
+   * （tooltip + aria-label）—— 所以这里必须同时带模型名与思考强度，不能只留名字。
+   * 文案仍由 `effModelBare` / `EFFORT_LABEL` 推导，不硬编码任何模型名。
+   */
+  const modelPillLabel = `${effModelBare || '默认'}${convoEffort !== 'off' ? ` · 思考强度${EFFORT_LABEL[convoEffort]}` : ''}`
+  const modelPillTip = `本会话模型：${modelPillLabel}（点击切换 · 仅本会话生效，默认跟随 设置→AI 默认模型）`
+
   const composerFooter = (
                 <div className="flex items-center gap-2 mt-0.5">
                   {/* 条目7：AI 生成内容合规提示——常驻左端空白处（原 flex-1 空占位），弱化小字不新增行高；
@@ -3125,21 +3174,37 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   </button>
                   {/* 模型菜单（2026-11-21 定稿）：只列设置里配置的条目，浮层由 useAnchoredMenu
                       锚在**被点的这枚按钮**旁（fixed，向下放不下自动翻上），不再就地 absolute
-                      —— 就地会被输入卡的 overflow / 层叠上下文裁掉，挂在卡容器上又会跑到面板右缘。 */}
-                  <div>
-                    <button onClick={(e) => openModelMenu(e.currentTarget)}
-                      className="flex items-center gap-1 h-7 px-2 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                      data-tip="选择本对话模型（仅本对话生效，默认跟随 设置→AI 默认模型）" aria-label="选择本对话模型（仅本对话生效，默认跟随 设置→AI 默认模型）">
-                      <Bot size={11} />
-                      <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
-                      {convoEffort !== 'off' && (
-                        <span className="flex shrink-0 items-center gap-0.5 text-[var(--accent)]">
-                          <span aria-hidden>·</span>
-                          <Brain size={10} strokeWidth={2} className="shrink-0" aria-hidden />
-                          {EFFORT_LABEL[convoEffort]}
+                      —— 就地会被输入卡的 overflow / 层叠上下文裁掉，挂在卡容器上又会跑到面板右缘。
+                      2026-11-24：按钮本体图标化 —— 常态只剩 Bot（约 27px），hover / 键盘聚焦 /
+                      菜单打开时用 `.kb-collapse-x` 平滑展开「模型名 + · 思考强度 + Chevron」，
+                      关菜单或选完模型后停留 1.2s 再收起（`useLingerExpand`，参考 DeepTutor 同款控件）。 */}
+                  <div className="shrink-0">
+                    <button ref={modelMenuTriggerRef} type="button" onClick={onModelPillClick}
+                      aria-haspopup="dialog" aria-expanded={modelMenu.open}
+                      aria-label={modelPillTip} data-tip={modelPillTip}
+                      {...modelPill.triggerProps}
+                      className={`flex h-7 items-center rounded-md px-1.5 text-[11px] transition-colors ${
+                        modelMenu.open
+                          ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]'
+                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                      }`}>
+                      <Bot size={11} className="shrink-0" aria-hidden />
+                      {/* 收起 / 展开本体：grid-template-columns 0fr↔1fr（令牌见 docs/ui-animation-plan.md）。
+                          reduced-motion 由令牌自己的媒体查询处理，这里不另写动画、不新写全属性过渡。 */}
+                      <span className={`kb-collapse-x${modelPill.expanded ? ' open' : ''}`} aria-hidden={!modelPill.expanded}>
+                        <span className="flex items-center gap-1 pl-1">
+                          <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
+                          {convoEffort !== 'off' && (
+                            <span className="flex shrink-0 items-center gap-0.5 text-[var(--accent)]">
+                              <span aria-hidden>·</span>
+                              <Brain size={10} strokeWidth={2} className="shrink-0" aria-hidden />
+                              {EFFORT_LABEL[convoEffort]}
+                            </span>
+                          )}
+                          <ChevronRight size={10} aria-hidden
+                            className={`kb-chevron shrink-0 ${modelMenu.open ? 'rotate-90' : '-rotate-90'}`} />
                         </span>
-                      )}
-                      <ChevronRight size={10} className="-rotate-90 shrink-0" />
+                      </span>
                     </button>
                     {modelMenu.open && modelMenu.pos && (
                       /* 极简：只有「选模型」。
@@ -3150,7 +3215,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <div ref={modelMenuRef} data-wb="aiTeachModelMenu"
                         style={{ left: modelMenu.pos.left, top: modelMenu.pos.top, transformOrigin: modelMenu.pos.transformOrigin }}
                         className="kb-pop fixed z-40 flex max-h-[min(70vh,420px)] w-[248px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-xl select-none"
-                        role="dialog" aria-label="选择本对话模型">
+                        role="dialog" aria-label="选择本会话模型">
                         <div className="min-h-0 flex-1 overflow-y-auto">
                           {menuModelEntries.length === 0 ? (
                             /* 空态：不造跳转机制，走既有 settings:open 事件（与 AI 助手同一入口） */
@@ -3165,7 +3230,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           ) : menuModelEntries.map((e) => {
                             const sel = effModel === e.id
                             return (
-                              <button key={e.id} onClick={() => pickModel(e.id)} aria-pressed={sel}
+                              <button key={e.id} onClick={() => { pickModel(e.id); modelMenu.close(); modelPill.linger() }} aria-pressed={sel}
                                 data-tip={e.modelId} aria-label={e.name || e.modelId}
                                 className={`w-full flex items-center gap-1.5 rounded-lg px-2 py-[6px] text-left text-[12px] transition-colors hover:bg-[var(--bg-hover)] ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
                                 <span className="min-w-0 flex-1 truncate">{e.name || e.modelId}</span>
@@ -3264,12 +3329,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   {/* P3b（R12）：流式输出中发送键 → 停止键（深色底白方块），点击中断、保留已落库内容 */}
                   {pending ? (
                     <button onClick={abortActive}
-                      className="kb-stop-pulse w-8 h-8 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 active:scale-90 transition-all motion-reduce:transform-none"
-                      data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）">
+                      className="kb-stop-pulse w-8 h-8 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 active:scale-90 transition-[opacity,scale] motion-reduce:transform-none"
+                      data-tip={STOP_RUN_TIP} aria-label={STOP_RUN_TIP}>
                       <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
                     </button>
                   ) : (
-                    <button onClick={() => { void doSend() }} disabled={imageBlocked || (!input.trim() && !composerImages.hasImages)} data-tip={imageBlocked ? '当前模型不支持图片' : '发送'} aria-label={imageBlocked ? '当前模型不支持图片' : '发送'}
+                    <button onClick={() => { void doSend() }} disabled={imageBlocked || (!input.trim() && !composerImages.hasImages)} data-tip={imageBlocked ? IMAGE_MODEL_SHORT : '发送'} aria-label={imageBlocked ? IMAGE_MODEL_SHORT : '发送'}
                       className="w-[33px] h-[33px] rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:-translate-y-px active:translate-y-0 active:scale-90 disabled:opacity-30 disabled:translate-y-0 transition-[transform,opacity,background-color] motion-reduce:transform-none">
                       <ArrowUp size={15} />
                     </button>
@@ -3489,11 +3554,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 </div>
               ))}
             </div>
-            <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 select-none">
-              <div className="truncate text-[9.5px] text-[var(--text-muted)]" data-tip={tutorFolder ?? undefined}>
-                {tutorFolder ? tutorFolder : '不建课 · 每个对话一个文件夹'}
+            {tutorFolder && (
+              <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 select-none">
+                <div className="truncate text-[9.5px] text-[var(--text-muted)]" data-tip={tutorFolder}>{tutorFolder}</div>
               </div>
-            </div>
+            )}
           </div>
           ) : (
           <>
@@ -3647,7 +3712,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               {!tutorActive && courseReviewChapter && activeId && courseState?.reviews[courseReviewChapter]?.sessionId === activeId && (
                 <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
                   <span className="shrink-0 text-[11px] font-medium text-[var(--text-primary)]">章末复习 · {courseReviewChapterName}</span>
-                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]">本章学完已解锁；复习不引入新知识点</span>
+                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]">只复习，不引入新知识点</span>
                   <div className="shrink-0 flex items-center gap-1">
                     {courseState?.reviews[courseReviewChapter]?.rel ? (
                       <button onClick={() => { const rel = courseState?.reviews[courseReviewChapter]?.rel; if (rel) void openViewerFile(rel) }}
@@ -3997,7 +4062,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   <div className="kb-item-in flex items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-2 select-none">
                     <div className="min-w-0 flex-1">
                       <div className="text-[11.5px] text-[var(--text-primary)]">本课已结课</div>
-                      <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">结课报告与全部段落交接都已归档，课程保持只读。</div>
+                      <div className="mt-0.5 text-[10.5px] leading-[1.5] text-[var(--text-muted)]">已归档 · 课程只读</div>
                     </div>
                     <div className="shrink-0 flex items-center gap-1.5">
                       <button type="button" onClick={() => setEndReportWs(activeWs)}
@@ -4387,7 +4452,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             : '发送补充回答'} aria-label={exam
                             ? (otherDraftPending ? '还有未确认的补充：翻回该题按 Enter 或取消' : `统一发送全部回答（${submitCount}/${n}）`)
                             : '发送补充回答'}
-                          className="ml-auto w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 active:scale-90 disabled:opacity-30 transition-all motion-reduce:transform-none">
+                          className="ml-auto w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 active:scale-90 disabled:opacity-30 transition-[opacity,scale] motion-reduce:transform-none">
                           <ArrowUp size={15} />
                         </button>
                       </div>
@@ -4417,7 +4482,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         className="mb-1.5 kb-item-in flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px]"
                         style={{ borderColor: 'color-mix(in srgb, var(--warning) 35%, transparent)', background: 'var(--warning-bg)', color: 'var(--warning)' }}>
                         <Info size={12} className="mt-0.5 shrink-0" />
-                        <span className="min-w-0">当前模型不支持图片输入。请在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）。</span>
+                        <span className="min-w-0">{IMAGE_MODEL_WARN}</span>
                       </div>
                     )}
                     {quotes.length > 0 && (
@@ -4454,14 +4519,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     {compressing && (
                       <div className="mb-1.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
                         <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
-                        正在压缩对话历史…（可能数十秒，期间暂不能发送）
+                        {COMPRESSING_INLINE}
                       </div>
                     )}
                     {pickedSkill && (
                       <div className="mb-1.5 kb-item-in">
                         <span className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                           <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
-                          <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
+                          <span className="truncate">Skill：{pickedSkill.title} · 本轮</span>
                           <button type="button" onClick={() => setPickedSkill(null)} data-tip="移除该 Skill" aria-label="移除该 Skill"
                             className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
                         </span>
@@ -5009,7 +5074,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
                           <User size={11} /><span className="kb-l1">画像</span>
                         </button>
-                        <button onClick={() => { void openWorkspaceConstraints(selWs.id) }} data-tip={`工作区要求 · ${selWs.folderRel}/CONSTRAINTS.md（优先级：本会话要求 > 工作区要求 > 全局要求）`} aria-label="编辑工作区要求"
+                        <button onClick={() => { void openWorkspaceConstraints(selWs.id) }} data-tip={`工作区要求 · ${selWs.folderRel}/CONSTRAINTS.md`} aria-label="编辑工作区要求"
                           className="flex items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
                           <ScrollText size={11} /><span className="kb-l1">要求</span>
                         </button>

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, type ReactNode } from 'react'
 import { Bot, Gauge, RefreshCw, ShieldCheck, Plus, Plug, Trash2, AlertTriangle, Loader2, Sparkles, Store, Copy, Cpu, Upload, MessageSquare, BarChart3, GraduationCap, FolderOpen } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
+import { PERCEPTION_DESC } from '../../../lib/aiCopy'
 import {
   aiToolsList, aiToolsGetRecentAudit,
   mcpListServers, mcpAddServer, mcpRemoveServer, mcpToggleServer, mcpRefreshTools, mcpTestConnection,
@@ -317,7 +318,7 @@ function ChatTab({ mascots, mascotDiag }: {
             <div data-setting-anchor="aiTools.perception">
               <Row label="感知模式（发送前自动检索笔记）" divider={false}
                 icon={<Sparkles size={14} />}
-                hint="发送前自动检索知识库并注入最相关的笔记；检索在本地完成，不消耗对话 token；未配置向量模型时降级为关键词匹配。">
+                hint={PERCEPTION_DESC}>
                 <SettingSwitch checked={s.aiAssistantPerception === true} onChange={v => update('aiAssistantPerception', v)} aria-label="AI 助手感知模式" />
               </Row>
             </div>

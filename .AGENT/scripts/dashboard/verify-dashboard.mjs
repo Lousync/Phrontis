@@ -392,6 +392,41 @@ eq('D7 monthHead 拆「11 月 / 2026」', monthHead('2026-11'), { title: '11 月
     /max-w-full/.test(chips) && /truncate/.test(chips))
 }
 
+/* ================= M. AI 用量窗口的窄 / 矮态（2026-11-24） ================= */
+// 这一批修的是「卡片被挤小之后仍在硬画柱图」：柱区贴 min-h 下限、额度区被压成 9px 的滚动盒，
+// 滚动条退化成 border-t 线上的一枚小圆角滑块。判据 = 「放不下就整块不画」，且横向滚动容器
+// 必须从源头摘掉（不是拿 overflow:hidden 盖住）。
+{
+  const win = stripComments(read('src/modules/dashboard/ModuleWindow.tsx'))
+  const css = read('src/styles/index.css')
+  // 只取 §⑨ 那一段，避免其它容器查询规则误命中
+  const start = css.indexOf('/* ---- ⑨ 看板 · AI 用量窗口')
+  const sec = start >= 0 ? css.slice(start, css.indexOf('@container aiusage (max-height: 74px)') + 200) : ''
+
+  ok('M1 卡片内容盒是容器查询宿主（container-type: size —— 高度阈值也要问得到）',
+    /\.kb-aiusage \{ container-type: size; container-name: aiusage; \}/.test(css))
+  ok('M2 窄态：容器内容宽 < 120px 隐掉整块「近 7 天」',
+    /@container aiusage \(max-width: 119\.9px\) \{ \.kb-aiusage-trend \{ display: none; \} \}/.test(sec))
+  ok('M3 矮态：容器内容高 < 146px 隐掉整块「近 7 天」',
+    /@container aiusage \(max-height: 146px\) \{ \.kb-aiusage-trend \{ display: none; \} \}/.test(sec))
+  ok('M4 极矮态：额度区连纵向滚动也关掉（不再在 9px 的盒子里画滑块）',
+    /@container aiusage \(max-height: 74px\) \{ \.kb-aiusage-quota \{ overflow-y: hidden; \} \}/.test(sec))
+  ok('M5 「近 7 天」整块是一个原子单元（标签 / 柱 / 星期 / 悬停提示 / 空态同进同退）',
+    /className="kb-aiusage-trend flex min-h-\[44px\] flex-1 flex-col gap-1"[\s\S]{0,120}?近 7 天[\s\S]{0,2400}?近 7 天还没有用量/.test(win))
+  ok('M6 额度区只做纵向滚动：`overflow-x: clip` 从源头摘掉 x 轴滚动容器',
+    /kb-aiusage-quota[^"]*overflow-x-clip[^"]*overflow-y-auto/.test(win))
+  ok('M7 负向：卡片里没有新增横向滚动容器（overflow-x-auto / overflow-x-scroll）',
+    !/overflow-x-auto|overflow-x-scroll/.test(win))
+  ok('M8 负向：「近 7 天」不是用 overflow-hidden 遮出来的（隐去只走容器查询）',
+    !/kb-aiusage-trend[^"]*overflow-/.test(win))
+  ok('M9 额度行的名字可收缩（truncate + min-w-0，两处），内容撑不出横向富余',
+    (win.match(/min-w-0 truncate text-\[var\(--text-secondary\)\]/g) || []).length === 2)
+  ok('M10 负向：没有引入视口宽度监听（不看 window.innerWidth / matchMedia）',
+    !/innerWidth|matchMedia/.test(win))
+  ok('M11 显隐不加过渡（不出现 transition-all；不做淡入淡出）',
+    !/transition-all/.test(win))
+}
+
 /* ================= 结果 ================= */
 
 const fails = checks.filter((c) => !c.pass)

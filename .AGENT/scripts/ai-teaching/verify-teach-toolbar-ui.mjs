@@ -105,7 +105,12 @@ check('reduced-motion 关闭抓手过渡与脉冲',
 check('思考四档带 aria-pressed（宽态四档 + 窄态气泡各一份）', count(tray, /aria-pressed=\{convoEffort === e\}/g) === 2)
 check('引用按钮带 aria-pressed', count(tray, /aria-pressed=\{quotesOpen && quotes\.length > 0\}/g) === 1)
 check('抽屉不再放模型入口（与底部 openModelMenu 重复，2026-11-23 去重）', !tray.includes('openModelMenu'))
-check('模型入口仍在输入卡底部', mod.slice(mod.indexOf('const composerFooter')).includes('openModelMenu'))
+// 2026-11-24 模型按钮图标化：底部入口改走 onModelPillClick（收起态先展开、下一帧再调
+// openModelMenu），所以 footer 里出现的是它；仍要求「模型入口挂在输入卡底部」不变。
+check('模型入口仍在输入卡底部',
+  (mod.slice(mod.indexOf('const composerFooter')).includes('onModelPillClick')
+    || mod.slice(mod.indexOf('const composerFooter')).includes('openModelMenu'))
+  && /const onModelPillClick = \(\): void => \{[\s\S]{0,600}?openModelMenu\(/.test(mod))
 
 /* ─────────── 2c. 窄态自动图标化（2026-11-23 用户拍板） ─────────── */
 console.log('\n[图标化] 抽屉可用宽 < 360px 时整体收成图标（不藏入口、不换行）；宽了自动还原')

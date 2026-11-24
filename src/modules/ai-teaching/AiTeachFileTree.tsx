@@ -312,7 +312,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
             空态把树替换掉的话「新建文件夹」点了会看不见输入框（B-14 之前这里是居中弹窗，不存在该问题）。 */}
         {(dirCache[''] ?? []).length === 0 && !creating ? (
           <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)] leading-relaxed">
-            产物根「{rootDir}/」还没有内容。新建对话或点「整理成文档」后，会话文件夹会出现在这里。
+            还没有产物 · 新建对话或「整理成文档」后会出现在这里。
             <button onClick={() => doCreate('', 'dir')} className="mt-1.5 flex items-center gap-1 text-[var(--accent)] hover:underline"><Plus size={11} /> 新建文件夹</button>
           </div>
         ) : (

@@ -61,6 +61,8 @@ const SCRIPTS = [
   'verify-tutor-mode.mjs',
   'verify-tutor-ui.mjs',
   'verify-reading-context.mjs',
+  'verify-ai-copy.mjs',
+  'verify-model-pill.mjs',
 ]
 
 const dir = path.join(ROOT, '.AGENT/scripts/ai-teaching')

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { showToast } from '../../../lib/toast'
+import { COMPRESSING_TOAST } from '../../../lib/aiCopy'
 import {
   draftKeyForSession, draftKeyForNew, getDraft, setDraft, moveDraft, deleteDraft, subscribeDrafts,
 } from '../../../lib/assistantDraftStore'
@@ -862,7 +863,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     // 压缩期间禁止发送（v3.16.1 F-2）：闸门下沉到这里，按钮禁用只是第一道；
     // 三宿主（右栏 / 工作台 / AI 教学）的 Enter 都必须被同一处挡住，否则普通文字会真的并发发出。
     if (compressingRef.current) {
-      showToast({ type: 'info', message: '正在压缩对话历史，请稍候再发送' })
+      showToast({ type: 'info', message: COMPRESSING_TOAST })
       return
     }
     flushScope()

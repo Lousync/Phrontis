@@ -3217,3 +3217,88 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - md / txt 阅读上下文尚未发布（PDF / EPUB 已覆盖），当前 md / txt 资料 chip 只有文件名。
 - 右侧宽度按作用域用 localStorage 覆盖层（`viewerResize.ts` 不在本批范围），挂载首帧可能被全局宽度短暂覆盖（150ms 兜底）；后续可把宽度键参数化。
 - 「[p.N] 跳转高亮」「以此建课」「加入错题」属第三批。
+
+## 2026-11-24 · AI 面文案去重（第一批）+ 对话模式左栏底部说明删除
+
+**背景**：`tmp/ai-text-simplify-proto/index.html` 记录了 11 处不必要的 AI 说明；本轮先做审计里风险最低的四组（纯常量 / 纯去重，不动布局），并删除用户指出的对话模式左栏底部「不建课 · 每个对话一个文件夹」。
+
+**单一文案源**：新增 `src/lib/aiCopy.ts`（零依赖字符串常量），保留全部关键语义：
+- `IMAGE_MODEL_TITLE / HINT / WARN / SHORT`：视觉模型名（vision / vl / 4o / glm-4v）不删，只从「每处各写一遍」收成一处。
+- `PERCEPTION_DESC`：不消耗对话 token + 未配置向量模型时降级为关键词匹配。
+- `COMPRESSING_INLINE / TIP / TOAST`：行内条去掉「（可能数十秒，期间暂不能发送）」括号（发送键 disabled 已表达限制），toast 仍解释原因。
+- `STOP_RUN_TIP`：已完成轮次保留。
+
+**替换范围**
+- **图片不支持（6 处 → 1 套）**：`AssistantPanel/ChatBody.tsx` 3 处 + `ai-teaching/index.tsx` 3 处（AI 教学第二套 composer 也覆盖，避免原型只改 ChatBody 的「半新半旧」）。
+- **感知模式说明（4 处 → 1 套）**：`settings.ts` 的 `desc`、`AiToolsView` 的设置页 hint、`ChatBody` 与 `AssistantPanel/index` 的开关 tooltip 全部引用 `PERCEPTION_DESC`；开启 / 关闭两态只差前缀。
+- **压缩历史（5 处 → 3 个常量）**：ChatBody / AI 助手 / AI 教学行内条统一 `COMPRESSING_INLINE`；tooltip 用 `COMPRESSING_TIP`；useAssistantChat 的 toast 用 `COMPRESSING_TOAST`。
+- **停止生成（4 处 → 1 个常量）**：ChatBody / AI 助手 / AI 学堂 / AI 教学统一 `STOP_RUN_TIP`；`ImageCard` 带计费语义的变体保留不改。
+- **左栏底部说明**：`ai-teaching/index.tsx` 原 `tutorFolder ? tutorFolder : '不建课 · 每个对话一个文件夹'` 改为 `{tutorFolder && (…)}`——没有会话文件夹时整块（分隔线 + 内边距 + 文字）不渲染，有文件夹时只显示路径。
+
+**契约**
+- 新增 `verify-ai-copy.mjs` **32/32**：常量语义（视觉模型名 / 不消耗 token / 降级规则 / 已完成轮次）+ 8 个宿主全部从 `aiCopy` 引用 + 旧字面量清零 + 底部说明删除。
+- 更新旧断言：`verify-input-bubble` 72/72、`verify-slash-commands` 全绿、`verify-assistant-composer` 32/32、`verify-multimodal-input` 65/65（顺带修了 tutor 新增 `sendText(..., mode)` / `agentChat(..., teachMode, reading)` 导致的过期正则）。
+- `verify-all-p0` **44/44**；`tsc` web/node 0 错；`npm run build` 通过。
+
+**未做**（审计清单里留下批）：收尾本段重复说明、仅本会话 / 本任务叫法、WebSourceDialog 工程口径、AI 学堂空态、旁问草稿、常驻交互自述、opencode 考据第二套、画像优先级两版本。
+
+## 2026-11-24 · AI 面文案去重（第二批：叫法统一 + 单文件清理）
+
+**背景**：第一批（图片不支持 / 感知说明 / 压缩历史 / 停止生成）已收口；本批处理审计清单里剩余的低风险项——会话级叫法、上下文 / Skill chip、学堂空态、旁问草稿、opencode 考据、画像优先级。
+
+**改动**
+- **会话级叫法统一「本会话」**：`AssistantEntry` 的 tooltip 与「会话要求 · 仅当前对话」标签、`ai-assistant` 的模型弹层头 / 按钮 tooltip、`AiLearn` 的「本对话」分区标签、AI 教学模型按钮 tooltip。`默认跟随设置→AI 默认模型` 只在模型按钮 tooltip 保留一次（模型菜单的「跟随设置默认」选项承载语义）。
+- **Skill chip 后缀**：助手面板 / AI 助手 / AI 教学三处「· 本轮显式生效」→「· 本轮」。
+- **上下文 chip**：`AiLearn`「·发送时并入消息」→「·将随提问附带」；「未附带页面（提问时按当前所在界面自动判断）」→「未附带页面」。
+- **AI 助手侧栏尾行**：「点击条目跳转，跳转后回到会话」整行删除（分隔线一起）。
+- **AI 学堂空态**：对话空态两段 → 一句「就这一步提问，会带上当前步骤与目标。」；随行空态两段 → 一句；「与侧栏共用同一份记录」只在 NoProvider 一处保留。
+- **旁问草稿**：空态合并为「还没有提问 · 发出后才会保存，关掉不留记录」；底部常驻「发出后才会保存」删除（发送按钮右贴边）。
+- **opencode 考据**：`AiModelsTab` 抽出 `OpencodeEndpointNotes` 折叠块，端点编辑器与添加弹层共用；旧地址差异 / 官方地址 / 模型数量说明保留在展开区，「切换为官方地址」按钮留在标题行右侧；请求头 HelpHint 只留「按对话覆盖：填任何非空值即可。」，「实际发送的是当前对话的 ID」只在添加弹层会话头保留一份。
+- **画像 / 要求优先级**：工作区要求按钮 tooltip 去掉「（优先级：…）」，完整优先级只在页尾卡保留。
+- **低优先**：章末复习条「本章学完已解锁；复习不引入新知识点」→「只复习，不引入新知识点」；结课卡「结课报告与全部段落交接都已归档，课程保持只读。」→「已归档 · 课程只读」；`QuizReviewPane` 说明 →「带上次答案重做 · 参考答案默认收起」；`AiTeachFileTree` 空态两段 → 一句。
+
+**契约**
+- `verify-ai-copy` 扩到 **49/49**（追加第二批 8 条旧字面量清零 + 叫法 / 折叠块 / 草稿说明断言）。
+- `verify-right-viewer-tabs` **220/220**（旁问草稿断言改为新空态文案）。
+- `verify-ai-views-disclosure` 30/30；`tsc` web/node 0 错；`verify-all-p0` 44/44。
+- 本批未改模型选择器布局 / 动画（另起「模型名收成图标」批次）。
+
+## 2026-11-24 · 看板 AI 用量窗口：窄态去掉近 7 天柱图 + 根除内部横向滑块
+
+**用户反馈**：看板「AI 用量」窗口变窄 / 变矮时，近 7 天柱图下方出现一条横线 + 中间小圆角滑块；窗口过小时不需要再画柱图。
+
+**根因（实测）**：滑块不是来自看板页或卡片外壳，而是额度区 `div.kb-aiusage-quota`：
+- 只写 `overflow-y-auto` 时，CSS Overflow 3 会把 `overflow-x: visible` 计算成 `auto`，于是 x 轴也成了滚动容器；
+- 该层同时有 `shrink + min-h-0`，窗口一矮被压到 9px（8px 是 `pt-2`、1px 是 `border-t`），全局滚动条样式把 thumb 画成 4px 小圆角块，正好压在 `border-t` 上。
+
+**改动**
+- 额度层 `overflow-x-clip`（规范会把 `clip + auto` 归一成 `hidden`，源码层面不再有横向滚动容器）；行内名字补 `min-w-0`，保证 `scrollWidth == clientWidth`。
+- `.kb-aiusage` 设为 `container-type: size; container-name: aiusage`，用**纯 CSS 容器查询**：
+  - 宽 `< 120px` 或高 `< 146px` → `.kb-aiusage-trend`（近 7 天标签 + 柱条 + 星期行 + 空态）整块 `display:none`，悬停提示一并失效；
+  - 高 `< 74px` → 额度区 `overflow-y: hidden`，不再出现 9px 盒子里的滑块。
+- 阈值依据：7 柱 × 10px + 5×6px 间隙 + 呼吸位 ≈ 120px；高 146 = 今日块 37 + 柱区 44 + 额度 44 + 两个 10px 间隙；高 74 = 额度区不足一行。
+- 宽态柱图行为不变（仍按 ResizeObserver 实测像素伸缩、今日 accent、空态一行）；无 JS resize / matchMedia。
+
+**契约与真机**
+- `verify-dashboard` **144/144**（原 133 + M1–M11）；`verify-all-p0` **44/44**；`tsc` web/node 0 错；`npm run build` 通过。
+- CDP 隔离实例 53 项全 PASS：各尺寸卡片内「`overflow-x` 为 auto/scroll 且 `scrollWidth > clientWidth+1`」元素数 = 0，全文档同样 0；1280×760 额度区可正常纵向滚动，1280×700 关闭。
+- 截图：修前 `/tmp/opencode/zoom-quota.png`、`/tmp/opencode/card2-1200x760.png`；修后 `/tmp/opencode/after-wide-1400x900.png`、`/tmp/opencode/after-short-1280x800.png`、`/tmp/opencode/after-squeezed-1280x760.png`。
+- 帮助：`resources/help/用量.md` 补一句「卡片过窄/过矮只保留今日用量与额度，柱图整块不画」。
+- 未覆盖：Windows 真机 800px 边界、空数据态 / 余额类额度的真机数据、单列布局（<1080px）第三卡被压成 2px 的既有栅格问题（在 `dashboard/index.tsx`，本次未动）。
+
+## 2026-11-24 · AI 教学模型选择器：选完收起为图标，悬停 / 聚焦 / 开菜单平滑展开
+
+**用户反馈**：模型名占了输入区很大一块；参考 DeepTutor，选完模型后名字收成一个图标，下次点击时名字动画展开并出模型菜单。
+
+**改动**
+- 新增 `src/lib/useLingerExpand.ts`（移植 DeepTutor 同名 hook，去 framer-motion）：展开条件 = hover · `:focus-visible` · 菜单打开 · linger 窗口内；鼠标离开 / 失焦 / 关菜单后停留 **1.2s** 再收起，刚选完的模型名不会立刻消失。
+- 新增动画令牌 `.kb-collapse-x`（`grid-template-columns 0fr↔1fr` 220ms，子元素 `min-width:0 / overflow:hidden / nowrap`，reduced-motion 关闭）；`docs/ui-animation-plan.md` 已登记，源码在 `src/styles/index.css`。
+- AI 教学模型按钮：常态只剩 Bot 图标（约 27px），展开显示「模型名 + · 思考强度 + Chevron」；完整值始终在 `data-tip` / `aria-label`；`aria-expanded` 跟随菜单。
+- 菜单锚点：点击时先展开并 `linger()`，下一帧再让 `useAnchoredMenu` 量展开后的按钮右缘（同一行左侧是 `flex-1` 合规提示，按钮变宽时右缘不动），避免菜单跑到屏幕外。
+- 文案统一「本会话模型」（tooltip / 菜单 aria-label / 未选会话 toast）。
+- 本批只落 AI 教学输入区；`ChatBody` / AI 助手后续可复用同一 hook 与令牌。
+
+**契约与真机**
+- `verify-model-pill` **61/61**（hook 状态机 / linger 1200 / `.kb-collapse-x` / aria / 无 transition-all / 未硬编码模型名）；登记进 `verify-all-p0` 后 **44/44**；`tsc` 0 错；build 通过。
+- 交互原型：`tmp/ai-model-pill/index.html`（360/480/960、深浅主题、reduced-motion、展开/菜单/linger 状态栏）；关键帧截图在 `tmp/ai-model-pill/shots/`。
+- 未覆盖：Windows 真机（字体宽度差 1–2px，菜单右缘需复核）、触摸设备（无 hover，依赖点击展开 + rAF 锚点）。

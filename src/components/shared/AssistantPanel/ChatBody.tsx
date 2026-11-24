@@ -6,6 +6,7 @@ import {
   RotateCcw, CalendarDays, Star, FolderTree, Zap, Undo2, ListChecks, ImagePlus, Settings2,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
+import { IMAGE_MODEL_TITLE, IMAGE_MODEL_HINT, IMAGE_MODEL_WARN, IMAGE_MODEL_SHORT, COMPRESSING_INLINE, STOP_RUN_TIP, PERCEPTION_DESC } from '../../../lib/aiCopy'
 import { useSettings } from '../../../lib/SettingsContext'
 import { AiMascotAnchor } from '../AiMascot/AiMascotAnchor'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
@@ -186,7 +187,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, onMana
   const imageBlocked = composerImages.hasImages && visionOk === false
   const trySend = () => {
     if (imageBlocked) {
-      showToast({ type: 'info', message: '当前模型不支持图片输入', detail: '请先在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）' })
+      showToast({ type: 'info', message: IMAGE_MODEL_TITLE, detail: `${IMAGE_MODEL_HINT}。` })
       return
     }
     void send()
@@ -758,20 +759,20 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, onMana
                   <div data-wb="imageModelWarn" className="mb-1.5 flex items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px]"
                     style={{ borderColor: 'color-mix(in srgb, var(--warning) 35%, transparent)', background: 'var(--warning-bg)', color: 'var(--warning)' }}>
                     <TriangleAlert size={12} className="mt-0.5 shrink-0" />
-                    <span className="min-w-0">当前模型不支持图片输入。请在模型菜单切换到视觉模型（名称含 vision / vl / 4o / glm-4v 等）。</span>
+                    <span className="min-w-0">{IMAGE_MODEL_WARN}</span>
                   </div>
                 )}
 
                 {compressing && (
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
                     <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
-                    正在压缩对话历史…（可能数十秒，期间暂不能发送）
+                    {COMPRESSING_INLINE}
                   </div>
                 )}
                 {!scheduleMode && pickedSkill && (
                   <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                     <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
-                    <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
+                    <span className="truncate">Skill：{pickedSkill.title} · 本轮</span>
                     <button onClick={() => setPickedSkill(null)} data-tip="移除该 Skill" aria-label="移除该 Skill"
                       className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
                   </span>
@@ -925,12 +926,12 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, onMana
                        与 AI 教学中栏同一个口径（那儿一直是这么做的）。★ 这一面此前**只能**从消息流
                        里的「停止」中断，生成态改版把状态区那颗按钮去掉了，所以这里必须补上，
                        否则全局面板/右栏/整页三个宿主会失去唯一的中断入口。 */
-                    <button onClick={() => { void abort() }} data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）"
+                    <button onClick={() => { void abort() }} data-tip={STOP_RUN_TIP} aria-label={STOP_RUN_TIP}
                       className="h-7 w-7 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity">
                       <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
                     </button>
                   ) : (
-                    <button onClick={trySend} disabled={compressing || imageBlocked || (!input.trim() && !composerImages.hasImages)} data-tip={imageBlocked ? '当前模型不支持图片' : '发送'} aria-label={imageBlocked ? '当前模型不支持图片' : '发送'}
+                    <button onClick={trySend} disabled={compressing || imageBlocked || (!input.trim() && !composerImages.hasImages)} data-tip={imageBlocked ? IMAGE_MODEL_SHORT : '发送'} aria-label={imageBlocked ? IMAGE_MODEL_SHORT : '发送'}
                       className="h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity">
                       <ArrowUp size={14} />
                     </button>
@@ -1165,8 +1166,8 @@ function PerceptionToggle({ on, onToggle }: { on: boolean; onToggle: () => void 
       data-wb="perceptionToggle"
       aria-label="感知模式"
       data-tip={on
-        ? '感知模式：已开启 —— 发送前自动检索知识库，把最相关的笔记素材注入本轮上下文（纯本地检索，不消耗对话 token）'
-        : '感知模式：已关闭 —— 点击开启后，发送前会自动检索知识库并注入相关笔记素材'}
+        ? `感知模式：已开启 —— ${PERCEPTION_DESC}`
+        : `感知模式：已关闭 —— 点击开启后，${PERCEPTION_DESC}`}
       className={`flex items-center rounded-md px-1.5 py-1 transition-colors ${on
         ? 'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)]'
         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)]'}`}>

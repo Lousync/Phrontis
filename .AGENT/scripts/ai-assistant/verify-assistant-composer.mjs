@@ -55,7 +55,7 @@ ok(/!e\.defaultPrevented && e\.key === 'Enter' && !e\.shiftKey && !e\.nativeEven
   'B8 模块发送 Enter 判 defaultPrevented + IME 组合态')
 ok(/Skill：\{api\.pickedSkill\.title\}/.test(mod) && /api\.setPickedSkill\(null\)/.test(mod), 'B9 Skill chip 可移除')
 ok(/\/ 唤起指令/.test(mod), 'B10 placeholder 提示 / 唤起指令')
-ok(/api\.compressing/.test(mod) && /正在压缩对话历史/.test(mod), 'B11 压缩进行中占位行')
+ok(/api\.compressing/.test(mod) && /COMPRESSING_INLINE/.test(mod), 'B11 压缩进行中占位行')
 ok(/disabled=\{api\.compressing \|\| !api\.input\.trim\(\)\}/.test(mod), 'B12 发送按钮压缩期间禁用')
 ok(/if \(api\.compressing\) \{ void api\.send\(text\); return \}/.test(mod),
   'B13 压缩期间发送不清草稿（交给 send 闸门拒绝，避免吞掉用户输入）')
@@ -68,11 +68,11 @@ ok(/pickedSkill: SkillInfo \| null/.test(shell) && /setPickedSkill: chat\.setPic
 
 console.log('\n=== D. 发送闸门下沉（三宿主 + 按钮 + Enter 共用）===')
 ok(/compressingRef/.test(chat), 'D1 压缩态有同步 ref（连按 Enter 不吃旧闭包）')
-ok(/if \(compressingRef\.current\) \{[\s\S]{0,160}正在压缩对话历史，请稍候再发送/.test(chat),
+ok(/if \(compressingRef\.current\) \{[\s\S]{0,160}COMPRESSING_TOAST/.test(chat),
   'D2 send 开头拦压缩中发送并 toast')
 ok(/onProgress: p => \{ compressingRef\.current = p\.active; setCompressing\(p\.active\) \}/.test(chat),
   'D3 onProgress 同时更新 state 与 ref')
-ok(/if \(!body\) return\n[\s\S]{0,400}compressingRef\.current/.test(chat), 'D4 闸门位于「无内容」判断之后、会话锁之前')
+ok(/if \(!body && outgoingImages\.length === 0\) return\n[\s\S]{0,400}compressingRef\.current/.test(chat), 'D4 闸门位于「无内容」判断之后、会话锁之前')
 
 console.log('\n=== E. IME 守卫覆盖三处发送 Enter ===')
 ok(/e\.key === 'Enter' && !e\.shiftKey && !e\.nativeEvent\.isComposing/.test(body), 'E1 右栏 ChatBody')

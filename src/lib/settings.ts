@@ -4,6 +4,7 @@
  */
 
 import { applyCodeTone } from './themeTone'
+import { PERCEPTION_DESC } from './aiCopy'
 
 // ===== 选项列表（供 UI 渲染） =====
 
@@ -277,7 +278,7 @@ export const SETTINGS = {
   assistantInputStyle: { default: 'v10', type: 'text', label: 'AI 助手输入样式', group: 'AI 助手', desc: 'AI 助手输入框外观方案（v10 浮卡 = 课堂原型默认 / v1 浅灰填充 / v2 白卡描边 / v3 光晕 / v4 投影 / v5 胶囊 / v6 内凹 / v7 双层嵌套 / v8 下划线 / v9 灰底聚焦描边；外观设置页可切换）', keywords: ['助手', '输入', '输入框', '样式', '外观', 'assistant'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // 2026-10-13：补 anchor（此前 ui:true 却无 anchor ⇒ 被 schemaKeyItems 静默排除在设置搜索之外，
   // 只能在 AI 助手面板里点到）；页签归属改为「对话」——它管的是对话怎么跑，不是模型怎么接。
-  aiAssistantPerception: { default: false, type: 'toggle', label: 'AI 助手感知模式', group: 'AI 助手', desc: '发送前自动检索知识库，将最相关的笔记内容注入本轮上下文；检索在本地完成（至多一次向量化调用，不消耗对话 token）。未配置向量模型时自动降级为关键词匹配', keywords: ['感知', '检索', '召回', '素材', 'rag', 'perception', '语意', '关键词', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.perception', aiTab: 'chat' },
+  aiAssistantPerception: { default: false, type: 'toggle', label: 'AI 助手感知模式', group: 'AI 助手', desc: PERCEPTION_DESC, keywords: ['感知', '检索', '召回', '素材', 'rag', 'perception', '语意', '关键词', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.perception', aiTab: 'chat' },
   aiMascot: { default: 'auto', type: 'select', label: 'AI 输入区吉祥物', group: 'AI 助手', desc: '有 AI 输入框的地方（对话主区 / 侧边对话 / 放大态 / 支线旁问 / 日程问答 / AI助手）在输入卡上沿显示吉祥物，并随 AI 活动切换动作。可选「自动」（使用已安装的吉祥物）、「内置占位」或指定角色；选择「关闭」则不显示', keywords: ['吉祥物', '角色', '待机', '宠物', '小宠物', '小动物', '书桌伙伴', '换一只', '换角色', 'mascot', '输入框', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'ai.mascot', aiTab: 'chat' },
   aiAssistantInlineSuggest: { default: true, type: 'toggle', label: '编辑器内联建议', group: 'AI 内联建议', desc: '打字停顿后由 AI 续写下一句，以浅灰提示文字呈现；Tab 采纳、Esc 拒绝、Alt+A 立即请求', keywords: ['内联', '建议', '续写', '补全', '幽灵', 'ghost', 'inline', 'suggest', 'alt+a', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.inlineSuggest', aiTab: 'chat' },
   aiAssistantInlineSuggestAuto: { default: true, type: 'toggle', label: '自动触发', group: 'AI 内联建议', desc: '停顿 0.8 秒后自动给出建议（仅在句读、换行、词后等自然断点触发）；关闭后仅按 Alt+A 时给出', keywords: ['内联', '建议', '自动', '触发', '停顿', 'debounce', 'auto', 'inline'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.inlineSuggestAuto', aiTab: 'chat' },

@@ -22,7 +22,7 @@ export function QuizReviewPane({ quizzes, onExit }: {
           <div className="text-[12px] font-medium text-[var(--text-primary)]">
             错题重做<span className="ml-1.5 text-[var(--text-muted)]">{list.length} 题</span>
           </div>
-          <div className="text-[10.5px] text-[var(--text-muted)]">只显示当前题单判错的题；带着上次答案重做，参考答案默认收起。</div>
+          <div className="text-[10.5px] text-[var(--text-muted)]">带上次答案重做 · 参考答案默认收起</div>
         </div>
         <div className="flex-1" />
         <button

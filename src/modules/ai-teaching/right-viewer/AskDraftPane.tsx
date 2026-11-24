@@ -126,9 +126,9 @@ export function AskDraftPane({ parentSessionId, parentTitle, draft, rootId, onLa
 
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-5 text-center">
         <Sparkles size={22} strokeWidth={1.5} className="mb-2 text-[var(--text-muted)]" />
-        <div className="text-[12.5px] font-medium text-[var(--text-primary)]">还没有提问</div>
-        <div className="mt-1 max-w-[250px] text-[10.5px] leading-[1.6] text-[var(--text-muted)]">
-          发出第一个问题后才会保存到旁问历史；现在关掉这个页签不会留下记录。
+        <div className="text-[12.5px] font-medium text-[var(--text-primary)]">
+          还没有提问
+          <span className="ml-1.5 text-[10.5px] font-normal text-[var(--text-muted)]">· 发出后才会保存，关掉不留记录</span>
         </div>
       </div>
 
@@ -152,8 +152,7 @@ export function AskDraftPane({ parentSessionId, parentTitle, draft, rootId, onLa
             aria-label="旁问输入"
             className="max-h-32 w-full resize-none bg-transparent px-0.5 py-1 text-[12.5px] leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none disabled:opacity-60"
           />
-          <div className="mt-0.5 flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-disabled)]">发出后才会保存</span>
+          <div className="mt-0.5 flex items-center justify-end">
             <button
               type="button"
               onClick={() => void send()}

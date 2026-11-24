@@ -232,7 +232,9 @@ check('panel is 248px wide with a capped height', /w-\[248px\]/.test(teachMenu) 
 check('menu anchors to the clicked trigger through useAnchoredMenu (fixed + flip when no room)',
   /useAnchoredMenu\(modelMenuTriggerRef, modelMenuRef/.test(teachSrc) &&
     /fixed z-40/.test(teachMenu) && /modelMenu\.pos\.top/.test(teachMenu) &&
-    /openModelMenu\(e\.currentTarget\)/.test(teachSrc), '')
+    // 2026-11-24 模型按钮图标化：点击改走 onModelPillClick（收起态先展开、下一帧再量锚点），
+    // 交给 openModelMenu 的仍是同一枚触发按钮 —— 三种形态等价，但必须仍然显式传锚点。
+    /openModelMenu\((?:e\.currentTarget|el|modelMenuTriggerRef\.current)\)/.test(teachSrc), '')
 check('menu no longer uses in-place absolute anchoring (gets clipped by the card)',
   !/absolute bottom-full/.test(teachMenu) && !/right-0 mb-2/.test(teachMenu), '')
 check('menu rows fall back to modelId and expose tooltips', /e\.name \|\| e\.modelId/.test(teachMenu) && /data-tip=\{e\.modelId\}/.test(teachMenu), '')

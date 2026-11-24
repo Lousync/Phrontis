@@ -5,6 +5,7 @@ import { useLearnProgress, learnStepContext } from '../AiLearn/useLearnProgress'
 import { getLesson } from '../AiLearn/lessons'
 import { useSettings } from '../../../lib/SettingsContext'
 import { getSemanticStatus } from '../../../lib/ipc'
+import { PERCEPTION_DESC } from '../../../lib/aiCopy'
 import { getSelectionAskHost, getAssistantContext } from '../../../lib/assistantContext'
 import { TranslateCard } from '../TranslateCard'
 import { ChatBody } from './ChatBody'
@@ -338,8 +339,8 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
         aria-pressed={perceptionOn} data-wb="perceptionToggle"
         aria-label="感知模式"
         data-tip={perceptionOn
-          ? '感知模式：已开启 —— 发送前自动检索知识库，把最相关的笔记素材注入本轮上下文（纯本地检索，不消耗对话 token）'
-          : '感知模式：已关闭 —— 点击开启后，发送前会自动检索知识库并注入相关笔记素材'}
+          ? `感知模式：已开启 —— ${PERCEPTION_DESC}`
+          : `感知模式：已关闭 —— 点击开启后，${PERCEPTION_DESC}`}
         className={`flex items-center rounded-md px-1.5 py-1 transition-colors ${perceptionOn
           ? 'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)]'
           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)]'}`}>

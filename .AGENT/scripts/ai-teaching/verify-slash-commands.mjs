@@ -40,9 +40,9 @@ console.log('\n[skillName 四层穿透]')
 check('AgentChatRequest 含 skillName（main 层入参）', svc.includes('skillName?: string'))
 check('agentChat → runAgentLoop 透传 skillName', svc.includes('skillName: req.skillName'))
 check('runAgentLoop llmOpts 含 skillName', /llmOpts\?: \{[^}]*skillName\?: string/.test(svc))
-check('preload agentChat 类型含 skillName', pre.includes("skillName?: string }) => ipcRenderer.invoke('agent:chat'"))
+check('preload agentChat 类型含 skillName', /skillName\?: string;[\s\S]{0,160}ipcRenderer\.invoke\('agent:chat'/.test(pre))
 // 2026-11-16（P2 多模态）：agentChat 末尾追加 images 参数，断言改为「skillName 之后允许追加可选参数」
-check('ElectronAPI.agentChat 类型含 skillName', /skillName\?: string;( images\?: AgentImageInput\[\])? \}\) => Promise<AgentChatResult>/.test(types))
+check('ElectronAPI.agentChat 类型含 skillName', /skillName\?: string;[\s\S]{0,200}\}\) => Promise<AgentChatResult>/.test(types))
 check('渲染层 ipc agentChat 追加 skillName 参数', ipc.includes('effort?: \'off\' | \'low\' | \'medium\' | \'high\', skillName?: string'))
 
 console.log('\n[agentService 显式注入]')
@@ -68,7 +68,7 @@ check('sendText 增 skillName 透传 agentChat', /await agentChat\(sid, text, un
 check('doSend 守卫 compressing（压缩中禁止发送；只发图片也放行）', /if \(\(!text && images\.length === 0\) \|\| pending \|\| compressing\) return/.test(teach))
 check('handleChatCommand 接线 onProgress → setCompressing', teach.includes('onProgress: p => setCompressing(p.active)'))
 check('挂载时拉取 Skill 列表（aiToolsListSkills）', teach.includes('aiToolsListSkills().then(r => setSlashSkills(r.skills))'))
-check('compressing 占位条渲染', teach.includes('正在压缩对话历史'))
+check('compressing 占位条渲染', teach.includes('COMPRESSING_INLINE'))
 check('pickedSkill chip 可移除（X 按钮）', /pickedSkill && \([\s\S]*?setPickedSkill\(null\)[\s\S]*?<X/.test(teach))
 
 console.log('\n[AssistantPanel 接线（assistant + aiLearn 两 surface 共用；逻辑在 ChatBody + useAssistantChat）]')
@@ -80,7 +80,7 @@ check('handleChatCommand 接线 onProgress → setCompressing', /onProgress: p =
 check('发送键禁用条件含 compressing / 空内容 / 模型不支持图片（pending 改由「停止键」分支接管，见 ai-reply-loading-plan §3.3）', chatBody.includes('disabled={compressing || imageBlocked || (!input.trim() && !composerImages.hasImages)}'))
 check('send 依赖数组补 pickedSkill', /\}, \[[^\]]*pickedSkill[^\]]*\]\)/.test(chatHook))
 check('面板打开时刷新 Skill 列表', chatHook.includes('aiToolsListSkills().then(r => setSlashSkills(r.skills))'))
-check('compressing 占位条渲染', chatBody.includes('正在压缩对话历史'))
+check('compressing 占位条渲染', chatBody.includes('COMPRESSING_INLINE'))
 
 console.log('\n[放行指令单一真源（v3.6.0 /生图，docs/ai-image-gen-plan.md §5.1）]')
 check('PASSTHROUGH_COMMANDS 表存在（放行给模型的指令）', t.includes('export const PASSTHROUGH_COMMANDS: PassthroughCommand[]'))

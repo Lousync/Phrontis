@@ -635,15 +635,7 @@ function ProviderEditor({ p, onChanged, onSaved, onClose, onAdopt, initialModelL
                 </div>
               )}
               {officialUrl && (
-                <p className="py-1.5 text-[11px] leading-relaxed">
-                  <span className="text-[var(--text-muted)]">当前为 opencode 旧地址，官方已调整为 </span>
-                  <span className="font-mono text-[var(--text-secondary)]">{officialUrl}</span>
-                  <span className="text-[var(--text-muted)]">（模型数量多 10 个）。</span>
-                  <button onClick={() => { void switchToOfficial() }} disabled={switchingUrl}
-                    className="ml-1.5 px-1.5 py-0.5 rounded border border-[var(--accent)]/50 text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-40 transition-colors">
-                    {switchingUrl ? '替换中…' : '切换为官方地址'}
-                  </button>
-                </p>
+                <OpencodeEndpointNotes officialUrl={officialUrl} onSwitch={() => { void switchToOfficial() }} switching={switchingUrl} />
               )}
               <FRow label="协议类型">
                 <select value={type} onChange={e => setType(e.target.value as LlmProviderType)} className={inputCls}>
@@ -656,7 +648,7 @@ function ProviderEditor({ p, onChanged, onSaved, onClose, onAdopt, initialModelL
               <FRow label="请求头">
                 <input value={headersText} onChange={e => setHeadersText(e.target.value)}
                   placeholder='{"头名":"值"}' className={`${inputCls} font-mono`} />
-                <HelpHint text="按对话覆盖：填任何非空值即可，实际发送的是当前对话的 ID。" />
+                <HelpHint text="按对话覆盖：填任何非空值即可。" />
               </FRow>
               <FRow label="语义检索模型">
                 <input value={embeddingModel} onChange={e => setEmbeddingModel(e.target.value)}
@@ -900,6 +892,55 @@ function SubGroup({ title, summary, open, onToggle, children }: {
   )
 }
 
+/**
+ * opencode 端点考据：官方 Go 端点 / 旧地址少 10 个模型 / 地址与会话头出处。
+ *
+ * 编辑区与「添加供应商」弹层共用这一份 —— 同一段考据原先在两处各写一遍，改一处就会漂。
+ * 默认折叠：只有真要动地址的人才需要读；修复入口（`切换为官方地址`）留在折叠外侧，
+ * 保持「诊断 + 一键修复」不因为收进折叠而变得难找。
+ */
+function OpencodeEndpointNotes({ officialUrl, onSwitch, switching }: {
+  /** 当前保存的是旧地址时传官方地址（编辑区才有） */
+  officialUrl?: string | null
+  onSwitch?: () => void
+  switching?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="py-1">
+      <div className="flex items-center gap-1.5">
+        <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open}
+          className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+          <ChevronRight size={11} className={`kb-chevron shrink-0 ${open ? 'rotate-90' : ''}`} />
+          关于 opencode 地址
+        </button>
+        {onSwitch && (
+          <button onClick={onSwitch} disabled={switching}
+            className="px-1.5 py-0.5 rounded border border-[var(--accent)]/50 text-[10.5px] text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-40 transition-colors">
+            {switching ? '替换中…' : '切换为官方地址'}
+          </button>
+        )}
+      </div>
+      <Collapsible open={open} innerClassName="">
+        {() => (
+          <div className="space-y-1 pt-1.5">
+            {officialUrl && (
+              <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+                当前为 opencode 旧地址，官方已调整为{' '}
+                <code className="font-mono text-[var(--text-secondary)]">{officialUrl}</code>（模型数量多 10 个）。
+              </p>
+            )}
+            <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+              <span className="inline-block mr-1.5 px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-400 text-[10px]">按官方文档</span>
+              地址与会话头取自 opencode 官方 Go 端点表。旧地址 <code className="font-mono text-[var(--text-secondary)]">https://opencode.ai/zen/go/v1</code> 仍可用，但模型数量少 10 个；切换前请先「测试地址」确认该 Key 在新路径可用。
+            </p>
+          </div>
+        )}
+      </Collapsible>
+    </div>
+  )
+}
+
 /* =========================================================================
    预设选择器 + 添加表单
    ========================================================================= */
@@ -1030,12 +1071,7 @@ function PresetAddForm({ preset, onDone, onCancel }: {
         接口地址：<span className="font-mono text-[var(--text-secondary)]">{preset.base || '（自定义，请展开「高级」填写）'}</span>
       </p>
 
-      {preset.srcConfig && (
-        <p className="pt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
-          <span className="inline-block mr-1.5 px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-400 text-[10px]">按官方文档</span>
-          地址与会话头取自 opencode 官方 Go 端点表。旧地址 <code>https://opencode.ai/zen/go/v1</code> 仍可用，但模型数量少 10 个；切换前请先「测试地址」确认该 Key 在新路径可用。
-        </p>
-      )}
+      {preset.srcConfig && <OpencodeEndpointNotes />}
       {preset.unverified && (
         <p className="pt-2 text-[11px] leading-relaxed text-amber-400/90">
           该地址未经在线核实，请核对后使用。

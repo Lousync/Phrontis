@@ -51,6 +51,7 @@
 | `.kb-modal-in` | 面板 `scale(0.97→1) + translateY(10px→0)`，280ms | Modal 主体进场 |
 | `.kb-drawer-in` | 面板 `translateX(100%→0)`，220ms（退场 176ms 反向） | 贴边通高抽屉进场（书市条目详情）；与 Modal 的区别见 index.css 该节注释 |
 | `.kb-collapse` | `grid-template-rows 0fr↔1fr` 240ms + 子元素 `overflow:hidden` | 树节点/分组/折叠面板展开收起 |
+| `.kb-collapse-x` | `grid-template-columns 0fr↔1fr` 220ms（`--dur-std` / `--ease-kb`）+ 子元素 `min-width:0 / overflow:hidden / nowrap` | 水平收起（模型选择器 / 只读标签） |
 | `.kb-chevron` | `transform rotate` 200ms | 所有展开箭头 |
 | `.kb-item-in` | `opacity + translateY(4px)` 200ms，`--ease-kb` | 列表项进场（新增行） |
 | `.kb-item-out` | `opacity→0 + scale(0.98) + 高度塌缩`，180ms | 列表项退场（普通删除，区别于吞噬特效） |
@@ -97,6 +98,8 @@
 
 ### C. 展开/收起 → `.kb-collapse` + `.kb-chevron`
 覆盖：NotebookList 树节点、收藏分组、FileTree 目录与「软件文件」节、ChapterPanel 两组列表、AiModelsTab 分组、CollapseList、help 目录、大纲/搜索侧栏（editor PdfReaderView sideTab）、已完成面板、密码本分组、标签结果展开。方案：`grid-rows 0fr→1fr` 240ms（moments 已验证此模式），chevron 旋转 200ms。子树首帧加 `.kb-item-in` 弱化层级感。
+
+**横向变体 `.kb-collapse-x`（2026-11-24）**：`grid-template-columns` 0fr↔1fr，用于「图标 ↔ 图标+文字」的工具栏控件。首个落地 = AI 教学输入区模型选择器：收起只剩 Bot 图标（约 27px），hover / `:focus-visible` / 菜单打开时展开「模型名 + · 思考强度 + Chevron」；关菜单或选完模型后由 `src/lib/useLingerExpand.ts` 停留 1.2s 再收（刚改完的名字不会立刻消失）。**注意它朝左长**：同一行左侧是 `flex-1` 的合规提示，按钮变宽时是它让位、按钮右缘不动 —— 所以 `useAnchoredMenu` 的右对齐锚点在展开过程中依然成立（原型实测展开前后右缘漂移 0px）。收起态的可读信息（完整模型名 + 思考强度）必须留在 `data-tip` / `aria-label` 上。
 
 ### D. 列表增删/排序
 | 场景 | 方案 |
@@ -291,7 +294,7 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
 | **列表项逐个进出场** | 每项一个合成层，一次进 50 项 = 50 层显存峰值 | stagger 最多前 8 项（delay ≤ 8×30ms），其余同时进场；**禁止给列表项常驻 will-change** |
 
 ### 6. 落码时的硬约束
-1. 只动 `transform` / `opacity`（`.kb-collapse` 与 `.kb-rail-secs` 的 grid-rows 是仅有的两处例外，已验证成本可接受）；
+1. 只动 `transform` / `opacity`（`.kb-collapse` / `.kb-rail-secs` 的 grid-rows、`.kb-collapse-x` 的 grid-columns 是仅有的三处例外，已验证成本可接受且只发生在小控件上）；
 2. 不给列表项、卡片、弹层加常驻 `will-change`（confetti.ts 那次性使用是正确姿势）；
 3. 主题切换禁用通配选择器过渡，统一 View Transition + 容器级降级；
 4. 遮罩层与 backdrop-filter 层解耦；
@@ -309,7 +312,7 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
 **基建**
 - `src/styles/index.css`：令牌（`--ease-kb` / `--ease-kb-spring` / `--dur-micro|std|large|view`）+ 工具类
   `.kb-view-in`、`.kb-view-fade`、`.kb-overlay(-out)`、`.kb-modal-in/-out`、`.kb-pop`、`.kb-toast-in/-out`、
-  `.kb-collapse`、`.kb-chevron`、`.kb-item-in`、`.kb-item-out`、`.kb-micro-pop`、`::view-transition(root)` + 统一 reduced-motion 兜底。
+  `.kb-collapse`、`.kb-collapse-x`、`.kb-chevron`、`.kb-item-in`、`.kb-item-out`、`.kb-micro-pop`、`::view-transition(root)` + 统一 reduced-motion 兜底。
   折叠容器用 `visibility`（延迟 `--dur-std` 切换）避免收起后的按钮/输入行仍可 Tab 聚焦。
 - `src/lib/usePresence.ts`：退场存在性 hook（定时器兜底，不依赖 transitionend）+ `prefersReducedMotion()`
 - `src/components/shared/Collapsible.tsx`：函数子节点的折叠容器（两个方向都有动画，且保持收起不挂载子树的懒语义）

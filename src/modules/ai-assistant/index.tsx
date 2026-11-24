@@ -5,6 +5,7 @@ import type { AgentSessionInfo, AiScopeSuggestion, LlmProviderInfo } from '../..
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
 import { resolveCatalogEntry, useModelCatalog } from '../../lib/modelCatalog'
 import { showToast } from '../../lib/toast'
+import { COMPRESSING_INLINE, COMPRESSING_TIP, STOP_RUN_TIP } from '../../lib/aiCopy'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
 import { MessageList, fmtTime } from '../../components/shared/AssistantPanel/MessageList'
@@ -455,9 +456,6 @@ export function AiAssistantModule({
             </div>
           )}
         </div>
-        <div className="shrink-0 border-t border-[var(--border-color)] px-3 py-1.5 text-[10px] text-[var(--text-disabled)]">
-          点击条目跳转，跳转后回到会话
-        </div>
       </div>
 
       {/* 会话主体（默认）：作用域（上）+ 会话列表（下）。切到大纲时只隐藏、不卸载 ——
@@ -701,13 +699,13 @@ export function AiAssistantModule({
             {api.compressing && (
               <div className="mb-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
                 <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
-                正在压缩对话历史…（可能数十秒，期间暂不能发送）
+                {COMPRESSING_INLINE}
               </div>
             )}
             {api.pickedSkill && (
               <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                 <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
-                <span className="truncate">Skill：{api.pickedSkill.title} · 本轮显式生效</span>
+                <span className="truncate">Skill：{api.pickedSkill.title} · 本轮</span>
                 <button onClick={() => api.setPickedSkill(null)} data-tip="移除该 Skill" aria-label="移除该 Skill"
                   className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">×</button>
               </span>
@@ -770,7 +768,7 @@ export function AiAssistantModule({
                   className={`flex items-center gap-1 h-7 px-2 rounded-md text-[11px] transition-colors ${
                     modelMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   }`}
-                  data-tip="本任务模型与思考强度（仅本任务生效，默认跟随设置→AI 默认模型）" aria-label="本任务模型与思考强度（仅本任务生效，默认跟随设置→AI 默认模型）"
+                  data-tip="本会话模型与思考强度（仅本会话生效）" aria-label="本会话模型与思考强度（仅本会话生效）"
                 >
                   <Bot size={11} />
                   <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
@@ -789,7 +787,7 @@ export function AiAssistantModule({
                     style={modelMenu.pos}
                     className="kb-pop fixed z-50 w-[280px] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-none"
                   >
-                    <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">回答模型 · 仅本任务生效</div>
+                    <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">回答模型 · 仅本会话生效</div>
                     <div className="max-h-[300px] overflow-y-auto py-1">
                       <button
                         onClick={() => pickModel('')}
@@ -836,7 +834,7 @@ export function AiAssistantModule({
                   type="button"
                   onClick={() => void api.stop()}
                   className="kb-micro-pop h-7 w-7 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity"
-                  data-tip="停止生成（已完成的轮次保留）" aria-label="停止生成（已完成的轮次保留）"
+                  data-tip={STOP_RUN_TIP} aria-label={STOP_RUN_TIP}
                 >
                   <Square size={12} />
                 </button>
@@ -846,7 +844,7 @@ export function AiAssistantModule({
                   onClick={handleSend}
                   disabled={api.compressing || !api.input.trim()}
                   className="kb-micro-pop h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity"
-                  data-tip={api.compressing ? '正在压缩对话历史，请稍候' : '发送'} aria-label={api.compressing ? '正在压缩对话历史，请稍候' : '发送'}
+                  data-tip={api.compressing ? COMPRESSING_TIP : '发送'} aria-label={api.compressing ? COMPRESSING_TIP : '发送'}
                 >
                   <ArrowUp size={14} />
                 </button>

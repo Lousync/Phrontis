@@ -219,7 +219,8 @@ export function AiUsageWindow({ aiUsage, quota, onOpenUsage, delay }: {
       delay={delay}
       footer={<WindowFooter label="打开用量" onClick={onOpenUsage} />}
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 px-[11px] pb-[11px] pt-2.5">
+      {/* 容器查询宿主：窄 / 矮时整块隐去「近 7 天」（细则与阈值见 index.css §⑨） */}
+      <div className="kb-aiusage flex min-h-0 flex-1 flex-col gap-2.5 px-[11px] pb-[11px] pt-2.5">
         <div className="flex-none">
           <div className="flex items-baseline gap-1.5">
             <b
@@ -234,8 +235,10 @@ export function AiUsageWindow({ aiUsage, quota, onOpenUsage, delay }: {
         </div>
 
         {/* 近 7 天：柱高按峰值归一，最后一根 = 今天（强调色）。柱子随卡片余高伸缩，
-            高窗口下第三卡不会只剩一大块空白；全 0 时退化成一句空态，不画一排看不见的柱 */}
-        <div className="flex min-h-[44px] flex-1 flex-col gap-1">
+            高窗口下第三卡不会只剩一大块空白；全 0 时退化成一句空态，不画一排看不见的柱。
+            ⚠️ 窄 / 矮态整块隐去（标签 + 柱 + 星期 + 悬停提示一起走），阈值见 index.css §⑨：
+            7 根柱挤到不足 ~13px 一根、或柱区连「标签 + 柱 + 星期」都放不下时，画出来只是噪声。 */}
+        <div className="kb-aiusage-trend flex min-h-[44px] flex-1 flex-col gap-1">
           <span className="flex-none text-[8px] text-[var(--text-muted)]">近 7 天</span>
           {hasTrend ? (
             <>
@@ -277,15 +280,19 @@ export function AiUsageWindow({ aiUsage, quota, onOpenUsage, delay }: {
           )}
         </div>
 
-        {/* 额度：只画有上限的套餐窗口；余额没有分母，一行金额即可 */}
-        <div className="flex min-h-0 shrink flex-col gap-2 overflow-y-auto border-t border-[var(--border-color)] pt-2">
+        {/* 额度：只画有上限的套餐窗口；余额没有分母，一行金额即可。
+            ⚠️ 只做**纵向**滚动：`overflow-y-auto` 会把 `overflow-x: visible` 计算成 `auto`
+            （CSS Overflow 3 §3.3），那个盒子里一旦有 1px 横向富余就会画出一条横向滑动手柄
+            —— 显式 `overflow-x: clip` 把 x 轴彻底从滚动容器里摘掉（内容本身已可收缩，见下面
+            两处 `min-w-0`），不是拿遮罩盖滚动条。 */}
+        <div className="kb-aiusage-quota flex min-h-0 shrink flex-col gap-2 overflow-x-clip overflow-y-auto border-t border-[var(--border-color)] pt-2">
           {windows.map((w) => {
             const lv = windowLevel(w)
             const cd = fmtCountdown(w.resetsAt)
             return (
               <div key={w.key}>
                 <div className="flex items-baseline justify-between gap-2 text-[8.5px]">
-                  <span className="truncate text-[var(--text-secondary)]">{w.name} · {w.label}</span>
+                  <span className="min-w-0 truncate text-[var(--text-secondary)]">{w.name} · {w.label}</span>
                   <span className="flex-none tabular-nums" style={{ color: lv === 'ok' ? 'var(--text-secondary)' : QUOTA_LEVEL_COLOR[lv] }}>
                     {w.percent}%{lv === 'hot' ? ' · 限速中' : ''}
                   </span>
@@ -299,7 +306,7 @@ export function AiUsageWindow({ aiUsage, quota, onOpenUsage, delay }: {
           })}
           {balances.map((b) => (
             <div key={b.key} className="flex items-baseline justify-between gap-2 text-[8.5px]">
-              <span className="truncate text-[var(--text-secondary)]">{b.name} 余额</span>
+              <span className="min-w-0 truncate text-[var(--text-secondary)]">{b.name} 余额</span>
               <span className="flex-none tabular-nums text-[var(--text-primary)]">{b.total} {b.currency}</span>
             </div>
           ))}

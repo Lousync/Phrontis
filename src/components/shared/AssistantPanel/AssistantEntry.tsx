@@ -126,10 +126,10 @@ export function AssistantEntryButton({ activeId }: { activeId: string | null }) 
                 </span>
               </button>
               <button onClick={() => { void openItem('session') }} disabled={!activeId} className={itemCls}
-                data-tip={activeId ? '只对本对话生效，优先于全局要求' : '开始对话后可用'} aria-label={activeId ? '只对本对话生效，优先于全局要求' : '开始对话后可用'}>
+                data-tip={activeId ? '只对本会话生效，优先于全局要求' : '开始对话后可用'} aria-label={activeId ? '只对本会话生效，优先于全局要求' : '开始对话后可用'}>
                 <MessagesSquare size={13} className="mt-0.5 shrink-0 text-[var(--accent)]" />
                 <span className="min-w-0">
-                  <span className="block text-[12px] text-[var(--text-primary)]">会话要求 · 仅当前对话</span>
+                  <span className="block text-[12px] text-[var(--text-primary)]">会话要求 · 仅本会话</span>
                   <span className="block truncate text-[10px] text-[var(--text-disabled)]">
                     {activeId ? '按需升格，覆盖全局要求' : '先选择或新建一个对话'}
                   </span>
