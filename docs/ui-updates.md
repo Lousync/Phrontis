@@ -3161,3 +3161,20 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - **顺带修掉一个既有缺陷**：`ResizeObserver` effect 原依赖 `[fit, activeView]`，而 `fit` 引用随 layout（含 foldVersion）变化 —— 折叠会重建 RO，`observe()` 首次回调立刻再整图 fit（探针里表现为折叠瞬间 s 0.353 → 1.15）。改为 `fitRef` + 依赖 `[activeView]`，折叠不再触发整图 fit（契约新增一条守住）。
 
 **未覆盖**：AI 教学查看器宿主（FilePane + `showExport` 导图页签）需要先建会话才进得去文件树，本轮只做到「PageEditor 宿主」；「FilePane 对 mindmap 不渲染动作行」与「导出绿色常驻」由契约 + 构建守住，未在查看器里点。
+
+## 2026-11-24 · 上下文占用指示：圆环 + 环外百分比（两处统一）
+
+**现状 / 用户反馈**：AI 教学输入区与 AI 助手面板的上下文占用指示是 22px 圆环，百分比数字挤在环内（6.5px 字号，窄面板下几乎看不清）；用户给了一张参考图，要求所有「上下文」用量图标统一成「小圆环 + 右侧百分比」的样子。
+
+**改动点**（`src/components/shared/UsageRing.tsx`，两处调用点共用）：
+- 形状改为 **16px 圆环 + 环外百分比**：环内不再放数字；环与文字同色，低占用跟随所在按钮的中性前景色（浅色主题即截图那种灰），`≥70%` 转 `--warning`、`>85%` 转 `--danger`。
+- 百分比文案新增纯函数 `formatContextShare()`（`src/lib/contextUsagePure.ts`）：`0%` / `<1%` / 10% 以下一位小数（`1.3%`）/ 其余取整，超窗夹到 `100%`。
+- `compact` 档从「只有圆环」变成「圆环 + 百分比」；`detailed` 档在百分比后继续追加 `used/window` 摘要；`off` 仍隐藏；未设窗口（`pct=null`）仍退化为 `≈ 1.2k`。
+- 设置文案同步：`ctxUsageDetail` 描述、设置页「占用指示档位」hint 与选项名改为「圆环 + 百分比」。
+
+**契约**：`verify-context-usage.mjs` 87 条（新增百分比文案四档、0..1 夹取、环内无 `<text>`、16px 圆环 + 环外百分比、高占用才变色、两处调用点共用 UsageRing）；`verify-all-p0` 39/39；`tsc` web/node 双配置 0 错；`npm run build` 通过。
+
+**真机验证**（Linux，devbridge 隔离实例，临时仓库 `/tmp/opencode/vault-icon`，AI 教学课程助手会话写入一条带 `promptTokens=10000` 的 trace、`ctxWindow=1000000`）：
+- 输入区显示「圆环 + 1%」，DOM 实测 SVG `16×16`、文字 `11px`、间距 `4px`、两者水平居中对齐；颜色 = 当前主题 `--text-secondary`。
+- 窄窗 900px（输入卡约 420px）下仍单行、无横向溢出，圆环与 `1%` 完整可见。
+- 未设窗口时仍显示 `≈ 10k`（不摆空环）。

@@ -350,7 +350,7 @@ export const SETTINGS = {
   // 旧键值由主进程启动时一次性迁移（settingsCache 拷贝，见 electron/main/index.ts）。
   // F-12 遗留收口（2026-10-07）：控件从「AI教学」设置页迁入「AI 工具 → AI 助手」小节并进设置搜索
   // （键的语义、消费方与 desc 早已通用化，入口滞留教学页属半成品状态）。
-  ctxUsageDetail: { default: 'compact', type: 'select', label: '上下文占用指示档位', group: 'AI 助手', desc: 'off=隐藏 / compact=上下文占用圆环（点击看详情）/ detailed=圆环+文字摘要；AI 教学与 AI 对话共用', keywords: ['用量', 'token', '上下文', '圆环', '预算', 'context', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxUsageDetail', aiTab: 'chat' },
+  ctxUsageDetail: { default: 'compact', type: 'select', label: '上下文占用指示档位', group: 'AI 助手', desc: 'off=隐藏 / compact=圆环 + 百分比（点击看详情）/ detailed=再加用量文字摘要；AI 教学与 AI 对话共用', keywords: ['用量', 'token', '上下文', '圆环', '百分比', '预算', 'context', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxUsageDetail', aiTab: 'chat' },
   ctxWindow: { default: 1000000, type: 'number', label: '模型上下文窗口（token）', group: 'AI 助手', desc: '0 = 未设置（长资料按 128k 保守档运行）；≥200k 时长资料自动切 1M 档；设置后圆环按占用比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '1m', '圆环', '占用', '长资料'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxWindow', aiTab: 'chat', min: 0, max: 4000000, step: 1000 },
   // R6 D9：storageKnowledge / storageData / storageBlog 三键已随去库化收官全部退役
   // （知识库/博客/结构化模块恒 vault 文件，无读源分支残留）。

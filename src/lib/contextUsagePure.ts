@@ -189,6 +189,19 @@ export function formatContextPct(tokens: number, windowTokens: number): string {
 }
 
 /**
+ * 圆环指示旁的百分比（`UsageRing` 用）：直接吃 0..1 的占用比，不经过 token 换算。
+ * 0 → `0%`；不足 1% → `<1%`；10% 以下保留一位小数（`1%` / `1.3%`）；其余取整。
+ * 与 `formatContextPct` 的差别只在输入形态与小数档：环旁要的是「精确到一位」的短标签。
+ */
+export function formatContextShare(share: number): string {
+  const raw = Number.isFinite(share) ? Math.max(0, Math.min(1, share)) * 100 : 0
+  if (raw <= 0) return '0%'
+  if (raw < 1) return '<1%'
+  if (raw < 10) return `${raw.toFixed(1).replace(/\.0$/, '')}%`
+  return `${Math.round(raw)}%`
+}
+
+/**
  * 顶部大号数字旁的比例：**保留一位小数**（示意图口径 `（1.3%）`；极小值给 `<0.1%`）。
  * 行内/剩余空间仍用 `formatContextPct`（`<1%` / 取整）—— 行要的是「大概多少」，头部要的是「精确到哪」。
  */

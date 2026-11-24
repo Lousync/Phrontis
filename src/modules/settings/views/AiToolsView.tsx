@@ -331,11 +331,11 @@ function ChatTab({ mascots, mascotDiag }: {
 
             <div data-setting-anchor="aiTools.ctxUsageDetail">
               <Row label="占用指示档位" icon={<Gauge size={14} />}
-                hint="输入区那一圈上下文占用的显示方式：隐藏 / 只留圆环 / 圆环加文字摘要。">
+                hint="输入区那一圈上下文占用的显示方式：隐藏 / 圆环 + 百分比 / 再加用量文字摘要。">
                 <select value={s.ctxUsageDetail || 'compact'} onChange={e => update('ctxUsageDetail', e.target.value)}
                   className="px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]">
                   <option value="off">隐藏</option>
-                  <option value="compact">紧凑（上下文圆环）</option>
+                  <option value="compact">紧凑（圆环 + 百分比）</option>
                   <option value="detailed">详细（圆环+文字摘要）</option>
                 </select>
               </Row>

@@ -425,6 +425,25 @@ check('用量面板只有一份 DOM：hover 预览与点击钉住共用（不再
     panelSrc.includes("tokenOpen ? 'select-text kb-pop' : 'pointer-events-none hidden group-hover:block kb-view-fade'") &&
     !panelSrc.includes('w-[252px]'), '')
 
+console.log('\n=== 10. 使用环形状：圆环 + 环外百分比（2026-11-24 口径） ===')
+check('百分比文案：0 / <1 / 一位小数 / 取整',
+  usageUi.formatContextShare(0) === '0%' && usageUi.formatContextShare(0.004) === '<1%' &&
+    usageUi.formatContextShare(0.01) === '1%' && usageUi.formatContextShare(0.013) === '1.3%' &&
+    usageUi.formatContextShare(0.42) === '42%',
+  [0, 0.004, 0.01, 0.013, 0.42].map((v) => usageUi.formatContextShare(v)).join(' '))
+check('百分比夹取 0..1（超窗不出 >100%，负数 / NaN 不出负）',
+  usageUi.formatContextShare(2) === '100%' && usageUi.formatContextShare(-1) === '0%' &&
+    usageUi.formatContextShare(Number.NaN) === '0%', '')
+const ringSrc = fs.readFileSync(path.join(ROOT, 'src/components/shared/UsageRing.tsx'), 'utf8')
+check('环内不再放数字（不再出现 <text>）', !ringSrc.includes('<text'), '')
+check('16px 圆环 + 百分比在环外',
+  ringSrc.includes('width="16"') && ringSrc.includes('formatContextShare(clamped)'), '')
+check('低占用跟随中性前景色，高占用才转 warning / danger',
+  ringSrc.includes('var(--warning)') && ringSrc.includes('var(--danger)') && !ringSrc.includes('var(--accent)'), '')
+check('两处用量指示共用 UsageRing（AI 教学 + AI 助手）',
+  ['src/modules/ai-teaching/index.tsx', 'src/components/shared/AssistantPanel/ChatBody.tsx']
+    .every((f) => fs.readFileSync(path.join(ROOT, f), 'utf8').includes('UsageRing')), '')
+
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) console.log(`  ${c.pass ? '[OK]' : '[FAIL]'} ${c.name}${c.detail && !c.pass ? '  -> ' + c.detail : ''}`)
