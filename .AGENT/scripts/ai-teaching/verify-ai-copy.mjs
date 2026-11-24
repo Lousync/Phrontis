@@ -6,7 +6,7 @@
  *  1. 常量本身保留关键语义（视觉模型名 / 不消耗 token / 降级规则 / 已完成轮次保留）；
  *  2. AI 教学、AI 助手、AI 学堂、助手面板、设置页都从 `aiCopy` 取文案，不再各写一份；
  *  3. 旧字面量不再出现在宿主源码里（漏改一处就会被这里拦住）；
- *  4. 对话模式左栏底部的「不建课 · 每个对话一个文件夹」已删除（无文件夹时整块不渲染）。
+ *  4. 对话模式左栏底部的会话路径 footer 已整体删除（含旧的「不建课 · 每个对话一个文件夹」兜底）。
  *
  * 运行（仓库根目录）：node .AGENT/scripts/ai-teaching/verify-ai-copy.mjs [仓库路径]
  * 输出纯 ASCII（禁 emoji，AGENTS.md）；期望全部 PASS 且 exit=0。
@@ -93,9 +93,9 @@ for (const [needle, label] of LEGACY) {
   check(`no legacy ${label}`, hits.length === 0, hits.join(','))
 }
 
-console.log('\n=== 4. 对话模式底部说明 ===')
-check('footer block is conditional on tutorFolder', /\{tutorFolder && \(/.test(code.teach))
-check('footer only renders the path', /data-tip=\{tutorFolder\}>/.test(code.teach))
+console.log('\n=== 4. 对话模式左栏 footer 已删除 ===')
+check('rail no longer renders a session folder footer',
+  !/\{tutorFolder && \(/.test(code.teach) && !/data-tip=\{tutorFolder\}/.test(code.teach))
 
 /* ---------------------------------------------------------------- 5. 第二批字面量 */
 console.log('\n=== 5. 第二批：叫法统一与单文件清理 ===')

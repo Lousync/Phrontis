@@ -45,6 +45,8 @@ interface Props {
   /** 收藏（v3.6.0）：isPinned / onTogglePin 收**仓库相对路径**；文件右键菜单「钉到收藏 / 取消收藏」用 */
   isPinned?: (rel: string) => boolean
   onTogglePin?: (rel: string, name: string) => void
+  /** 空态提示（可选）：默认是「产物根」口径；会话文件夹树传自己的说法，避免答非所问。 */
+  emptyHint?: string
 }
 
 interface CtxState { x: number; y: number; node: TreeNode | null }
@@ -59,7 +61,7 @@ const parentDirOf = (rel: string): string => {
   return i === -1 ? '' : rel.slice(0, i)
 }
 
-function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenImage, onOpenExternal, refreshSeq, isPinned, onTogglePin }: Props) {
+function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenImage, onOpenExternal, refreshSeq, isPinned, onTogglePin, emptyHint }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootDir, setRootDir] = useState('AI教学')
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -312,7 +314,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
             空态把树替换掉的话「新建文件夹」点了会看不见输入框（B-14 之前这里是居中弹窗，不存在该问题）。 */}
         {(dirCache[''] ?? []).length === 0 && !creating ? (
           <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)] leading-relaxed">
-            还没有产物 · 新建对话或「整理成文档」后会出现在这里。
+            {emptyHint ?? '还没有产物 · 新建对话或「整理成文档」后会出现在这里。'}
             <button onClick={() => doCreate('', 'dir')} className="mt-1.5 flex items-center gap-1 text-[var(--accent)] hover:underline"><Plus size={11} /> 新建文件夹</button>
           </div>
         ) : (

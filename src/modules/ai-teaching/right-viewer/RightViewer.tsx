@@ -261,6 +261,11 @@ export interface RightViewerProps {
    * 缺省 = 旧口径 `innerWidth - 300`；传入后窗口过窄时查看器降到紧凑下限 300。
    */
   reserve?: number
+  /**
+   * 笔记页签不渲染文件列表列（对话模式：左栏会话文件树已承担切文件入口）。
+   * 缺省 false = 课程模式现状。
+   */
+  hideNoteList?: boolean
 }
 
 export function RightViewer(props: RightViewerProps): JSX.Element {
@@ -268,6 +273,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
     open, onClose, rootId, sessionId, sessionTitle, workspaceId, persistScope,
     request, onOpenInEditor, onOpenFullscreen, onTalkPage, onQuote, onFloat,
     onActivePathChange, anchorMessageId, onTabChange, onWidthChange, reserve,
+    hideNoteList,
   } = props
 
   /** 清洗后的作用域：空串 = 课程会话（旧键 / 旧行为） */
@@ -1208,6 +1214,7 @@ export function RightViewer(props: RightViewerProps): JSX.Element {
             registerFlush={registerFlush(tab.id)}
             onRequestOpenNote={cached(`${tab.id}:openNote`, () => (rel: string) => { openNote(rel) })}
             onRequestNewNote={cached(`${tab.id}:newNote`, () => () => { void newNote() })}
+            hideNoteList={hideNoteList}
           />
         </PaneSlot>
       )

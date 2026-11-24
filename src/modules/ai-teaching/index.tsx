@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
-import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, Brain, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, FolderOpen, Search, Settings2, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, ImagePlus, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play, CircleCheck, Inbox } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, llmReasoningCapable, llmVisionChatCapable, aiToolsListSkills, agentListSideLanes, agentResume,
@@ -752,8 +752,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [tutorRenamingId, setTutorRenamingId] = useState<string | null>(null)
   const [tutorRenameDraft, setTutorRenameDraft] = useState('')
   const [tutorCreating, setTutorCreating] = useState(false)
-  /** 当前会话文件夹（`AI教学/对话/...`；列表底部弱化小字） */
-  const [tutorFolder, setTutorFolder] = useState<string | null>(null)
+  /** 左栏「会话文件树」：正在看哪个会话的落盘文件夹（null = 看会话列表）。
+   *  列表块用 display:none 保挂载（滚动 / 搜索 / 分组展开状态不重置），树块懒挂载。 */
+  const [tutorTreeSid, setTutorTreeSid] = useState<string | null>(null)
+  /** 该会话文件夹相对 `aiTeachRoot` 的子路径（由 aiTeachSessionFolder 的仓库相对路径去掉前缀；
+   *  '' = 文件夹就是产物根本身；null = 尚未解析出来） */
+  const [tutorTreeSubRel, setTutorTreeSubRel] = useState<string | null>(null)
   /** 本轮辅导方式（`auto` 只在渲染层存在；发送后回 auto） */
   const [tutorMode, setTutorMode] = useState<TutorUiMode>('auto')
   /** 当前阅读上下文（R 段发布：PDF 当前页 / EPUB 当前章节）；资料 chip 与自动路由共用 */
@@ -926,6 +930,18 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const treeOpenExternal = useCallback((rel: string) => {
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: `${treeBase}/${rel}`, from: 'aiTeaching' } }))
   }, [treeBase])
+  /* 会话文件树（2026-11-24）：树根 = 该会话自己的文件夹（不再是工作区段）。
+     打开回调同样提到 useCallback —— 依赖只有派生出来的 base 字符串与 openViewerFile，保持 memo 有效。 */
+  const tutorTreeBase = tutorTreeSubRel ? `${aiTeachRoot}/${tutorTreeSubRel}` : aiTeachRoot
+  const tutorTreeActiveRel = useMemo(() => {
+    if (!viewerActiveRel || tutorTreeSubRel === null) return null
+    const prefix = `${aiTeachRoot}/${tutorTreeSubRel}/`
+    return viewerActiveRel.startsWith(prefix) ? viewerActiveRel.slice(prefix.length) : null
+  }, [viewerActiveRel, tutorTreeSubRel, aiTeachRoot])
+  const tutorTreeOpenArt = useCallback((rel: string) => { void openViewerFile(`${tutorTreeBase}/${rel}`) }, [openViewerFile, tutorTreeBase])
+  const tutorTreeOpenExternal = useCallback((rel: string) => {
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: `${tutorTreeBase}/${rel}`, from: 'aiTeaching' } }))
+  }, [tutorTreeBase])
   /**
    * v3.1.2 条目11 P4：**已升格支线**（lane==='main' 且带 parentSessionId）跟随父行缩进。
    * 支线本身不分配工作区，故从**全量** sessions 里按父行归属；父行不在当前工作区视图时不出现（旧行为）。
@@ -1187,23 +1203,49 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     for (const r of rows) out.find(g => g.label === tutorDayGroup(String(r.updatedAt ?? r.createdAt), now))!.rows.push(r)
     return out
   }, [tutorSessions, tutorSearch])
+  /** 会话文件树头部标题（= 会话标题；文件夹名可能带日期前缀，这里不复刻磁盘名） */
+  const tutorTreeTitle = tutorTreeSid ? (tutorSessions.find((s) => s.id === tutorTreeSid)?.title ?? '') : ''
   useEffect(() => {
-    if (!tutorActive || !activeId) { setTutorFolder(null); return }
-    let alive = true
-    const load = async () => {
+    if (!tutorActive || !activeId) return
+    const syncFolderName = async () => {
       const r = await aiTeachSessionFolder(activeId).catch(() => null)
-      let rel = r?.ok ? (r.relPath ?? null) : null
+      const rel = r?.ok ? (r.relPath ?? null) : null
       // 首条消息后后端把标题从「新对话」改成用户首句：文件夹跟着改名，保持 {MM-DD 标题} 一致。
       // 手动改名走的是同一通道，改完 rel 已不含「新对话」，不会重复触发。
       if (rel && activeTitle && activeTitle !== '新对话' && /新对话$/.test(rel)) {
-        const rr = await aiTeachRenameSessionFolder(activeId, activeTitle).catch(() => null)
-        if (rr?.ok && rr.relPath) rel = rr.relPath
+        await aiTeachRenameSessionFolder(activeId, activeTitle).catch(() => null)
       }
-      if (alive) setTutorFolder(rel)
     }
-    void load()
-    return () => { alive = false }
+    void syncFolderName()
   }, [tutorActive, activeId, activeTitle])
+
+  /* ---------- 左栏「会话文件树」（2026-11-24）----------
+     点会话行的文件夹按钮 → 左栏整体切到该会话的落盘文件夹。会话文件夹路径会随标题变化
+     （首条消息后后端改写标题 → 文件夹跟着改名），所以停在树里时也要重新解析；
+     退出对话模式 / 会话被删除则回列表。 */
+  useEffect(() => {
+    if (!tutorActive) { setTutorTreeSid(null); setTutorTreeSubRel(null); return }
+    const sid = tutorTreeSid
+    if (!sid) return
+    let alive = true
+    void (async () => {
+      const r = await aiTeachSessionFolder(sid).catch(() => null)
+      const rel = r?.ok ? (r.relPath ?? null) : null
+      if (!alive) return
+      if (!rel) { setTutorTreeSid(null); setTutorTreeSubRel(null); return }
+      const prefix = `${aiTeachRoot}/`
+      if (rel !== aiTeachRoot && !rel.startsWith(prefix)) { setTutorTreeSid(null); setTutorTreeSubRel(null); return }
+      setTutorTreeSubRel(rel === aiTeachRoot ? '' : rel.slice(prefix.length))
+    })()
+    return () => { alive = false }
+  }, [tutorActive, tutorTreeSid, activeId, activeTitle, aiTeachRoot])
+  // 会话被删除（本会话行删除 / 外部删除后列表刷新）→ 树不再指向一个不存在的会话
+  useEffect(() => {
+    if (!tutorTreeSid) return
+    if (tutorSessions.some((s) => s.id === tutorTreeSid)) return
+    setTutorTreeSid(null); setTutorTreeSubRel(null)
+  }, [tutorSessions, tutorTreeSid])
+
 
   /** 右栏支线中心「引用到主线」：把支线末条 AI 回答作为引用胶囊放进主线输入框（不自动发送） */
   const quoteFromLane = useCallback((text: string) => {
@@ -1350,6 +1392,20 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // 查看器页签已全局持久化（用户已定），切会话不再恢复「上次的工件」——
     // 旧存档里的 arts / docRel / readerRel / readerPage 一律忽略（见 AiTeachNav 的兼容注释）。
   }, [refreshMessages, requestViewer])
+
+  /** 会话列表行内的「文件夹」按钮：解析该会话的落盘文件夹并切到左栏文件树。
+   *  没有文件夹（从未发过消息）只提示、不切换；同时把该会话切成当前会话（看它的文件时中栏不该停着另一个对话）。 */
+  const openTutorTree = useCallback(async (sid: string, title: string) => {
+    const r = await aiTeachSessionFolder(sid).catch(() => null)
+    const rel = r?.ok ? (r.relPath ?? null) : null
+    if (!rel) { showToast({ type: 'info', message: '这个对话还没有落盘文件夹：先发一条消息，再回来看文件' }); return }
+    const prefix = `${aiTeachRoot}/`
+    const sub = rel === aiTeachRoot ? '' : rel.startsWith(prefix) ? rel.slice(prefix.length) : null
+    if (sub === null) { showToast({ type: 'info', message: '这个对话还没有落盘文件夹：先发一条消息，再回来看文件' }); return }
+    setTutorTreeSubRel(sub)
+    setTutorTreeSid(sid)
+    if (activeIdRef.current !== sid) await openSession(sid, title)
+  }, [aiTeachRoot, openSession])
 
   /**
    * 一次 Agent 运行的共同收尾（发送 / 续跑共用）：
@@ -3480,8 +3536,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             </div>
           )}
           {tutorActive ? (
-          /* 「对话」模式左栏：会话列表（约 248px）。没有课程树 / 资源管理器 / 素材 —— 对话不建课。 */
-          <div className="flex h-full min-h-0 flex-col" data-wb="aiTutorSessionRail">
+          /* 「对话」模式左栏：会话列表（约 248px）。没有课程树 / 资源管理器 / 素材 —— 对话不建课。
+             点某一行的文件夹按钮 → 整个左栏切到该会话的落盘文件树（2026-11-24）；
+             列表块用 display:none 保挂载，返回后滚动位置 / 搜索词 / 分组展开都还在。 */
+          <div className="flex h-full min-h-0 flex-col">
+          <div className={`flex h-full min-h-0 flex-col ${tutorTreeSid ? 'hidden' : 'kb-view-fade'}`} data-wb="aiTutorSessionRail">
             <div className="shrink-0 border-b border-[var(--border-color)] px-2 py-1.5 select-none">
               <div className="flex items-center gap-1.5">
                 <MessagesSquare size={12} className="shrink-0 text-[var(--accent)]" />
@@ -3543,6 +3602,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             </>
                           )}
                         </div>
+                        <button type="button" data-tip="查看这个对话的文件夹" aria-label="查看这个对话的文件夹" data-wb="aiTutorSessionFiles"
+                          onClick={e => { e.stopPropagation(); void openTutorTree(s.id, s.title) }}
+                          onDoubleClick={e => e.stopPropagation()}
+                          className={`shrink-0 rounded p-0.5 transition-colors hover:bg-[var(--bg-hover)] ${on ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'} ${on ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}>
+                          {tutorTreeSid === s.id ? <FolderOpen size={11} /> : <Folder size={11} />}
+                        </button>
                         <button type="button" data-tip="删除对话" aria-label="删除对话"
                           onClick={e => void delSession(e, s.id, s.title)}
                           className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] ${on ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}>
@@ -3554,11 +3619,52 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 </div>
               ))}
             </div>
-            {tutorFolder && (
-              <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 select-none">
-                <div className="truncate text-[9.5px] text-[var(--text-muted)]" data-tip={tutorFolder}>{tutorFolder}</div>
+          </div>
+          {/* 会话文件树（懒挂载）：树根就是该会话自己的文件夹，顶层直接是 画像.md / 要求.md / 产物 等 */}
+          {tutorTreeSid && tutorTreeSubRel !== null && (
+            <div className="flex flex-1 min-h-0 flex-col kb-view-in" data-wb="aiTutorSessionTree">
+              <div className="shrink-0 flex h-[34px] items-center gap-0.5 border-b border-[var(--border-color)] px-1 select-none">
+                <button type="button" onClick={() => { setTutorTreeSid(null); setTutorTreeSubRel(null) }}
+                  data-tip="返回对话列表" aria-label="返回对话列表" data-wb="aiTutorSessionTreeBack"
+                  className="shrink-0 rounded p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                  <ArrowLeft size={11} />
+                </button>
+                <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold text-[var(--text-primary)]"
+                  data-tip={`${aiTeachRoot}/${tutorTreeSubRel}`}>{tutorTreeTitle || '未命名对话'}</span>
+                <button type="button"
+                  onClick={() => {
+                    if (treeRefreshing) return
+                    setTreeRefreshing(true)
+                    setTreeRefreshSeq(n => n + 1)
+                    void workspaceRefreshVault()
+                      .then(r => { if (r.error) showToast({ type: 'error', message: r.error }) })
+                      .catch(() => {})
+                      .finally(() => setTreeRefreshing(false))
+                  }}
+                  disabled={treeRefreshing}
+                  data-tip="刷新文件树" aria-label="刷新文件树"
+                  className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50">
+                  <RefreshCw size={11} className={treeRefreshing ? 'animate-spin' : undefined} />
+                </button>
               </div>
-            )}
+              {/* 树体必须在 flex 列里 flex-1：写 h-full 会把 34px 头部的高度叠上去，底部一截滚不到
+                  （课程分支那层 h-full 是网格轨道给的确定高度，不能照抄到这层）。 */}
+              <div className="flex-1 min-h-0 overflow-hidden pb-1">
+                <AiTeachFileTree
+                  subRel={tutorTreeSubRel}
+                  emptyHint="这个文件夹还是空的 · 右键可新建文件"
+                  refreshSeq={treeRefreshSeq}
+                  activeRel={tutorTreeActiveRel}
+                  onOpenMd={tutorTreeOpenArt}
+                  onOpenHtml={tutorTreeOpenArt}
+                  onOpenImage={tutorTreeOpenArt}
+                  onOpenExternal={tutorTreeOpenExternal}
+                  isPinned={isPinned}
+                  onTogglePin={togglePin}
+                />
+              </div>
+            </div>
+          )}
           </div>
           ) : (
           <>
@@ -4224,10 +4330,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         文案最长 7 字，正常宽度单行居中；极窄中栏时允许折行（不加 whitespace-nowrap，
                         否则会横向溢出）。说明文字字号不动，只调标题这一层。 */}
                     {/* 空态主标题（2026-11-22）：改成一句与学习有关的名言，按段稳定取词；
+                        「对话」模式同样走这套引言（2026-11-24，不再只显示状态名「对话」）；
                         「章末复习」保留状态名（它是模式而不是对话开场）；小字说明整段删除 ——
                         用户要的是标语，不是操作手册。 */}
                     <div className="max-w-[620px] text-balance text-[24px] font-semibold leading-snug text-[var(--text-primary)]">
-                      {tutorActive ? '对话' : courseReviewChapter ? '章末复习' : (
+                      {!tutorActive && courseReviewChapter ? '章末复习' : (
                         <>
                           {emptyQuote.text}
                           <span className="ml-2 align-middle text-[12px] font-normal text-[var(--text-muted)]">— {emptyQuote.source}</span>
@@ -4550,37 +4657,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         )}
                       </Collapsible>
                     )}
-                    {tutorActive && (
-                      /* 「对话」模式方式行（原型 mode-row）：单枚资料 chip + 五档方式；不挤进 footer。
-                         auto 只在渲染层存在，发送前由 resolveTutorMode 解析（方案 §2.2 / §3.1）。 */
-                      <div className="mb-1.5 flex min-w-0 items-center gap-2 select-none" data-wb="aiTutorModeRow">
-                        {(readingCtx || viewerActiveRel) && tutorMaterialName && (
-                          <span className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] py-0.5 pl-2 pr-1 text-[10.5px] text-[var(--text-secondary)]" data-wb="aiTutorMaterialChip">
-                            <FileText size={10} className="shrink-0 text-[var(--accent)]" />
-                            <button type="button" onClick={openRail} data-tip="打开右侧栏" aria-label="打开右侧栏"
-                              className="min-w-0 max-w-[180px] truncate text-left transition-colors hover:text-[var(--text-primary)]">
-                              {tutorMaterialName}{tutorMaterialMeta ? ` · ${tutorMaterialMeta}` : ''}
+                    {tutorActive && (readingCtx || viewerActiveRel) && tutorMaterialName && (
+                      /* 「对话」模式当前资料 chip：方式五档已搬进卡下抽屉（2026-11-24），这里只剩资料绑定；
+                         没有资料时整行不渲染 —— 不留空行、不占高度。 */
+                      <div className="mb-1.5 flex min-w-0 items-center gap-2 select-none">
+                        <span className="inline-flex min-w-0 shrink items-center gap-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] py-0.5 pl-2 pr-1 text-[10.5px] text-[var(--text-secondary)]" data-wb="aiTutorMaterialChip">
+                          <FileText size={10} className="shrink-0 text-[var(--accent)]" />
+                          <button type="button" onClick={openRail} data-tip="打开右侧栏" aria-label="打开右侧栏"
+                            className="min-w-0 max-w-[180px] truncate text-left transition-colors hover:text-[var(--text-primary)]">
+                            {tutorMaterialName}{tutorMaterialMeta ? ` · ${tutorMaterialMeta}` : ''}
+                          </button>
+                          {readingCtx && (
+                            <button type="button" onClick={() => publishReadingContext(null)} data-tip="移除当前资料" aria-label="移除当前资料"
+                              className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]">
+                              <X size={9} />
                             </button>
-                            {readingCtx && (
-                              <button type="button" onClick={() => publishReadingContext(null)} data-tip="移除当前资料" aria-label="移除当前资料"
-                                className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]">
-                                <X size={9} />
-                              </button>
-                            )}
-                          </span>
-                        )}
-                        <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">方式</span>
-                        <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="group" aria-label="本轮方式">
-                          {(['auto', 'chat', 'read', 'solve', 'ask'] as TutorUiMode[]).map(m => (
-                            <button key={m} type="button" aria-pressed={tutorMode === m} onClick={() => setTutorMode(m)}
-                              data-tip={TUTOR_MODE_TIPS[m]} aria-label={TUTOR_MODE_LABELS[m]}
-                              className={`shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] transition-colors ${tutorMode === m
-                                ? 'border-[var(--accent)]/55 bg-[var(--accent)]/10 text-[var(--accent)]'
-                                : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-                              {TUTOR_MODE_LABELS[m]}
-                            </button>
-                          ))}
-                        </div>
+                          )}
+                        </span>
                       </div>
                     )}
                     <div className="relative">
@@ -4634,9 +4727,31 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
                             </>
                           )}
+                          {/* 「方式」五档（2026-11-24 从输入卡上方搬进抽屉）：与「思考 / 引用」同一条 34px 行；
+                              按钮高度 / 圆角 / 字号沿用抽屉 pill 口径。窄宽态整组横向滚动，不换行、不藏入口。
+                              auto 只在渲染层存在，发送前由 resolveTutorMode 解析（方案 §2.2 / §3.1）。 */}
+                          {tutorActive && (
+                            <>
+                              <div className="flex min-w-0 items-center gap-1.5 select-none" data-wb="aiTutorModeRow">
+                                <span className="shrink-0 pl-0.5 text-[10.5px] text-[var(--text-muted)]">方式</span>
+                                <div className="flex min-w-0 items-center gap-1 overflow-x-auto kb-hide-scrollbar" role="group" aria-label="本轮方式">
+                                  {(['auto', 'chat', 'read', 'solve', 'ask'] as TutorUiMode[]).map(m => (
+                                    <button key={m} type="button" aria-pressed={tutorMode === m} onClick={() => setTutorMode(m)}
+                                      data-tip={TUTOR_MODE_TIPS[m]} aria-label={TUTOR_MODE_LABELS[m]}
+                                      className={`shrink-0 h-[24px] px-2 rounded-full text-[11px] transition-colors ${tutorMode === m
+                                        ? 'bg-[var(--bg-primary)] text-[var(--accent)] shadow-sm'
+                                        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                                      {TUTOR_MODE_LABELS[m]}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <span aria-hidden className="kb-tray-divider mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" />
+                            </>
+                          )}
                           {/* 段已收尾 / 课程已结课：只压暗并禁点右侧控制（pill 不压暗、仍可点，打开右栏笔记页签）；
                               抽屉本身**不自动收起**、抓手不禁用 —— 收尾态最可能想回看画像 / 要求。 */}
-                          <div className={`flex min-w-0 flex-1 items-center gap-1.5 ${courseReadonly || courseEnded ? 'opacity-45 pointer-events-none select-none' : ''}`}>
+                          <div className={`flex min-w-0 items-center gap-1.5 ${tutorActive ? 'shrink-0' : 'flex-1'} ${courseReadonly || courseEnded ? 'opacity-45 pointer-events-none select-none' : ''}`}>
                             {/* 宽态：标签 + 四档（窄态整组由容器查询隐藏，换下面那枚「脑图标 + 当前档」）
                                 2026-11-23 工具条图标化：抽屉可用宽 < 380px 时不藏入口，只把文字收成图标。 */}
                             <span className="kb-tray-effort-seg flex min-w-0 items-center gap-1.5">
@@ -4738,6 +4853,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         sessionId={activeId ?? ''}
         sessionTitle={activeTitle}
         persistScope={tutorActive ? `tutor:${activeId || 'empty'}` : undefined}
+        hideNoteList={tutorActive}
         workspaceId={activeWs && activeWs !== '__none__' ? activeWs : ''}
         request={viewerReq}
         onOpenInEditor={(rel) => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))}

@@ -7,12 +7,14 @@
  * Scope of this script: src/modules/ai-teaching/index.tsx only (U block).
  *   1. picker entry between workspace search and "new workspace"
  *   2. tutorActive view branch + enterWs / exitToPicker reset
- *   3. session rail (filter / grouping / create / rename / delete / folder path)
- *   4. five mode chips (labels, default auto, reset after send) + material chip
+ *   3. session rail (filter / grouping / create / rename / delete / folder rename side effect)
+ *   4. five mode chips inside the composer tray (labels, default auto, reset after send)
+ *      + material chip above the textarea
  *   5. auto routing (resolveTutorMode) and agentChat request fields
  *   6. solve action row only on the last assistant + no fake "add to wrongbook" button
  *   7. RightViewer persistScope + host viewer state reset on session switch
  *   8. course-only blocks hidden under tutor
+ *   9. session folder drill-down: row folder button, list kept mounted, AiTeachFileTree branch
  *
  * Run (repo root): node .AGENT/scripts/ai-teaching/verify-tutor-ui.mjs
  * Output is pure ASCII (no emoji).
@@ -84,20 +86,109 @@ check('Enter commits / Escape cancels rename',
   /if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); setTutorRenamingId\(null\) \}/.test(src))
 check('delete reuses delSession (folder ask/keep/delete preserved)', /delSession\(e, s\.id, s\.title\)/.test(src))
 check('empty state offers new session', /还没有对话[\s\S]{0,260}?新建对话/.test(src))
-check('session folder path displayed (only when folder exists)', /aiTeachSessionFolder\(activeId\)/.test(src) && /\{tutorFolder && \(/.test(src) && /data-tip=\{tutorFolder\}/.test(src) && !src.includes('不建课 · 每个对话一个文件夹'))
+// 2026-11-24: the session folder path footer at the bottom of the left rail was removed.
+// The rename side effect stays: after the first message the backend retitles the session and
+// the folder must follow ({MM-DD title}). Locate it by source slice (nearest useEffect +
+// its dependency array) so a bare mention or a call elsewhere cannot satisfy the contract.
+const folderProbeAt = src.indexOf('aiTeachSessionFolder(activeId)')
+const folderEffectStart = folderProbeAt >= 0 ? src.lastIndexOf('useEffect(() => {', folderProbeAt) : -1
+const folderEffectEnd = folderProbeAt >= 0 ? src.indexOf('}, [tutorActive, activeId, activeTitle])', folderProbeAt) : -1
+const folderEffectBlock = folderEffectStart >= 0 && folderEffectEnd > folderProbeAt
+  ? src.slice(folderEffectStart, folderEffectEnd)
+  : ''
+check('session folder path no longer displayed in the rail',
+  folderProbeAt > 0 && !/\{tutorFolder && \(/.test(code) && !/data-tip=\{tutorFolder\}/.test(code) &&
+  !src.includes('不建课 · 每个对话一个文件夹'))
+check('session folder rename still synced inside the effect',
+  folderEffectBlock.length > 0 &&
+  /await aiTeachRenameSessionFolder\(activeId, activeTitle\)/.test(folderEffectBlock))
+
+// ---------------------------------------------------------------- 2b. session folder tree drill-down
+console.log(`\n[2b] ${rel} - session folder tree drill-down`)
+// Source slices, not bare grep: each contract is located relative to its own anchor.
+const rowAt = src.indexOf('data-wb="aiTutorSessionRow"')
+const filesBtnAt = rowAt >= 0 ? src.indexOf('data-wb="aiTutorSessionFiles"', rowAt) : -1
+const deleteBtnAt = rowAt >= 0 ? src.indexOf('data-tip="删除对话"', rowAt) : -1
+const filesBtn = filesBtnAt >= 0 ? src.slice(filesBtnAt, filesBtnAt + 700) : ''
+check('folder button sits inside the session row, left of delete, and stops propagation',
+  rowAt > 0 && filesBtnAt > rowAt && deleteBtnAt > filesBtnAt &&
+  /onClick=\{e => \{ e\.stopPropagation\(\); void openTutorTree\(s\.id, s\.title\) \}\}/.test(filesBtn) &&
+  /size=\{11\}/.test(filesBtn) && /p-0\.5/.test(filesBtn))
+
+const openTreeAt = src.indexOf('const openTutorTree = useCallback')
+const openTreeEndAt = openTreeAt >= 0 ? src.indexOf('}, [aiTeachRoot, openSession])', openTreeAt) : -1
+const openTreeBlock = openTreeAt >= 0 && openTreeEndAt > openTreeAt ? src.slice(openTreeAt, openTreeEndAt) : ''
+check('tree entry parses the session folder, derives the sub path, and only toasts when it is missing',
+  openTreeBlock.length > 0 &&
+  /await aiTeachSessionFolder\(sid\)/.test(openTreeBlock) &&
+  /const prefix = `\$\{aiTeachRoot\}\/`/.test(openTreeBlock) &&
+  /rel\.slice\(prefix\.length\)/.test(openTreeBlock) &&
+  /if \(!rel\) \{ showToast\(\{ type: 'info', message: '这个对话还没有落盘文件夹：先发一条消息，再回来看文件' \}\); return \}/.test(openTreeBlock) &&
+  /setTutorTreeSubRel\(sub\)[\s\S]{0,100}?setTutorTreeSid\(sid\)[\s\S]{0,160}?if \(activeIdRef\.current !== sid\) await openSession\(sid, title\)/.test(openTreeBlock))
+
+const treeBranchAt = src.indexOf('{tutorTreeSid && tutorTreeSubRel !== null && (')
+const treeCallAt = treeBranchAt >= 0 ? src.indexOf('subRel={tutorTreeSubRel}', treeBranchAt) : -1
+const treeSlice = treeBranchAt >= 0 && treeCallAt > treeBranchAt ? src.slice(treeBranchAt, treeCallAt + 420) : ''
+const backAt = treeSlice.indexOf('data-wb="aiTutorSessionTreeBack"')
+const backBtnStart = backAt >= 0 ? treeSlice.lastIndexOf('<button', backAt) : -1
+check('tree branch lazily mounts AiTeachFileTree at the session folder and a back button clears the same pair',
+  treeSlice.length > 0 && treeCallAt > treeBranchAt &&
+  treeSlice.includes('<AiTeachFileTree') &&
+  /subRel=\{tutorTreeSubRel\}[\s\S]{0,420}?activeRel=\{tutorTreeActiveRel\}/.test(treeSlice) &&
+  backAt > 0 &&
+  /onClick=\{\(\) => \{ setTutorTreeSid\(null\); setTutorTreeSubRel\(null\) \}\}/.test(treeSlice.slice(backBtnStart, backAt + 120)))
+
+const railMarkerAt = src.indexOf('data-wb="aiTutorSessionRail"')
+const railOpenAt = railMarkerAt >= 0 ? src.lastIndexOf('<div', railMarkerAt) : -1
+const railOpenTag = railOpenAt >= 0 ? src.slice(railOpenAt, railMarkerAt + 30) : ''
+check('session list stays mounted via display toggle (scroll/search survive the round trip)',
+  railOpenTag.length > 0 && /tutorTreeSid \? 'hidden' : 'kb-view-fade'/.test(railOpenTag) &&
+  !/\{!tutorTreeSid && \(/.test(src))
+
+check('tree state resets when leaving tutor mode and activeRel derives from the session folder prefix',
+  /if \(!tutorActive\) \{ setTutorTreeSid\(null\); setTutorTreeSubRel\(null\); return \}/.test(src) &&
+  /if \(tutorSessions\.some\(\(s\) => s\.id === tutorTreeSid\)\) return[\s\S]{0,90}?setTutorTreeSid\(null\); setTutorTreeSubRel\(null\)/.test(src) &&
+  /const tutorTreeActiveRel = useMemo\(\(\) => \{[\s\S]{0,220}?const prefix = `\$\{aiTeachRoot\}\/\$\{tutorTreeSubRel\}\/`[\s\S]{0,140}?viewerActiveRel\.slice\(prefix\.length\)/.test(src))
+
+// 树体高度契约（2026-11-24）：头部 34px 是 flex 兄弟，树体写 h-full 会叠出 34px 溢出、底部滚不到；
+// 空态文案也必须换会话口径（默认那句是「产物根」引导，放在单个会话文件夹里答非所问）。
+const treeBodyAt = src.indexOf('data-wb="aiTutorSessionTree"')
+const treeBodyEndAt = treeBodyAt >= 0 ? src.indexOf('emptyHint="这个文件夹还是空的', treeBodyAt) : -1
+check('tree body fills the remaining height (flex-1, not h-full) and gets a session-scoped empty hint',
+  treeBodyAt > 0 && treeBodyEndAt > treeBodyAt &&
+  /flex-1 min-h-0 overflow-hidden pb-1/.test(src.slice(treeBodyAt, treeBodyEndAt)) &&
+  !/className="h-full min-h-0 pb-1"[\s\S]{0,160}?subRel=\{tutorTreeSubRel\}/.test(src))
 
 // ---------------------------------------------------------------- 3. composer: mode chips + material chip
-console.log(`\n[3] ${rel} - composer mode row and material chip`)
+console.log(`\n[3] ${rel} - composer tray mode row and material chip`)
 check('mode labels come from TUTOR_MODE_LABELS', (src.match(/TUTOR_MODE_LABELS/g) || []).length >= 2)
 check('five modes in plan order', /\['auto', 'chat', 'read', 'solve', 'ask'\] as TutorUiMode\[\]/.test(src))
 check('default mode is auto', /useState<TutorUiMode>\('auto'\)/.test(src))
 check('chip exposes aria-pressed', /aria-pressed=\{tutorMode === m\}/.test(src))
-check('mode row sits above the textarea',
-  src.indexOf('data-wb="aiTutorModeRow"') < src.indexOf('ref={inputRef}'))
+
+// 2026-11-24: the five-mode row moved from above the textarea into the composer tray
+// (`id="aiTeachComposerTray"`). Locate by source slices so a stray marker elsewhere
+// cannot satisfy the contract.
+const textareaAt = src.indexOf('ref={inputRef}')
+const modeRowAt = src.indexOf('data-wb="aiTutorModeRow"')
+const materialAt = src.indexOf('data-wb="aiTutorMaterialChip"')
+const trayAt = src.indexOf('id="aiTeachComposerTray"')
+// Tray body ends where the narrow effort bubble (rendered right after it) starts.
+const trayEndAt = src.indexOf('data-wb="aiTeachEffortMenu"', trayAt)
+const traySlice = trayAt >= 0 && trayEndAt > trayAt ? src.slice(trayAt, trayEndAt) : ''
+const trayRowAt = trayAt >= 0 ? src.indexOf('kb-tray-row', trayAt) : -1
+check('mode row sits inside the composer tray',
+  traySlice.length > 0 && modeRowAt > trayAt && modeRowAt < trayEndAt && traySlice.includes('data-wb="aiTutorModeRow"'))
+check('mode row shares the tray 34px row',
+  trayRowAt > trayAt && trayRowAt < modeRowAt && /kb-tray-row[^\n]*h-\[34px\]/.test(src.slice(trayRowAt, trayRowAt + 220)))
+check('mode row no longer sits above the textarea',
+  textareaAt > 0 && materialAt > 0 && materialAt < textareaAt &&
+  modeRowAt > textareaAt && !src.slice(materialAt, textareaAt).includes('data-wb="aiTutorModeRow"'))
 check('mode resets to auto after send', /if \(tutorTurn\) setTutorMode\('auto'\)/.test(src))
 check('reading context read via useSyncExternalStore',
   /useSyncExternalStore\(subscribeReadingContext, getReadingContext\)/.test(src))
-check('material chip present', src.includes('data-wb="aiTutorMaterialChip"'))
+check('material chip present (only rendered when a material is bound)',
+  /\(readingCtx \|\| viewerActiveRel\) && tutorMaterialName && \([\s\S]{0,600}?data-wb="aiTutorMaterialChip"/.test(src))
 check('material chip focuses right rail', /data-wb="aiTutorMaterialChip"[\s\S]{0,700}?onClick=\{openRail\}/.test(src))
 check('material chip x clears reading context', /onClick=\{\(\) => publishReadingContext\(null\)\}/.test(src))
 check('empty state suggestions exist', src.includes('data-wb="aiTutorSuggestions"'))
@@ -155,7 +246,22 @@ check('segment-ended row hidden', /\{!tutorActive && activeSegment && activeId =
 check('course-ended card hidden', /\{courseEnded && activeWs && activeWs !== '__none__' && !tutorActive/.test(src))
 check('empty-state "open course assistant" hidden', /\{!tutorActive && !activeId && \(/.test(src))
 check('hero chips hidden', /const heroMode = emptyState && !!activeSegment && !tutorActive/.test(src))
-check('tutor empty title is the conversation title', /\{tutorActive \? '对话' : courseReviewChapter \? '章末复习'/.test(src))
+// 2026-11-24: under tutorActive the empty title now reuses the quote layout instead of
+// the bare status word "对话"; "章末复习" stays as the only status-name branch.
+const titleAt = code.indexOf('text-balance text-[24px] font-semibold')
+const titleEndAt = code.indexOf('{!tutorActive && !activeId && (', titleAt)
+const titleBlock = titleAt >= 0 && titleEndAt > titleAt ? code.slice(titleAt, titleEndAt) : ''
+// Scope the negative check to the empty-state block: `tutorActive ? '对话'` still exists
+// legitimately in the panel header title, so a whole-file grep would be meaningless.
+const emptyAt = code.indexOf('{emptyState && (')
+const emptyBlock = emptyAt >= 0 && titleEndAt > emptyAt ? code.slice(emptyAt, titleEndAt) : ''
+check('tutor empty title drops the standalone "对话" literal',
+  titleBlock.length > 0 && emptyBlock.length > 0 &&
+  !/['"]对话['"]/.test(titleBlock) && !/tutorActive \? '对话'/.test(emptyBlock))
+check('tutor empty title shares the quote layout under tutorActive',
+  /!tutorActive && courseReviewChapter \? '章末复习' : \(/.test(titleBlock) &&
+  /emptyQuote\.text[\s\S]{0,200}?emptyQuote\.source/.test(titleBlock) &&
+  titleBlock.indexOf('emptyQuote.text') > titleBlock.indexOf("'章末复习'"))
 check('ask card kept (not guarded by tutorActive)', !/!tutorActive && askVisible/.test(src))
 check('image attachment strip kept (not guarded by tutorActive)', !/!tutorActive && <ComposerImageStrip/.test(src))
 

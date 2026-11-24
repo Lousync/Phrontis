@@ -155,6 +155,50 @@ check('save debounce is 1000ms', /const SAVE_DEBOUNCE_MS = 1000/.test(pane))
 check('request opens paths outside the list', /request\?\.relPath/.test(pane) && /isNoteFile\(rel\)/.test(pane))
 check('unmount flushes pending write', /return \(\) => \{[\s\S]{0,200}?void saveNow\(\)/.test(pane))
 
+/* 对话模式（tutorActive）由左栏会话文件树承担切文件入口，笔记列表列整列不渲染；
+   课程模式缺省 false = 现状。断言按切片看「条件装配」，不只看字符串存在。 */
+const showListDecl = (pane.match(/const showList = [^\n]+/) ?? [''])[0]
+const toggleIdx = pane.indexOf('收起笔记列表')
+const toggleGuard = pane.slice(pane.lastIndexOf('{!isSessionDoc && hasSession', toggleIdx), toggleIdx)
+const listStart = pane.indexOf('{showList && (')
+const listBlock = listStart >= 0 ? pane.slice(listStart, pane.indexOf('{/* 编辑 / 预览 */}', listStart)) : ''
+const relativeTimeAt = pane.indexOf('relativeTime(now')
+check('hideNoteList defaults to false and gates showList (list column really renders through it)',
+  /hideNoteList = false/.test(pane.slice(pane.indexOf('export function NotesPane'), pane.indexOf('const kind:')))
+  && showListDecl.includes('!hideNoteList')
+  && showListDecl.indexOf('!hideNoteList') < showListDecl.indexOf('(!narrow || listOpen)')
+  && listStart >= 0
+  && listBlock.includes('relativeTime(now')
+  && relativeTimeAt > listStart
+  && pane.split('relativeTime(now').length - 1 === 1)
+check('hideNoteList also drops the narrow list toggle (no dead button)',
+  toggleGuard.includes('!hideNoteList') && toggleGuard.includes('narrow')
+  && toggleIdx < listStart)
+check('shell forwards hideNoteList to NotesPane',
+  (() => {
+    const shellPane = stripComments(fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/right-viewer/RightViewer.tsx'), 'utf8').replace(/\r\n/g, '\n'))
+    const at = shellPane.indexOf('<NotesPane')
+    const call = at >= 0 ? shellPane.slice(at, shellPane.indexOf('/>', at)) : ''
+    return call.includes('hideNoteList={hideNoteList}') && call.includes('onRequestNewNote=')
+  })())
+check('host passes hideNoteList={tutorActive} to <RightViewer>',
+  (() => {
+    const host = stripComments(fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/index.tsx'), 'utf8').replace(/\r\n/g, '\n'))
+    const at = host.indexOf('<RightViewer')
+    const call = at >= 0 ? host.slice(at, host.indexOf('/>', at)) : ''
+    return call.includes('hideNoteList={tutorActive}') && call.includes('persistScope={tutorActive')
+  })())
+// 列表隐藏后搜索无对象可筛：动作行里那两枚搜索入口（窄态按钮 / 宽态输入框）必须一起让位，
+// 否则点了没反应（2026-11-24 用户拍板：对话模式去掉笔记列表这一列）。
+check('search controls yield to hideNoteList (no dead search box once the list is gone)',
+  (() => {
+    const pane = stripComments(fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/right-viewer/NotesPane.tsx'), 'utf8').replace(/\r\n/g, '\n'))
+    const at = pane.indexOf(') : hideNoteList ? (')
+    const guard = at >= 0 ? pane.slice(at, at + 520) : ''
+    const branch = at >= 0 ? pane.slice(at, pane.indexOf(') : narrow && !searchOpen ? (', at)) : ''
+    return guard.length > 0 && branch.includes('baseName(currentRel)') && !branch.includes('aria-label="搜索笔记"')
+  })())
+
 /* ---------------------------------------------------------------- report */
 let pass = 0
 const fails = []

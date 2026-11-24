@@ -112,7 +112,7 @@ export function NotesPane(props: NotesPaneProps) {
     rootId, sessionId, width, active, open, request,
     initialRelPath, fileKind, ownerSessionId, displayName, initialPreview,
     onOpenInEditor, onDirtyChange, onTitleChange, onRelPathChange,
-    registerFlush, onRequestOpenNote, onRequestNewNote,
+    registerFlush, onRequestOpenNote, onRequestNewNote, hideNoteList = false,
   } = props
 
   const kind: NotesFileKind = fileKind === 'profile' || fileKind === 'constraints' ? fileKind : 'note'
@@ -641,13 +641,13 @@ export function NotesPane(props: NotesPaneProps) {
   }
 
   const hasSession = !!sessionId
-  const showList = !isSessionDoc && hasSession && (!narrow || listOpen)
+  const showList = !isSessionDoc && hasSession && !hideNoteList && (!narrow || listOpen)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* 动作行：32px，只放动作与当前文件，不另加标题 */}
       <div className="flex h-8 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-1.5">
-        {!isSessionDoc && hasSession && narrow && (
+        {!isSessionDoc && hasSession && !hideNoteList && narrow && (
           <button
             onClick={() => setListOpen((v) => !v)}
             data-tip={listOpen ? '收起笔记列表' : '展开笔记列表'}
@@ -681,6 +681,17 @@ export function NotesPane(props: NotesPaneProps) {
             <span className="min-w-0 max-w-[46%] truncate">{currentRel ? baseName(currentRel) : noteTabTitle('', kind)}</span>
           </span>
         ) : !hasSession ? (
+          <span
+            className="flex min-w-0 items-center gap-1 text-[11.5px] text-[var(--text-primary)]"
+            data-tip={currentRel}
+            aria-label={currentRel}
+          >
+            <span className="shrink-0 text-[var(--text-muted)]"><FileText size={12} /></span>
+            <span className="min-w-0 truncate">{currentRel ? baseName(currentRel) : '笔记'}</span>
+          </span>
+        ) : hideNoteList ? (
+          /* 对话模式（列表已隐藏，见上面 showList）：动作行只留文件身份 —— 搜索只筛那一列，
+             列表不在了就没有可筛的对象，别留一枚点了没反应的输入框。 */
           <span
             className="flex min-w-0 items-center gap-1 text-[11.5px] text-[var(--text-primary)]"
             data-tip={currentRel}

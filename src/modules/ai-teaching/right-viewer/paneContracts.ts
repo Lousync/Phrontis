@@ -182,6 +182,12 @@ export interface NotesPaneProps extends ViewerPaneContext {
   onRequestOpenNote?: (relPath: string) => void
   /** 「新建笔记」→ 交给外壳建文件并开页签（一个文件一个页签） */
   onRequestNewNote?: () => void
+  /**
+   * 不渲染笔记列表列（含窄态的开合按钮）。对话模式由左栏会话文件树承担切文件入口，
+   * 这一列是重复入口 —— 模式派生，不是用户可调项，故不落 localStorage。
+   * 缺省 false = 课程模式现状。
+   */
+  hideNoteList?: boolean
 }
 
 /**
