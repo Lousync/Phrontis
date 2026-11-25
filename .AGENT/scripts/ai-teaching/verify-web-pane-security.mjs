@@ -67,11 +67,54 @@ check('persistent partition constant is persist:webtabs',
 check('view actually uses the partition constant',
   /partition\s*:\s*WEB_PANE_PARTITION/.test(view), '')
 
-console.log('\n=== 2. guard 1: window.open ===')
+console.log('\n=== 2. guard 1: window.open (2026-11-25: in-place link / in-app login popup) ===')
 check('setWindowOpenHandler installed', /setWindowOpenHandler\s*\(/.test(view), '')
-check('window open always denied', /action\s*:\s*'deny'/.test(view), '')
-check('http(s) targets forwarded to shell.openExternal',
-  /shell\.openExternal\s*\(/.test(view) && /isHttpUrl\s*\(/.test(view), '')
+check('the native window is never allowed except the login popup path',
+  /action\s*:\s*'deny'/.test(view) && /action\s*:\s*'allow'/.test(view), '')
+check('plain links navigate inside the current view (deferred loadURL)',
+  /function loadLinkInPlace\s*\(\s*wc:\s*WebContents/.test(view)
+  && /setImmediate\s*\(/.test(view)
+  && /loadLinkInPlace\(live,\s*target\)/.test(view)
+  && /loadLinkInPlace\(wc,\s*target\)/.test(view), '')
+check('same url is not reloaded by the in-place navigation',
+  /getURL\(\)\s*===\s*target/.test(view), '')
+check('http(s) links are no longer handed to shell.openExternal',
+  !/shell\.openExternal\(url\)/.test(view), '')
+check('mailto / tel still go to the system',
+  /handOffSystemScheme/.test(view) && /shell\.openExternal\(s\)/.test(view), '')
+check('in-page mailto / tel links hand off instead of being silently blocked',
+  /'will-navigate'[\s\S]{0,200}?handOffSystemScheme\(url\)/.test(view), '')
+check('popup detection uses size features or a POST body',
+  /function isPopupRequest\s*\(/.test(view) && /postBody/.test(view)
+  && /readFeatureNumber\(details\.features,\s*'width'\)/.test(view), '')
+check('login popup keeps the persistent webtabs partition',
+  /overrideBrowserWindowOptions/.test(view) && /partition:\s*WEB_PANE_PARTITION/.test(view), '')
+{
+  const popupOpts = view.slice(view.indexOf('overrideBrowserWindowOptions'), view.indexOf("'did-create-window'"))
+  check('login popup repeats the sandbox trio (no preload)',
+    /sandbox\s*:\s*true/.test(popupOpts)
+    && /contextIsolation\s*:\s*true/.test(popupOpts)
+    && /nodeIntegration\s*:\s*false/.test(popupOpts)
+    && !/\bpreload\s*:/.test(popupOpts), `${popupOpts.length} chars`)
+  check('login popup x / y are clamped to a readable range',
+    /clampPopupSize\([\s\S]{0,200}?POPUP_MIN_WIDTH/.test(popupOpts) && /POPUP_MIN_HEIGHT/.test(popupOpts), '')
+  check('login popup follows the owner window', /parent:\s*pane\.win/.test(popupOpts), '')
+}
+check('concurrent popups are capped per pane',
+  /WEB_PANE_POPUP_MAX\s*=\s*2/.test(view) && /pane\.popups\.size\s*>=\s*WEB_PANE_POPUP_MAX/.test(view), '')
+check('popup security mirror installs the same navigation guards',
+  (() => {
+    const i = view.indexOf('function attachPopupSecurity')
+    if (i < 0) return false
+    const body = view.slice(i, view.indexOf("'did-create-window'", i) + 20)
+    return /\.on\(\s*'will-navigate'/.test(body) && /\.on\(\s*'will-redirect'/.test(body)
+      && /will-attach-webview/.test(body) && /setWindowOpenHandler/.test(body)
+  })(), '')
+check('popup creation is tracked per pane', /pane\.popups\.add\(popup\)/.test(view), '')
+check('closing a pane closes its popups first', (() => {
+  const b = fnBody(view, 'closeWebPane')
+  return b.includes('pane.popups') && b.includes('popup.close()') && b.includes('pane.popups.clear()')
+})(), '')
 
 console.log('\n=== 3. guard 2: in-page navigation ===')
 check('will-navigate hook installed', /\.on\(\s*'will-navigate'/.test(view), '')

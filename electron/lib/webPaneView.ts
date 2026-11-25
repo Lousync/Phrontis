@@ -22,8 +22,21 @@ import { getEffectiveUiZoom } from '../main/uiZoom'
 export const WEB_PANE_MAX = 3
 /** 独立持久分区（C3 拍板 A）：登录态跨页签、跨重启保留，且与主应用 cookie 完全隔离 */
 export const WEB_PANE_PARTITION = 'persist:webtabs'
+/**
+ * 单个网页页签同时允许存在的登录 / 授权弹窗上限（2026-11-25）。
+ * 防的是「页面狂开窗口」：真弹窗走 `action: 'allow'`，没有上限就是一个可被站点放大的资源口子。
+ */
+export const WEB_PANE_POPUP_MAX = 2
 /** 主进程 → 渲染层的状态回传通道（载荷 `{ id, state }`） */
 const CHANGED_CHANNEL = 'webPane:changed'
+
+/** 登录弹窗缺省 / 夹取区间：站点给多少用多少，但不许小到看不见、大到占满屏 */
+const POPUP_DEFAULT_WIDTH = 480
+const POPUP_DEFAULT_HEIGHT = 640
+const POPUP_MIN_WIDTH = 360
+const POPUP_MAX_WIDTH = 900
+const POPUP_MIN_HEIGHT = 320
+const POPUP_MAX_HEIGHT = 800
 
 export interface WebPaneBounds {
   x: number
@@ -54,6 +67,12 @@ interface PaneRecord {
   win: BrowserWindow
   /** 渲染层最后上报的意图（本模块只用于自身排查，不做渲染决策） */
   visible: boolean
+  /**
+   * 这个页签开出的登录 / 授权弹窗。
+   * 关页签 / 关查看器（disposeAll）/ 退出应用时必须连带关闭 —— 否则会留下一扇
+   * 没有宿主页、也没有关闭入口的孤儿窗口（只能靠任务管理器收）。
+   */
+  popups: Set<BrowserWindow>
   /** 最近一次主框架加载失败的描述；成功导航 / 重新开始加载时清空 */
   error?: string
   /** 失败时地址栏仍要显示用户输入的目标地址（失败导航不会进历史） */
@@ -164,31 +183,184 @@ function ensureSessionHardened(): Session {
 }
 
 /**
+ * 从 `window.open` 的 features 串里读一个尺寸（`"width=420,height=320"`）。
+ * 取不到 / 非法 → null（调用方落缺省值）。
+ */
+function readFeatureNumber(features: unknown, key: 'width' | 'height'): number | null {
+  const m = new RegExp(`(?:^|[,;\\s])${key}\\s*=\\s*(\\d+)`, 'i').exec(String(features ?? ''))
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function clampPopupSize(raw: number | null, min: number, max: number, fallback: number): number {
+  const base = raw ?? fallback
+  return Math.round(Math.min(max, Math.max(min, base)))
+}
+
+/**
+ * 「这次新窗口请求是不是真弹窗」。
+ *
+ * 2026-11-25 实测（Electron 33）：`target="_blank"` 普通链接与 `window.open(url)` **不带尺寸**
+ * 都报 `disposition: 'foreground-tab'` + `features: ''`；OAuth / 授权弹窗一律带
+ * `width=…,height=…`（`disposition: 'new-window'`）。所以判据只认尺寸特征与表单 POST，
+ * 不认 disposition —— 前者能把「普通链接 / 登录弹窗」干净分开，后者分不开。
+ *
+ * POST 必须单列：`loadURL` 只能发 GET，把表单弹窗硬转成同页跳转会丢参数。
+ */
+function isPopupRequest(details: { features?: unknown; postBody?: unknown }): boolean {
+  if (details.postBody) return true
+  return readFeatureNumber(details.features, 'width') !== null
+    || readFeatureNumber(details.features, 'height') !== null
+}
+
+/**
+ * `mailto:` / `tel:` 交给系统（那不是网页，右侧视图里也没有邮件 / 拨号能力）。
+ * 返回是否已经处理 —— 调用方据此决定是「拦下并交出去」而不是「拦下并丢弃」。
+ */
+function handOffSystemScheme(raw: unknown): boolean {
+  const s = String(raw ?? '').trim()
+  if (!/^(mailto:|tel:)/i.test(s)) return false
+  void shell.openExternal(s).catch(() => undefined)
+  return true
+}
+
+/**
+ * 普通链接在**当前视图内**跳转（2026-11-25 用户拍板：外部打开只留地址栏 ↗ 一个出口）。
+ *
+ * 为什么推迟一拍：`setWindowOpenHandler` 是同步回调，此刻 Chromium 正在处理 `window.open`；
+ * 在回调栈里直接 `loadURL` 属于中途重入导航，个别站点「先开窗再写 opener」的流程会被打断。
+ * `setImmediate` 把导航挪到当前事件循环之后，语义仍是「点一下就到」。
+ */
+function loadLinkInPlace(wc: WebContents, target: string): void {
+  setImmediate(() => {
+    if (wc.isDestroyed()) return
+    // 同一个地址（站点用 window.open(location.href) 之类）不重载：无意义且会丢滚动位置
+    if (wc.getURL() === target) return
+    void wc.loadURL(target).catch(() => undefined)
+  })
+}
+
+/**
+ * 登录 / 授权弹窗的安全镜像（与页签视图同一套边界，少一条就是缺口）：
+ *   · 只允许 http(s) 导航；
+ *   · **不允许弹窗再弹窗**（否则就是无限套娃），它的新窗口请求改成在自己里面跳；
+ *   · 不允许嵌 `<webview>`；
+ *   · 不挂 preload（`overrideBrowserWindowOptions` 里也没有）—— 网页拿不到 `window.api`。
+ * 权限拒绝与下载拦截是**会话级**的（同一个 `persist:webtabs` 分区自动继承），无需重复挂。
+ */
+function attachPopupSecurity(popup: BrowserWindow, pane: PaneRecord): void {
+  const wc = popup.webContents
+
+  wc.setWindowOpenHandler(({ url }) => {
+    const raw = String(url ?? '')
+    const target = toHttpUrl(raw)
+    if (!target) {
+      handOffSystemScheme(raw)
+      return { action: 'deny' }
+    }
+    loadLinkInPlace(wc, target)
+    return { action: 'deny' }
+  })
+  wc.on('will-navigate', (event, url) => {
+    if (isHttpUrl(url)) return
+    event.preventDefault()
+    handOffSystemScheme(url)
+  })
+  wc.on('will-redirect', (event, url) => {
+    if (isHttpUrl(url)) return
+    event.preventDefault()
+    handOffSystemScheme(url)
+  })
+  wc.on('will-attach-webview', (event) => event.preventDefault())
+
+  popup.on('closed', () => {
+    pane.popups.delete(popup)
+  })
+}
+
+/**
  * 每个 view 自己的安全钩子（会话级的三、四在 `ensureSessionHardened` 里）。
  */
 function attachPaneSecurity(id: string, pane: PaneRecord): void {
   const wc = pane.view.webContents
 
-  // 安全四件套之一：新窗口一律不放行。
-  // 真实站点常把登录 / 外链做成 window.open / target=_blank；deny 之后若目标是 http(s)
-  // 就交给系统浏览器，既不丢链接也不会凭空多出一个脱离管理的 Electron 窗口。
-  wc.setWindowOpenHandler(({ url }) => {
-    if (isHttpUrl(url)) {
-      // openExternal 返回 Promise，站点给的地址可能触发系统无关联程序 —— 吞掉 rejection，
-      // 避免主进程出现 unhandledRejection（用户侧已没有任何可操作的补救动作）
-      void shell.openExternal(url).catch(() => undefined)
+  /**
+   * 安全四件套之一（2026-11-25 重写）：新窗口请求三分流。
+   *
+   *   · 普通链接（`target="_blank"` / `window.open` 无尺寸 / Ctrl·中键）→ **当前页签内跳转**，
+   *     历史入栈（`←` 回得去），地址栏 / 页签标题由 `webPane:changed` 自动跟随；
+   *   · 真弹窗（OAuth 登录 / 授权：features 带尺寸，或表单 POST）→ 应用内受控小窗，
+   *     **共用 `persist:webtabs` 分区**，登录 Cookie 直接落在应用内、重启还在
+   *     （2026-11-25 探针实测：弹窗与宿主读同一个 cookie、`window.opener` 与 `postMessage`
+   *     可用、`window.close()` 能关掉窗口）；
+   *   · 非 http(s)：`mailto:` / `tel:` 交给系统（那不是网页），其余一律丢弃。
+   *
+   * ★ 为什么不再「deny + shell.openExternal」：系统浏览器的 Cookie 与本分区完全隔离，
+   *   登录在那边做完回来仍是未登录，且点普通链接会莫名离开应用。
+   */
+  wc.setWindowOpenHandler((details) => {
+    const raw = String(details.url ?? '')
+    const target = toHttpUrl(raw)
+
+    if (!target) {
+      // 新窗口请求里的 mailto / tel 也交给系统（例如 <a target="_blank" href="mailto:...">）
+      handOffSystemScheme(raw)
+      return { action: 'deny' }
     }
-    return { action: 'deny' }
+
+    if (!isPopupRequest(details)) {
+      const live = liveWebContents(pane)
+      if (live) loadLinkInPlace(live, target)
+      return { action: 'deny' }
+    }
+
+    // 弹窗达上限：静默拒绝（站点会自己报「弹窗被拦截」，比开出一串窗口好）
+    if (pane.popups.size >= WEB_PANE_POPUP_MAX) return { action: 'deny' }
+
+    // 内容区夹取在创建时由 Electron 自己夹进工作区；这里只保证尺寸可读
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        width: clampPopupSize(readFeatureNumber(details.features, 'width'), POPUP_MIN_WIDTH, POPUP_MAX_WIDTH, POPUP_DEFAULT_WIDTH),
+        height: clampPopupSize(readFeatureNumber(details.features, 'height'), POPUP_MIN_HEIGHT, POPUP_MAX_HEIGHT, POPUP_DEFAULT_HEIGHT),
+        // 跟随主窗：最小化 / 关闭主窗时一起收，不会孤零零留在桌面上
+        parent: pane.win,
+        center: true,
+        autoHideMenuBar: true,
+        fullscreenable: false,
+        webPreferences: {
+          // ★ 与网页页签同一个持久分区 —— 登录 Cookie 必须落在应用内，这是「应用内登录」的前提
+          partition: WEB_PANE_PARTITION,
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webSecurity: true,
+          spellcheck: false,
+        },
+      },
+    }
+  })
+
+  // 弹窗真正创建出来之后再套安全镜像（OverrideOptions 只能改窗口属性，钩子要挂在 webContents 上）
+  wc.on('did-create-window', (popup) => {
+    pane.popups.add(popup)
+    attachPopupSecurity(popup, pane)
   })
 
   // 安全四件套之二：站内导航只允许 http(s)。
   // file: / javascript: / data: / blob: / 自定义 scheme 全部拦下 —— 这一条是「网页视图只认
   // http/https」的执行点，别为了某个站点方便而放开。
+  // mailto / tel 例外：它们不是网页，交给系统（点邮箱地址该开邮件客户端，而不是静默没反应）。
   wc.on('will-navigate', (event, url) => {
-    if (!isHttpUrl(url)) event.preventDefault()
+    if (isHttpUrl(url)) return
+    event.preventDefault()
+    handOffSystemScheme(url)
   })
   wc.on('will-redirect', (event, url) => {
-    if (!isHttpUrl(url)) event.preventDefault()
+    if (isHttpUrl(url)) return
+    event.preventDefault()
+    handOffSystemScheme(url)
   })
   // 网页里再嵌 <webview> 也一并关死（沙箱视图本身创建不出，但钩子成本为零）
   wc.on('will-attach-webview', (event) => event.preventDefault())
@@ -272,7 +444,7 @@ export function createWebPane(win: BrowserWindow | null | undefined, id: unknown
     return { ok: false, error: (e as Error).message }
   }
 
-  const pane: PaneRecord = { view, win, visible: false }
+  const pane: PaneRecord = { view, win, visible: false, popups: new Set() }
 
   try {
     win.contentView.addChildView(view)
@@ -410,6 +582,11 @@ export function closeWebPane(id: string): WebPaneActionResult {
   const pane = panes.get(key)
   if (!pane) return { ok: true }
   panes.delete(key)
+  // 先收弹窗：宿主页已经没了，登录小窗再留着就是没有关闭入口的孤儿窗口
+  for (const popup of [...pane.popups]) {
+    try { if (!popup.isDestroyed()) popup.close() } catch { /* 已销毁 */ }
+  }
+  pane.popups.clear()
   const win = pane.win
   try {
     if (win && !win.isDestroyed()) win.contentView.removeChildView(pane.view)

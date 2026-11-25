@@ -3321,3 +3321,22 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **契约**
 - `verify-web-pane-renderer` **59/59**（新增 suppressed 两例 + 四条静态断言）；`verify-right-viewer-tabs` **221/221**；`verify-right-viewer-shell` 94/94；`verify-artifact-tabs` 26/26；`verify-notes-pane` 52/52；`verify-web-pane-security` 61/61；`tsc` web/node 0 错；`npm run build` 通过。
 - 未覆盖：Windows 真机（原生视图合成层级与 Linux 一致，但菜单 / Toast 位置需复验）；同一类风险仍存于「模块级浮层」——AI 教学里悬浮旁问窗（`floatLane`）与课程结束抽屉（`CourseEndReportDrawer`）覆盖右下角时同样会被原生视图压住，本批未动。
+
+## 2026-11-25 · 右侧网页页签：链接就地跳转 + 应用内登录（Cookie 落本地）
+
+**用户反馈**：右侧打开网页后点站内 / 站外链接，不在右侧跳转，而是踢到系统浏览器；希望"跟浏览器一样在一个标签页内跳转，很少新建标签页"，并且登录也要在应用内完成。
+
+**根因**：`attachPaneSecurity` 里的 `setWindowOpenHandler` 是按「安全四件套之一」写的 —— 任何新窗口请求**一律 deny + `shell.openExternal`**。而 `target="_blank"`、`window.open`、Ctrl / 中键点击都走这条，于是全部离开应用；又因为系统浏览器与本应用的 `persist:webtabs` 分区 Cookie 完全隔离，登录在那边做完回来仍是未登录。
+
+**改动**（`electron/lib/webPaneView.ts` 一处策略重写 + 弹窗安全镜像）
+- 新窗口请求三分流：普通链接 → `loadLinkInPlace()`（同一 view 内 `setImmediate` 后 `loadURL`，history 入栈，`←` 可回）；真弹窗（features 带 `width` / `height`，或 `postBody`）→ `action: 'allow'` + `overrideBrowserWindowOptions`（**同 `persist:webtabs` 分区**、sandbox 三件套、无 preload、尺寸夹取 360–900 × 320–800、`parent` 跟随主窗）；非 http(s) → `mailto:` / `tel:` 交系统，其余丢弃。
+- `did-create-window` 给弹窗套同一套导航钩子（只允许 http(s)、不允许弹窗再弹窗、禁 `<webview>`）；`PaneRecord.popups` 记账，`closeWebPane` 先关弹窗再摘视图；上限 `WEB_PANE_POPUP_MAX = 2`。
+- `will-navigate` / `will-redirect` 顺手补齐 `mailto:` / `tel:` 交给系统（原先是被静默拦掉的）。
+
+**实测依据**（Electron 33 探针）：`target="_blank"` 与不带尺寸的 `window.open` 都是 `foreground-tab` + `features: ''`；带尺寸的是 `new-window` + `features: "width=…,height=…"`。弹窗与宿主读同一个 cookie、`window.opener` 非空、`postMessage` 可回传、`window.close()` 能关窗、回调页自动关闭也成立。
+
+**契约**
+- 新增运行时契约 `.AGENT/scripts/ai-teaching/verify-web-pane-window-open.mjs`（esbuild 打包真实 `webPaneView.ts` 进 Electron 跑，18/18）：就地跳转 / 不开窗口 / 后退 / 弹窗同分区 / opener·name·postMessage / window.close / 上限 2 / 关页签连带 / mailto 交系统 / 无 http(s) 泄漏。
+- `verify-web-pane-security.mjs` 74/74（section 2 重写为分流断言）；`verify-all-p0` 44/44；`tsc` web/node 0 错；`npm run build` 通过。
+- 帮助手册：`resources/help/AI 教学 · 对话模式.md` 的「右侧查看器」补了链接 / 登录 / ↗ / mailto 四条；`verify-help-retrieval` 182/182。
+- 未覆盖：Windows 真机（弹窗父窗关系、DPI 缩放下的窗口尺寸）；依赖 `window.open` 但不带尺寸的登录流程会退化成同页跳转。

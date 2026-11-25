@@ -4,11 +4,65 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：117
+ * 版本数：118
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.62.0",
+    "date": "2026-11-25",
+    "summary": "本版一句话：右侧网页页签变成一个真正能用的浏览器页签 —— 点链接就地跳转、登录弹窗在应用内完成并记住登录态。",
+    "groups": [
+      {
+        "title": "AI 教学 · 右侧网页页签（体验重做）",
+        "kind": "ux",
+        "items": [
+          {
+            "lead": "链接就地跳转",
+            "rest": "`target=\"_blank\"`、`window.open`、Ctrl / 中键点击的链接都在当前页签内跳转，`←` 能回到上一页，地址栏与页签标题跟着变；不再把链接丢给系统浏览器。",
+            "sub": []
+          },
+          {
+            "lead": "应用内登录",
+            "rest": "站点弹出的登录 / 授权小窗在应用内打开，与页签共用同一个持久分区（`persist:webtabs`）—— 登录 Cookie 落在本地，切页签、重启应用后仍然登录；`window.opener` / `postMessage` / `window.close()` 都正常，弹窗随所属页签一起关闭。",
+            "sub": []
+          },
+          {
+            "lead": "外部打开只剩一个入口",
+            "rest": "地址栏右侧的 ↗。想用系统浏览器看当前页时用它。",
+            "sub": []
+          },
+          {
+            "lead": "`mailto:` / `tel:`",
+            "rest": "交给系统的邮件 / 拨号程序（原先被静默拦截，点了没反应）。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "边界",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "",
+            "rest": "每个网页页签最多同时存在 2 个登录弹窗，超出静默拒绝（防站点无限开窗）。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "登录弹窗里不允许再弹新窗口：它的新窗口请求改成在弹窗自身里跳转。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "网页下载仍然一律拦截；自定义 scheme（如 `myapp://`）仍然拒绝。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.61.1",
     "date": "2026-11-24",
