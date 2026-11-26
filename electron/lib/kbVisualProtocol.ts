@@ -4,6 +4,7 @@ import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { rootDirName } from './aiTeachingFolders'
 import { WELCOME_DOC_FILENAME } from 'phrontis-core/kbStore/welcomeDoc'
 import { safePathInside } from './pathGuard'
+import { PAGE_STORE_CLIENT_SCRIPT } from './pageStoreClientScript'
 
 /**
  * kbview:// 协议 —— 仓库内受控 HTML 的沙箱渲染载体，三个白名单入口：
@@ -26,6 +27,11 @@ import { safePathInside } from './pathGuard'
  *   即「沙箱渲染+断外联」档：页面 JS 可跑但 fetch/XHR 全断，无法外传数据），并剥掉文档自带的 CSP meta
  *   （取交集会反噬）；
  * - 渲染侧仍必须配合 iframe sandbox="allow-scripts"（无 allow-same-origin，不透明源拿不到宿主 bridge）。
+ *
+ * 页面数据桥（2026-11-26，docs/html-page-store.md）：三条分支都会向 `<head>` 注入
+ * `window.KbStore`（见 PAGE_STORE_SCRIPT）。页面用 `<meta name="kb-store" content="…">`
+ * 声明 `.knowbase/pagesdata/*.json` 后即可读写；未声明则桥自行早退，页面里根本没有这个对象。
+ * 注入只解决「页面 ⇄ 宿主」这一段，落盘与安全边界在主进程（electron/lib/pageStore.ts）。
  */
 
 const VISUAL_CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; worker-src 'none'"
@@ -64,6 +70,30 @@ const SHELL_SCRIPT = [
 ].join('\n')
 const SHELL_INJECT = SHELL_HEAD + '\n' + SHELL_SCRIPT
 
+/**
+ * 页面数据桥（2026-11-26，docs/html-page-store.md）。
+ *
+ * 页面在 `<head>` 里声明数据文件：
+ *   <meta name="kb-store" content=".knowbase/pagesdata/28考研看板.json">
+ * 声明了才生效；没声明时注入的脚本第一行就早退（页面里根本没有 `window.KbStore`，
+ * 页面据 `typeof KbStore === 'undefined'` 提示「在软件内打开」）。
+ *
+ * 为什么必须在协议层注入而不是页面自己写：沙箱是不透明源，页面拿不到 `window.api`，
+ * 只能 postMessage 给宿主；这段桥统一了「重试握手 / 按 id 去重 / 防自己写的回声」这些细节，
+ * 页面作者只需要 `await KbStore.read()` / `KbStore.save(state)`。
+ *
+ * 注意：不带 `meta` 的页面（含欢迎页默认内容）不受影响；注入位置紧跟 `<head>`，
+ * 保证页面自己的脚本执行时 `KbStore` 已就绪。
+ */
+const PAGE_STORE_SCRIPT = PAGE_STORE_CLIENT_SCRIPT
+
+/** 注入页面数据桥（三条白名单分支共用；未声明 kb-store 的页面注入后自行早退，零副作用） */
+function injectPageStoreBridge(html: string): string {
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, m => `${m}\n${PAGE_STORE_SCRIPT}`)
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, m => `${m}\n<head>\n${PAGE_STORE_SCRIPT}\n</head>`)
+  return `<!doctype html>\n<html>\n<head>\n${PAGE_STORE_SCRIPT}\n</head>\n<body>\n${html}\n</body>\n</html>`
+}
+
 function wrapVisualShell(raw: string): string {
   const src = stripCspMeta(raw)
   if (/<head[^>]*>/i.test(src)) return src.replace(/<head[^>]*>/i, m => `${m}\n${SHELL_INJECT}`)
@@ -87,7 +117,7 @@ export function registerKbVisualProtocol(getSetting: (key: string) => unknown): 
         if (!welcomeAbs) return new Response('Forbidden', { status: 403 })
         if (!existsSync(welcomeAbs) || !statSync(welcomeAbs).isFile()) return new Response('Not Found', { status: 404 })
         if (statSync(welcomeAbs).size > MAX_WELCOME_BYTES) return new Response('Too Large', { status: 413 })
-        return new Response(stripCspMeta(readFileSync(welcomeAbs, 'utf-8')), {
+        return new Response(injectPageStoreBridge(stripCspMeta(readFileSync(welcomeAbs, 'utf-8'))), {
           headers: {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-cache',
@@ -105,7 +135,7 @@ export function registerKbVisualProtocol(getSetting: (key: string) => unknown): 
         if (abs) {
           if (!existsSync(abs) || !statSync(abs).isFile()) return new Response('Not Found', { status: 404 })
           if (statSync(abs).size > MAX_VISUAL_BYTES) return new Response('Too Large', { status: 413 })
-          return new Response(stripCspMeta(readFileSync(abs, 'utf-8')), {
+          return new Response(injectPageStoreBridge(stripCspMeta(readFileSync(abs, 'utf-8'))), {
             headers: {
               'Content-Type': 'text/html; charset=utf-8',
               'Cache-Control': 'no-cache',
@@ -123,7 +153,7 @@ export function registerKbVisualProtocol(getSetting: (key: string) => unknown): 
       if (!abs) return new Response('Forbidden', { status: 403 })
       if (!existsSync(abs) || !statSync(abs).isFile()) return new Response('Not Found', { status: 404 })
       if (statSync(abs).size > MAX_VISUAL_BYTES) return new Response('Too Large', { status: 413 })
-      const html = wrapVisualShell(readFileSync(abs, 'utf-8'))
+      const html = injectPageStoreBridge(wrapVisualShell(readFileSync(abs, 'utf-8')))
       return new Response(html, {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',

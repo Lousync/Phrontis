@@ -2472,6 +2472,32 @@ export interface WorkspaceWriteResult {
   mtimeMs?: number
   size?: number
 }
+
+/** 页面数据（`.knowbase/pagesdata/*.json`）读写结果 —— 口径见 electron/lib/pageStore.ts */
+export interface PageStoreReadResult {
+  ok: boolean
+  exists?: boolean
+  data?: unknown
+  /** 内容指纹（sha1）。写回时原样带上做乐观锁 */
+  rev?: string
+  bytes?: number
+  error?: string
+}
+export interface PageStoreWriteResult {
+  ok: boolean
+  rev?: string
+  bytes?: number
+  created?: boolean
+  /** 磁盘内容已变（别处改过 / AI 刚写过）→ 调用方应重读而不是覆盖 */
+  conflict?: boolean
+  error?: string
+}
+export interface PageStoreEntry {
+  rel: string
+  bytes: number
+  rev: string
+  updatedAt: number
+}
 export interface WorkspaceRecent {
   rootId: string
   name: string
@@ -3060,6 +3086,10 @@ export interface ElectronAPI {
    *  草案不落库（`builtin.booksource.draft` 只广播、不写盘），也不含凭据字段 */
   onBookMarketSourceDraft: (cb: (p: { draft: BookSourceDraft }) => void) => () => void
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
+  /** 页面数据读写（仓库内 html 的 `.knowbase/pagesdata/*.json`，docs/html-page-store.md） */
+  pageStoreRead: (relPath: string) => Promise<PageStoreReadResult>
+  pageStoreWrite: (relPath: string, data: unknown, expectedRev?: string) => Promise<PageStoreWriteResult>
+  pageStoreList: () => Promise<{ ok: boolean; dir?: string; files?: PageStoreEntry[]; error?: string }>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   /** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
   workspaceCopyFile: (rootId: string, srcRel: string, dstRel: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>

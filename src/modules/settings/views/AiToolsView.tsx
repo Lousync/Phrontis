@@ -38,6 +38,7 @@ const MODULE_LABEL: Record<string, string> = {
   checkin: '习惯打卡',
   pomodoro: '番茄专注',
   quiz: '错题本',
+  pagedata: '页面数据',
 }
 
 /**

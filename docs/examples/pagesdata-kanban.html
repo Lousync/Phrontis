@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 页面数据：相对仓库根，只允许 .knowbase/pagesdata/*.json（docs/html-page-store.md） -->
+<meta name="kb-store" content=".knowbase/pagesdata/28考研看板.json">
+<title>28 考研看板</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --surface: #fffdf9; --ink: #24211c; --ink-2: #5b554c; --ink-3: #8c857a;
+    --line: #e4ded3; --accent: #b4552d; --ok: #3f7d58; --amber: #b07d1f;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1815; --surface: #232019; --ink: #ece7dd; --ink-2: #b8b1a4; --ink-3: #8a8378;
+      --line: #38332a; --accent: #dd7f52; --ok: #6fae86; --amber: #d9a94e;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; padding: 18px 20px 24px; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: .3px; }
+  .count { font-size: 12.5px; color: var(--ink-2); }
+  .count b { font-size: 19px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .status {
+    margin-left: auto; font-size: 11.5px; color: var(--ink-3);
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px;
+  }
+  .status[data-s="saved"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .status[data-s="conflict"], .status[data-s="error"] { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent); cursor: pointer; }
+
+  .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  @media (max-width: 900px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .col {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 10px; min-height: 140px; transition: border-color .15s, background .15s;
+  }
+  .col.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+  .col-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .col-title { font-size: 12.5px; font-weight: 600; color: var(--ink-2); letter-spacing: .4px; }
+  .col-num { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .col-bar { margin-left: auto; width: 46px; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .col-bar > i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .25s; }
+
+  .card {
+    position: relative; display: flex; gap: 7px; align-items: flex-start;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 8px; margin-bottom: 7px; cursor: grab; touch-action: none;
+    transition: box-shadow .15s, opacity .15s, transform .12s;
+  }
+  .card:hover { box-shadow: 0 1px 6px rgb(0 0 0 / .07); }
+  .card.dragging { opacity: .85; cursor: grabbing; box-shadow: 0 8px 22px rgb(0 0 0 / .18); z-index: 5; }
+  .card.done .t { color: var(--ink-3); text-decoration: line-through; }
+  .card input[type=checkbox] { margin: 2px 0 0; accent-color: var(--ok); cursor: pointer; flex: none; }
+  .t { flex: 1; min-width: 0; word-break: break-word; font-size: 12.5px; outline: none; }
+  .t:focus { background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 4px; }
+  .del { border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; opacity: 0; }
+  .card:hover .del { opacity: 1; }
+  .del:hover { color: var(--accent); }
+
+  .add {
+    width: 100%; border: 1px dashed var(--line); background: none; color: var(--ink-3);
+    border-radius: 7px; padding: 5px; font-size: 11.5px; cursor: pointer; font-family: inherit;
+    transition: color .15s, border-color .15s;
+  }
+  .add:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+  .cover {
+    position: fixed; inset: 0; display: none; place-items: center; padding: 24px;
+    background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(2px); text-align: center;
+  }
+  .cover.on { display: grid; }
+  .cover h2 { font-size: 14.5px; margin: 0 0 6px; }
+  .cover p { margin: 0; font-size: 12.5px; color: var(--ink-2); max-width: 30em; }
+  .cover code { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>28 考研看板</h1>
+  <span class="count">距初试 <b id="days">—</b> 天</span>
+  <span class="count" id="summary"></span>
+  <span class="status" id="status" data-s="idle">—</span>
+</header>
+<div class="board" id="board"></div>
+
+<div class="cover" id="cover">
+  <div>
+    <h2>请在 Phrontis 内打开</h2>
+    <p>本页的进度直接写进仓库的 <code>.knowbase/pagesdata/28考研看板.json</code>，
+      需要在软件里打开才能读写（浏览器里没有这条通道）。</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict'
+
+  var EXAM = '2027-12-25'          // 28 考研初试（2027 年 12 月下旬）
+  var DEFAULTS = {
+    version: 1,
+    examDate: EXAM,
+    columns: [
+      { id: 'politics', title: '政治', cards: [] },
+      { id: 'english',  title: '英语', cards: [] },
+      { id: 'math',     title: '数学', cards: [] },
+      { id: 'major',    title: '专业课', cards: [] },
+    ],
+  }
+
+  var boardEl = document.getElementById('board')
+  var statusEl = document.getElementById('status')
+  var coverEl = document.getElementById('cover')
+
+  // 浏览器里打开：没有宿主桥，直接按约定提示
+  if (typeof window.KbStore === 'undefined') {
+    coverEl.classList.add('on')
+    statusEl.textContent = '只读预览'
+    return
+  }
+
+  var state = null
+  var dragging = null
+
+  function uid() { return Math.random().toString(36).slice(2, 9) }
+
+  function setStatus(s, text) {
+    statusEl.dataset.s = s
+    statusEl.textContent = text
+  }
+
+  function daysLeft() {
+    var now = new Date()
+    var exam = new Date((state && state.examDate) || EXAM)
+    var a = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+    var b = Date.UTC(exam.getFullYear(), exam.getMonth(), exam.getDate())
+    return Math.max(0, Math.round((b - a) / 86400000))
+  }
+
+  function render() {
+    boardEl.innerHTML = ''
+    var total = 0, done = 0
+    state.columns.forEach(function (col) {
+      var colDone = col.cards.filter(function (c) { return c.done }).length
+      total += col.cards.length
+      done += colDone
+
+      var box = document.createElement('div')
+      box.className = 'col'
+      box.dataset.col = col.id
+
+      var head = document.createElement('div')
+      head.className = 'col-head'
+      head.innerHTML = '<span class="col-title"></span><span class="col-num"></span>' +
+        '<span class="col-bar"><i></i></span>'
+      head.querySelector('.col-title').textContent = col.title
+      head.querySelector('.col-num').textContent = colDone + '/' + col.cards.length
+      head.querySelector('.col-bar > i').style.width =
+        (col.cards.length ? Math.round(colDone / col.cards.length * 100) : 0) + '%'
+      box.appendChild(head)
+
+      col.cards.forEach(function (card) { box.appendChild(cardEl(col, card)) })
+
+      var add = document.createElement('button')
+      add.className = 'add'
+      add.textContent = '+ 添加'
+      add.onclick = function () {
+        col.cards.push({ id: uid(), title: '新任务', done: false })
+        commit(true)
+      }
+      box.appendChild(add)
+      boardEl.appendChild(box)
+    })
+
+    document.getElementById('days').textContent = String(daysLeft())
+    document.getElementById('summary').textContent =
+      total ? ('已完成 ' + done + '/' + total) : ''
+  }
+
+  function cardEl(col, card) {
+    var el = document.createElement('div')
+    el.className = 'card' + (card.done ? ' done' : '')
+    el.dataset.id = card.id
+
+    var cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.checked = !!card.done
+    cb.onchange = function () { card.done = cb.checked; commit(true) }
+
+    var t = document.createElement('div')
+    t.className = 't'
+    t.textContent = card.title
+    t.spellcheck = false
+    // 默认不可编辑：卡片整块都能拖；双击才进入改名
+    t.ondblclick = function (e) {
+      e.stopPropagation()
+      t.contentEditable = 'true'
+      t.focus()
+      var range = document.createRange()
+      range.selectNodeContents(t)
+      var sel = window.getSelection()
+      sel.removeAllRanges(); sel.addRange(range)
+    }
+    t.onblur = function () {
+      var v = t.textContent.trim()
+      if (!v) { v = card.title; t.textContent = v }
+      t.contentEditable = 'false'
+      if (v !== card.title) { card.title = v; commit(true) }
+    }
+    t.onkeydown = function (e) {
+      if (t.contentEditable !== 'true') return
+      if (e.key === 'Enter') { e.preventDefault(); t.blur() }
+      if (e.key === 'Escape') { t.textContent = card.title; t.blur() }
+    }
+
+    var del = document.createElement('button')
+    del.className = 'del'
+    del.textContent = '×'
+    del.title = '删除'
+    del.onclick = function () {
+      col.cards = col.cards.filter(function (c) { return c.id !== card.id })
+      commit(true)
+    }
+
+    el.appendChild(cb); el.appendChild(t); el.appendChild(del)
+    el.addEventListener('pointerdown', function (e) {
+      if (e.target === cb || e.target === del) return   // 勾选 / 删除不拖
+      if (e.button !== 0) return
+      if (t.contentEditable === 'true') return          // 正在改名不拖
+      startDrag(e, el, col, card)
+    })
+    return el
+  }
+
+  /* 拖拽用 pointer events（HTML5 拖放在应用内会静默失败） */
+  function startDrag(e, el, col, card) {
+    dragging = { el: el, card: card, from: col, x: e.clientX, y: e.clientY, moved: false }
+    el.classList.add('dragging')
+    document.body.style.userSelect = 'none'
+    el.setPointerCapture && el.setPointerCapture(e.pointerId)
+
+    function move(ev) {
+      if (!dragging) return
+      var dx = ev.clientX - dragging.x, dy = ev.clientY - dragging.y
+      if (Math.abs(dx) + Math.abs(dy) > 3) dragging.moved = true
+      el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)'
+      var under = document.elementFromPoint(ev.clientX, ev.clientY)
+      var target = under && under.closest ? under.closest('.col') : null
+      Array.prototype.forEach.call(boardEl.children, function (c) {
+        c.classList.toggle('over', c === target && c.dataset.col !== dragging.from.id)
+      })
+    }
+
+    function up(ev) {
+      document.removeEventListener('pointermove', move)
+      document.removeEventListener('pointerup', up)
+      el.classList.remove('dragging')
+      el.style.transform = ''
+      document.body.style.userSelect = ''
+      Array.prototype.forEach.call(boardEl.children, function (c) { c.classList.remove('over') })
+      var d = dragging; dragging = null
+      if (!d || !d.moved) return
+      var under = document.elementFromPoint(ev.clientX, ev.clientY)
+      var target = under && under.closest ? under.closest('.col') : null
+      if (!target) return
+      if (target.dataset.col === d.from.id) return
+      var to = state.columns.filter(function (c) { return c.id === target.dataset.col })[0]
+      if (!to) return
+      d.from.cards = d.from.cards.filter(function (c) { return c.id !== d.card.id })
+      to.cards.push(d.card)
+      commit(true)
+    }
+
+    document.addEventListener('pointermove', move)
+    document.addEventListener('pointerup', up)
+  }
+
+  function commit(rerender) {
+    if (rerender) render()
+    KbStore.save(state)
+  }
+
+  KbStore.onStatus(function (s, err) {
+    if (s === 'dirty') setStatus('dirty', '待保存')
+    else if (s === 'saving') setStatus('saving', '保存中…')
+    else if (s === 'saved') setStatus('saved', '已保存')
+    else if (s === 'conflict') setStatus('conflict', '别处已更新 · 点此重载')
+    else setStatus('error', '保存失败' + (err ? '：' + err : ''))
+  })
+
+  statusEl.onclick = function () {
+    if (statusEl.dataset.s !== 'conflict') return
+    reload()
+  }
+
+  // AI / 另一个页面改过同一份数据：重新载入（拖拽中不打断）
+  KbStore.onChange(function (data) {
+    if (dragging || !data || !Array.isArray(data.columns)) return
+    state = data
+    render()
+    setStatus('saved', '已同步')
+  })
+
+  function reload() {
+    KbStore.read().then(function (r) {
+      state = (r.data && Array.isArray(r.data.columns)) ? r.data : DEFAULTS
+      render()
+      setStatus('saved', r.exists ? '已重新载入' : '已就绪')
+      if (!r.exists) KbStore.save(state)
+    }).catch(function (e) {
+      setStatus('error', '读取失败：' + (e && e.message ? e.message : e))
+    })
+  }
+
+  // 主题跟随宿主（欢迎页 / 工件栏两套通道都听）
+  window.addEventListener('message', function (e) {
+    var d = e.data
+    if (!d) return
+    var vars = (d.__kbWelcomeTheme && d.__kbWelcomeTheme.vars) || d.__kbArtTheme
+    if (!vars || typeof vars !== 'object') return
+    Object.keys(vars).forEach(function (k) {
+      try { document.documentElement.style.setProperty(k, vars[k]) } catch (x) {}
+    })
+  })
+
+  reload()
+})()
+</script>
+</body>
+</html>

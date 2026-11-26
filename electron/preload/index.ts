@@ -951,6 +951,12 @@ const api = {
     return () => { ipcRenderer.removeListener('bookMarket:source-draft', handler) }
   },
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
+  // 页面数据（docs/html-page-store.md）：仓库内 html 的 `.knowbase/pagesdata/*.json` 读写。
+  // 只给 kbview:// 渲染宿主用（src/lib/pageStoreBridge.ts），不接受任意路径 —— 主进程按
+  // pageStorePath.ts 校验命名空间 / 扩展名 / 大小，AI 工具走同一实现。
+  pageStoreRead: (relPath: string) => ipcRenderer.invoke('pageStore:read', relPath),
+  pageStoreWrite: (relPath: string, data: unknown, expectedRev?: string) => ipcRenderer.invoke('pageStore:write', relPath, data, expectedRev),
+  pageStoreList: () => ipcRenderer.invoke('pageStore:list'),
   // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),
   workspaceCopyFile: (rootId: string, srcRel: string, dstRel: string) => ipcRenderer.invoke("ws:copy", rootId, srcRel, dstRel),

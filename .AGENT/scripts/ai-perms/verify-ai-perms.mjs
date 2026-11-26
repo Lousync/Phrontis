@@ -29,7 +29,7 @@ const LEGAL = new Set(['off', 'read', 'write'])
 const ids = MODULES.map(m => m.id)
 
 console.log('\n§1 模块清单')
-check(MODULES.length === 9, `有 9 个模块（实际 ${MODULES.length}）`)
+check(MODULES.length === 10, `有 10 个模块（实际 ${MODULES.length}）`)
 check(new Set(ids).size === ids.length, '模块 id 无重复')
 check(MODULES.every(m => m.label && m.desc), '每个模块都有 label 与 desc')
 check(ids.includes('pomodoro') && !hasWriteOp('pomodoro'), '番茄专注没有写操作（"读写"对它应置灰）')

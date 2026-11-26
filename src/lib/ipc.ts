@@ -427,6 +427,10 @@ export const workspaceWriteFile = (rootId: string, relPath: string, content: str
     return r
   })
 export const workspaceCreateFile = (rootId: string, relPath: string, content?: string) => a().workspaceCreateFile(rootId, relPath, content)
+/** 页面数据（docs/html-page-store.md）：仓库内 html 的 `.knowbase/pagesdata/*.json`。
+ *  只有 `src/lib/pageStoreBridge.ts` 用；路径与内容校验全在主进程 lib/pageStore.ts */
+export const pageStoreRead = (relPath: string) => a().pageStoreRead(relPath)
+export const pageStoreWrite = (relPath: string, data: unknown, expectedRev?: string) => a().pageStoreWrite(relPath, data, expectedRev)
 /** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
 export const workspaceCopyFile = (rootId: string, srcRel: string, dstRel: string): Promise<{ ok: boolean; relPath?: string; renamed?: boolean; error?: string }> => a().workspaceCopyFile(rootId, srcRel, dstRel)
 /** 复制仓库内文件/目录到系统 + 应用内文件剪贴板（B-51）；渲染层只传相对路径 */

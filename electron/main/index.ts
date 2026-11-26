@@ -87,6 +87,7 @@ import { registerAttachmentHandlers, getAttachmentFilePath } from '../database/r
 import { registerVaultBackupHandlers } from '../database/repositories/vaultBackupRepo'
 import { registerRepoConfigHandlers } from '../database/repositories/repoConfigRepo'
 import { registerCheckinHandlers } from '../database/repositories/checkinRepo'
+import { registerPageStoreHandlers } from '../database/repositories/pageStoreRepo'
 import { registerShareCardHandlers } from '../database/repositories/shareCardRepo'
 import { registerBookmarkHandlers } from '../database/repositories/bookmarkRepo'
 import { registerPetHandlers } from '../database/repositories/petRepo'
@@ -1464,6 +1465,9 @@ app.whenReady().then(async () => {
   registerAttachmentHandlers()
   registerVaultBackupHandlers()
   registerCheckinHandlers()
+  // 页面数据（docs/html-page-store.md）：仓库内 html 声明的 `.knowbase/pagesdata/*.json`
+  // 读写通道，业务在 lib/pageStore（AI 工具 builtin.pagedata.* 共用同一实现）
+  registerPageStoreHandlers()
   registerShareCardHandlers()
   registerBookmarkHandlers()
   registerPetHandlers()

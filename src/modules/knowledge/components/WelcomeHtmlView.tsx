@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { usePageStoreBridge } from '../../../lib/pageStoreBridge'
 
 /**
  * 知识库内的「欢迎.html」渲染器（2026-09-10）。
@@ -69,6 +70,10 @@ export function WelcomeHtmlView({ path }: { path: string }) {
   const [mode, setMode] = useState<'light' | 'dark'>(() => resolveMode())
   const [reloadSeq, setReloadSeq] = useState(0)
   const frameRef = useRef<HTMLIFrameElement>(null)
+
+  // 页面数据桥（docs/html-page-store.md）：页面声明 <meta name="kb-store"> 后即可读写
+  // .knowbase/pagesdata/*.json；未声明的页面完全不受影响
+  usePageStoreBridge(frameRef, path)
 
   /** 把应用主题变量下发给沙箱页面（沙箱是不透明源，读不到宿主样式） */
   const pushTheme = useCallback(() => {

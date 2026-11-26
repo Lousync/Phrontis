@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { readdirSync, lstatSync, readFileSync, statSync, mkdirSync } from 'fs'
 import { join, relative, extname, sep, dirname } from 'path'
 import { listTools, registerTool, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
+import { listPageStore, readPageStore, writePageStore } from './pageStore'
 import { readWorkspaceTrust } from './workspaceTrust'
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
@@ -2325,6 +2326,56 @@ export function registerBuiltinTools(): void {
       tools: rows,
       hint: rows.length === 0 ? '没有匹配的按需工具（常驻工具已在系统工具列表中）' : undefined,
     }
+  })
+
+  // ===== 页面数据（.knowbase/pagesdata/*.json，docs/html-page-store.md）=====
+  // 仓库内 html 页面（如考研看板）把自己的状态存在这里；这三个工具让 AI 能直接读写同一份数据。
+  // 写盘走 lib/pageStore（路径白名单 + 1MB 上限 + 乐观锁），**不**给 .knowbase 开文件写白名单。
+  registerTool({
+    name: 'builtin.pagedata.list',
+    title: '列出页面数据',
+    description: '列出仓库 .knowbase/pagesdata 下的页面数据文件（HTML 看板/小工具的状态数据）',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin', enabled: true, readOnly: true, tier: 'ondemand', module: 'pagedata',
+  }, () => listPageStore())
+
+  registerTool({
+    name: 'builtin.pagedata.read',
+    title: '读取页面数据',
+    description: '读取一个页面数据文件的 JSON 内容，返回 rev（写回时带上可避免覆盖用户刚改的内容）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rel: { type: 'string', description: '如 .knowbase/pagesdata/28考研看板.json' },
+      },
+      required: ['rel'],
+    },
+    source: 'builtin', enabled: true, readOnly: true, tier: 'ondemand', module: 'pagedata',
+  }, args => {
+    const r = readPageStore(str(args.rel).trim())
+    if (!r.ok) throw new Error(r.error)
+    return r
+  })
+
+  registerTool({
+    name: 'builtin.pagedata.write',
+    title: '写入页面数据',
+    description: '整体覆盖一个页面数据文件（井号看板等页面打开时会即时刷新）。先读再写并带上 rev；用户正在页面上编辑时不要盲目覆盖',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rel: { type: 'string', description: '如 .knowbase/pagesdata/28考研看板.json' },
+        data: { type: 'object', description: '完整的 JSON 内容（对象或数组）' },
+        rev: { type: 'string', description: '读取时拿到的 rev，可选；给了就不会覆盖别人的改动' },
+      },
+      required: ['rel', 'data'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'pagedata',
+  }, args => {
+    const rev = str(args.rev).trim()
+    const r = writePageStore(str(args.rel).trim(), args.data, rev || undefined)
+    if (!r.ok) throw new Error(r.conflict ? `${r.error}（rev 已过期，请重新读取后再写）` : r.error)
+    return { ok: true, rel: str(args.rel).trim(), rev: r.rev, bytes: r.bytes, created: r.created }
   })
 
   // builtin.tool.request —— 申请启用按需工具（本会话内持久；启用集合由 agentService 按会话维护）

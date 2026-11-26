@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, WheelEvent as ReactWheelEvent } from 'react'
 import { workspaceGetCurrent, workspaceReadFile } from '../../lib/ipc'
+import { usePageStoreBridge } from '../../lib/pageStoreBridge'
 import { collectThemeVars } from './htmlShell'
 
 /**
@@ -36,6 +37,10 @@ export function ArtHtmlView({ relPath, reloadSeq, fit = false, manualZoom = null
   const frameRef = useRef<HTMLIFrameElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const [avail, setAvail] = useState({ w: 0, h: 0 })
+
+  // 页面数据桥（docs/html-page-store.md）：页面声明 <meta name="kb-store"> 后即可读写
+  // .knowbase/pagesdata/*.json（工件栏的交互式示意图也能存状态）
+  usePageStoreBridge(frameRef, relPath)
 
   // 明暗主题切换 → 向沙箱内壳重发 CSS 变量（§4.4，不重挂 iframe）
   useEffect(() => {

@@ -4,11 +4,70 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：118
+ * 版本数：119
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.63.0",
+    "date": "2026-11-26",
+    "summary": "本版一句话：仓库里的 HTML 页面能自己存数据了 —— 看板、学习小工具不再是一刷新就白干。",
+    "groups": [
+      {
+        "title": "页面数据（新能力）",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "页面自己声明数据文件",
+            "rest": "在 `<head>` 写 `<meta name=\"kb-store\" content=\".knowbase/pagesdata/xxx.json\">`，页面里就能 `await KbStore.read()` / `KbStore.save(state)`。路径由页面决定，软件侧不硬编码任何文件。",
+            "sub": []
+          },
+          {
+            "lead": "改一下就存",
+            "rest": "1 秒防抖合并，写入原子落盘；页面保存时自动带乐观锁，别处刚改过会返回冲突而不是覆盖。",
+            "sub": []
+          },
+          {
+            "lead": "多个页面共用一份数据",
+            "rest": "声明同一个 JSON 的页面互相同步（写盘后广播，打开着的页面即时重读）。",
+            "sub": []
+          },
+          {
+            "lead": "AI 也能读写同一份数据",
+            "rest": "新增 `builtin.pagedata.list / read / write`；设置 → AI → 权限里多一行「页面数据」，默认只读，要 AI 改数据得手动调成读写。",
+            "sub": []
+          },
+          {
+            "lead": "示例",
+            "rest": "`docs/examples/pagesdata-kanban.html`（28 考研看板：倒计时 + 四科泳道 + 拖拽 + 自动保存），复制进仓库根目录即可用。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "边界",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "",
+            "rest": "只开放 `.knowbase/pagesdata/`：单文件 ≤1MB，内容必须是 JSON 对象/数组；密码本、日程、错题本等核心模块数据不在白名单内。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "页面沙箱不变：仍是 `sandbox=\"allow-scripts\"`（不含 `allow-same-origin`），网络仍被 CSP 锁死。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "同一个 HTML 用系统浏览器打开时没有这条通道，按约定提示「在软件内打开」。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.62.0",
     "date": "2026-11-25",

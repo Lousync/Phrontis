@@ -33,6 +33,8 @@ export const MODULES: ModuleDef[] = [
   { id: 'pomodoro',  label: '番茄专注', desc: '专注统计',             writeDesc: '' },
   { id: 'accounting', label: '记账',    desc: '查询收支流水与统计',   writeDesc: '导入、新增与修改流水（AI 记账）' },
   { id: 'vocab',     label: '背单词',   desc: '查询背诵记录与薄弱词', writeDesc: '' },
+  // 2026-11-26：仓库内 HTML 页面（看板 / 学习工具）的数据文件 `.knowbase/pagesdata/*.json`
+  { id: 'pagedata',  label: '页面数据', desc: '读取看板等页面数据',   writeDesc: '改写页面数据（打开着的页面会自动刷新）' },
 ]
 // 注：bookmarks 模块已随 2026-09-09 工具重构退役（bookmarks.search → vault.search）；
 // 旧设置数据中残留的 bookmarks 键无害（无工具引用即不生效），解析层自动忽略。
